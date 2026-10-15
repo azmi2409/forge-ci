@@ -1,4 +1,4 @@
-# ForgeCI Control Plane (component 2)
+# ForgeCI Control Plane (components 2–4)
 
 The Rails control plane for ForgeCI, the open-source CircleCI-compatible CI.
 It owns projects, pipelines, workflow/job state machines, the pipeline-intake
@@ -67,6 +67,10 @@ DATABASE_URL="sqlite3:db/test.sqlite3" bin/rails test
 | `ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY` | Same. |
 | `ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT` | Same. |
 | | Dev/test fall back to deterministic **insecure** dev keys (loud warning). Never use those in production. |
+| `GITHUB_APP_ID` | Numeric GitHub App ID (component 3). |
+| `GITHUB_APP_PRIVATE_KEY` | The App's private key, PEM text (may contain newlines). |
+| `GITHUB_WEBHOOK_SECRET` | Webhook HMAC secret. **Fail-closed**: the webhook endpoint 401s every request when this is blank. |
+| `APP_HOST` | Public base URL of this app, e.g. `https://ci.example.com` — used for commit-status `target_url` links. Optional. |
 
 ## Web UI
 
@@ -184,6 +188,53 @@ Only the owning token (`403` otherwise).
 `GET /api/v1/jobs/:id/logs` → `200 { job_id, chunks: [{ seq, chunk }] }`
 ordered by `seq`. Simple polling is the v1 live-tail story.
 
+## GitHub App setup (component 3)
+
+Pushes and pull requests become forge-ci pipelines automatically once a
+GitHub App is installed on the account. Flow:
+
+`push` / `pull_request` webhook → HMAC-verified → `Github::SyncPipelineJob`
+→ fetch `.circleci/config.yml` at the event SHA → compile with the forge-ci
+gem → `PipelineIntake` (the same seam as the REST API) → `pending` commit
+status → runners claim jobs → terminal status (`success`/`failure`) posted
+back via `Pipeline#after_update_commit`.
+
+### 1. Register the App on github.com (manual)
+
+GitHub → Settings → Developer settings → GitHub Apps → New GitHub App:
+
+- **Webhook URL**: `https://<your-host>/api/v1/github/webhooks` (the app must
+  be reachable over public HTTPS — this step waits until deployment)
+- **Webhook secret**: generate one, set it as `GITHUB_WEBHOOK_SECRET`
+- **Permissions**: Contents — Read only; Commit statuses — Read and write;
+  Pull requests — Read only; Metadata — Read only (mandatory)
+- **Subscribe to events**: `push`, `pull_request`, `installation`
+
+Then install the App on the account/org and note the **App ID**; generate a
+**private key** (PEM) and set `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY`.
+
+### 2. How repos map to projects
+
+On the first push from a repo the app has never seen, the sync job
+**auto-creates** a `Project` named after the repo's `owner/name` plus the
+`GithubRepository` mapping. Install/uninstall events keep the
+`GithubInstallation` rows in sync.
+
+### 3. Fork-PR secret gating (security)
+
+Pull requests from forks are detected (`head.repo != base.repo`) and marked
+`Pipeline#forked = true`. **Forked pipelines never receive contexts** —
+`context_names: []` is forced at intake regardless of the project's
+configured contexts, so secrets can't leak into untrusted fork code.
+Non-fork pipelines get the project's default contexts (all of them, in v1).
+
+### 4. Compile errors are not silent
+
+If `.circleci/config.yml` fails to compile, the push still creates a
+**failed** pipeline and posts a `failure` commit status carrying the first
+error lines. A repo with no config file at the SHA is skipped quietly
+(nothing to build).
+
 ## Runner contract (for component 5, the Docker runner)
 
 1. Generate a token: `RunnerToken.generate!(name: "worker-1", resource_class: "medium")`
@@ -251,7 +302,8 @@ dependents. Fixed additively in `../forge-ci` (commit `ca9f633`):
 
 ## Not yet (deferred)
 
-- GitHub webhooks / GitHub App authentication on the intake endpoint (currently unauthenticated)
+- GitHub App auth on the raw intake endpoint (currently unauthenticated; the
+  GitHub flow goes through the HMAC-verified webhook instead)
 - Real UI auth (login, RBAC) — v1 is HTTP basic auth via env vars
 - SSE/ActionCable live tail — v1 is log-chunk polling
 - Artifact/cache upload/download on object storage (models exist; no storage backend or API yet)

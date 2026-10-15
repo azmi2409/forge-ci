@@ -43,6 +43,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_15_091000) do
     t.index ["project_id"], name: "index_contexts_on_project_id"
   end
 
+  create_table "github_installations", force: :cascade do |t|
+    t.bigint "installation_id", null: false
+    t.string "account_login", null: false
+    t.string "account_type", default: "Organization", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["installation_id"], name: "index_github_installations_on_installation_id", unique: true
+  end
+
+  create_table "github_repositories", force: :cascade do |t|
+    t.integer "github_installation_id", null: false
+    t.integer "project_id", null: false
+    t.string "full_name", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["full_name"], name: "index_github_repositories_on_full_name", unique: true
+    t.index ["github_installation_id"], name: "index_github_repositories_on_github_installation_id"
+    t.index ["project_id"], name: "index_github_repositories_on_project_id"
+  end
+
   create_table "job_runs", force: :cascade do |t|
     t.integer "workflow_run_id", null: false
     t.string "name", null: false
@@ -82,7 +102,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_15_091000) do
     t.integer "status", default: 0, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "forked", default: false, null: false
+    t.integer "pipeline_number"
+    t.integer "github_repository_id"
+    t.index ["github_repository_id"], name: "index_pipelines_on_github_repository_id"
     t.index ["project_id", "created_at"], name: "index_pipelines_on_project_id_and_created_at"
+    t.index ["project_id", "pipeline_number"], name: "index_pipelines_on_project_id_and_pipeline_number", unique: true
     t.index ["project_id"], name: "index_pipelines_on_project_id"
   end
 
@@ -131,8 +156,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_15_091000) do
   add_foreign_key "artifacts", "job_runs"
   add_foreign_key "cache_entries", "projects"
   add_foreign_key "contexts", "projects"
+  add_foreign_key "github_repositories", "github_installations"
+  add_foreign_key "github_repositories", "projects"
   add_foreign_key "job_runs", "workflow_runs"
   add_foreign_key "log_chunks", "job_runs"
+  add_foreign_key "pipelines", "github_repositories"
   add_foreign_key "pipelines", "projects"
   add_foreign_key "step_runs", "job_runs"
   add_foreign_key "workflow_runs", "pipelines"

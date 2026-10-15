@@ -19,11 +19,15 @@ class PipelineIntake
     end
   end
 
-  def self.call!(project:, sha:, branch:, ir:, context_names: [])
-    new(project: project, sha: sha, branch: branch, ir: ir, context_names: context_names).call!
+  def self.call!(project:, sha:, branch:, ir:, context_names: [], pipeline_number: nil,
+                 forked: false, github_repository: nil)
+    new(project: project, sha: sha, branch: branch, ir: ir, context_names: context_names,
+        pipeline_number: pipeline_number, forked: forked,
+        github_repository: github_repository).call!
   end
 
-  def initialize(project:, sha:, branch:, ir:, context_names: [])
+  def initialize(project:, sha:, branch:, ir:, context_names: [], pipeline_number: nil,
+                 forked: false, github_repository: nil)
     @project = project
     @sha = sha
     @branch = branch
@@ -33,6 +37,9 @@ class PipelineIntake
     plain = ir.respond_to?(:to_unsafe_h) ? ir.to_unsafe_h : (ir || {})
     @ir = ::JSON.parse(::JSON.dump(plain))
     @context_names = Array(context_names).map(&:to_s).uniq
+    @pipeline_number = pipeline_number
+    @forked = forked
+    @github_repository = github_repository
   end
 
   def call!
@@ -41,7 +48,11 @@ class PipelineIntake
     context_env = merge_context_env(contexts)
 
     Pipeline.transaction do
-      pipeline = @project.pipelines.create!(sha: @sha, branch: @branch, status: "running")
+      number = @pipeline_number || @project.pipelines.maximum(:pipeline_number).to_i + 1
+      pipeline = @project.pipelines.create!(
+        sha: @sha, branch: @branch, status: "running",
+        pipeline_number: number, forked: @forked, github_repository: @github_repository
+      )
 
       @ir["workflows"].each do |wf|
         wf_name = wf["name"].to_s

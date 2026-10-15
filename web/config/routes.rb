@@ -38,6 +38,11 @@ Rails.application.routes.draw do
           get :logs, controller: "jobs"
         end
       end
+
+      # GitHub App webhooks (HMAC-verified; see Api::V1::Github::WebhooksController).
+      namespace :github do
+        post "webhooks", to: "webhooks#create"
+      end
     end
   end
 

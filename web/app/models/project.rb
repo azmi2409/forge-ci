@@ -6,9 +6,16 @@ class Project < ApplicationRecord
   has_many :job_runs, through: :workflow_runs
   has_many :contexts, dependent: :destroy
   has_many :cache_entries, dependent: :destroy
+  has_many :github_repositories, dependent: :destroy
 
   validates :name, presence: true
   validates :max_concurrency, numericality: { only_integer: true, greater_than: 0 }
+
+  # Context names injected into non-fork pipelines created from GitHub events.
+  # Fork pull requests NEVER get these (see Github::SyncPipelineJob).
+  def default_context_names
+    contexts.pluck(:name)
+  end
 
   # Jobs currently occupying a concurrency slot.
   def active_job_count

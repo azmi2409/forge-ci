@@ -10,6 +10,9 @@ gem "puma", ">= 5.0"
 # forge-ci config compiler (component 1) — consumed for pipeline intake
 gem "forge-ci", path: "../forge-ci", require: "forge_ci"
 
+# GitHub App auth: RS256 JWTs for installation-token exchange (component 3)
+gem "jwt"
+
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
 gem "tzinfo-data", platforms: %i[ windows jruby ]
 
