@@ -9,6 +9,8 @@ complete**.
 Component 1 is the [`forge-ci`](https://github.com/azmi2409/forge-ci) config-compiler
 gem, consumed here as a path gem (`gem "forge-ci", path: ".."`).
 
+> **Docs:** [architecture](../docs/architecture.md) · [API](../docs/api.md) · [configuration](../docs/configuration.md) · [troubleshooting](../docs/troubleshooting.md) · [contributing](../docs/contributing.md)
+
 ## Versions used
 
 - Ruby **3.2.3**, Rails **8.1.4**
@@ -59,26 +61,11 @@ DATABASE_URL="sqlite3:db/test.sqlite3" bin/rails test
 
 ### Environment variables
 
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | Overrides `config/database.yml` (Postgres URL or `sqlite3:` path). |
-| `FORGE_CI_UI_USER` / `FORGE_CI_UI_PASSWORD` | HTTP basic auth for the web UI. Dev/test default to `admin` / `password` with a logged warning; production refuses to boot the UI without them. |
-| `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY` | Encryption key for Context payloads. Generate with `bin/rails db:encryption:init`. |
-| `ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY` | Same. |
-| `ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT` | Same. |
-| | Dev/test fall back to deterministic **insecure** dev keys (loud warning). Never use those in production. |
-| `GITHUB_APP_ID` | Numeric GitHub App ID (component 3). |
-| `GITHUB_APP_PRIVATE_KEY` | The App's private key, PEM text (may contain newlines). |
-| `GITHUB_WEBHOOK_SECRET` | Webhook HMAC secret. **Fail-closed**: the webhook endpoint 401s every request when this is blank. |
-| `APP_HOST` | Public base URL of this app, e.g. `https://ci.example.com` — used for commit-status `target_url` links. Optional. |
-| `ACTIVE_STORAGE_SERVICE` | `local` (default) or `amazon` — selects the ActiveStorage service in `config/storage.yml`. |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Credentials for the `amazon` storage service (S3 or S3-compatible). |
-| `AWS_REGION` | Region for the `amazon` service (default `us-east-1`). |
-| `AWS_BUCKET` | Bucket name for the `amazon` service (required when `ACTIVE_STORAGE_SERVICE=amazon`). |
-| `AWS_ENDPOINT` | Optional endpoint override for S3-compatible stores (MinIO, etc.), e.g. `http://minio:9000`. Omit for real S3. |
-| `ARTIFACT_RETENTION_DAYS` | How long artifacts are kept; `PurgeOldArtifactsJob` deletes older ones daily at 03:00 (Solid Queue recurring, `config/recurring.yml`). Default `30`. |
-| `FORGE_CI_ADMIN_TOKEN` | Bearer token for context administration (`POST /api/v1/contexts/:id/rotate`). **Fail-closed**: rotation 503s when this is blank. |
-| `FORGE_CI_STREAM_TIMEOUT_SECONDS` | How long the SSE log live-tail stays open waiting for output (default `300`). |
+Full reference: [docs/configuration.md](../docs/configuration.md).
+Key production secrets: `DATABASE_URL`, `RAILS_MASTER_KEY`,
+`FORGE_CI_UI_USER`/`FORGE_CI_UI_PASSWORD`, `ACTIVE_RECORD_ENCRYPTION_*`,
+`GITHUB_*` (app), `FORGE_CI_ADMIN_TOKEN`, S3 credentials — see
+[DEPLOY.md](../DEPLOY.md).
 
 ### Object storage setup (components 6–7)
 
@@ -117,174 +104,9 @@ success green · failed red · canceled dark gray.
 
 ## API reference (v1)
 
-All request/response bodies are JSON.
-
-### Pipeline intake (unauthenticated in v1 — GitHub App auth is deferred)
-
-`POST /api/v1/projects/:project_id/pipelines`
-
-```jsonc
-{
-  "sha": "abc123def456",
-  "branch": "main",
-  "ir": { /* compiler IR: { version, workflows: [{ name, jobs: [{ name, requires: [...], executor: {...}, working_directory, steps: [...] }] }], meta } */ },
-  "contexts": ["deploy"]            // optional: named Contexts for the project
-}
-```
-
-- `ir` may use string keys (normal HTTP/JSON) or symbol keys (direct Ruby).
-- Validates the IR (workflows → jobs → name/executor/steps); `422` with
-  `details` on violation.
-- Unknown context name → `404`. Unknown project → `404`.
-- Creates the Pipeline (`running`), one WorkflowRun per workflow (`running`),
-  one JobRun per job — `queued` when `requires` is empty, else `pending` —
-  plus one StepRun per IR step (`pending`). Each job stores its pruned
-  `requires` list (emitted by the compiler since the requires seam fix),
-  the denormalized `resource_class`, and the merged context environment.
-- Response `201`:
-
-```jsonc
-{ "id": 1, "project_id": 1, "sha": "abc123def456", "branch": "main", "status": "running",
-  "workflows": [{ "id": 1, "name": "build-test-deploy", "status": "running",
-    "jobs": [{ "id": 1, "name": "build", "status": "queued", "requires": [] },
-             { "id": 2, "name": "test", "status": "pending", "requires": ["build"] }] }] }
-```
-
-### Runner API — `Authorization: Bearer <raw-runner-token>` on every call
-
-Tokens are created with `RunnerToken.generate!(name:, resource_class:)` →
-`[record, raw_token]`; only the SHA256 hex digest is stored, compared with
-`secure_compare`. Missing/wrong token → `401`. Acting on a job owned by
-another token → `403`.
-
-`POST /api/v1/runner/jobs/claim` — `{ "resource_class": "medium" }` (optional)
-
-Atomically claims the oldest `queued` job the token may run and returns the
-full job payload (`200`), or `422` when nothing is claimable. Matching:
-
-- job `executor.resource_class` == token `resource_class`, **or either side
-  is NULL** (NULL matches anything);
-- the job's project has a free `max_concurrency` slot (counted across
-  `claimed` + `running` jobs).
-
-On Postgres the candidate scan takes `FOR UPDATE SKIP LOCKED` inside a
-transaction, so concurrent runners resolve the race atomically (the loser sees
-no claimable row). Other adapters use a plain ordered first-row claim inside
-the transaction. The claim sets `claimed` + `claimed_by` (token name) +
-`claimed_at` + `heartbeat_at`.
-
-```jsonc
-// 200 response
-{ "id": 1, "name": "build", "working_directory": "~/project",
-  "executor": { "type": "docker", "image": "cimg/ruby:3.2", "resource_class": "medium",
-                "environment": { "RAILS_ENV": "test" }, /* … */ },
-  "steps": [{ "type": "checkout" }, { "type": "run", "name": "Bundle", "command": "bundle install" }],
-  "environment": { "RAILS_ENV": "test", "DEPLOY_KEY": "s3cr3t" },  // executor env merged with context payloads; contexts win
-  "pipeline": { "sha": "abc123def456", "branch": "main" },
-  "workflow_run_id": 1,
-  "repository": { "url": "https://github.com/acme/demo.git",       // additive & nil-safe: omitted entirely when
-                  "sha": "abc123def456", "branch": "main" } }       // neither the GitHub repo nor project.repo_url is known
-// Raw Context records are NEVER returned.
-```
-
-`POST /api/v1/runner/jobs/:id/heartbeat` → `200 { id, status, heartbeat_at }`.
-Only the claiming token may heartbeat its own jobs (`403` otherwise).
-
-`POST /api/v1/runner/jobs/:id/start` — `claimed → running` (`200`), called
-when the container actually starts so the two states stay distinguishable.
-`422` on illegal transition.
-
-`POST /api/v1/runner/jobs/:id/complete`
-
-```jsonc
-{ "status": "success",                                   // "success" | "failed" | "canceled"
-  "step_results": [{ "name": "Bundle", "exit_code": 0,
-                      "started_at": "2026-10-15T09:00:00Z", "finished_at": "2026-10-15T09:01:12Z" }] }
-```
-
-- Terminal state (`200 { id, status }`); `422` on illegal transition or
-  non-terminal status.
-- Updates matching StepRuns by name (exit code, timestamps, derived status).
-- On `success`: dependent jobs in the same workflow whose `requires` are now
-  **all** successful move `pending → queued`. On `failed`/`canceled`:
-  dependents stay `pending`.
-- Recomputes workflow status (`failed` if any job failed → `canceled` →
-  `running` while anything is in flight → `success`) and rolls up to the
-  pipeline.
-
-`POST /api/v1/jobs/:id/log_chunks` — `{ "seq": 3, "chunk": "…log text…" }`.
-Upsert on `(job_run_id, seq)` — safe to retry; `200 { job_id, seq }`.
-Only the owning token (`403` otherwise). Chunks are appended to an
-ActiveStorage blob **in seq order**; the `LogChunk` rows are kept as a
-write-ahead ingestion buffer (idempotent upserts) and purged once the job
-reaches a terminal state, at which point the blob becomes the durable log
-store. Decision: the model stays (as metadata/buffer), the blob is the
-source of truth for reads.
-
-`GET /api/v1/jobs/:id/logs` → `200 { job_id, chunks: [{ seq, chunk }] }`
-ordered by `seq`. Served from buffered rows while the job is live, from the
-blob once it is terminal.
-
-`GET /api/v1/jobs/:id/logs/stream` — `text/event-stream` live tail. Sends
-existing chunks as `chunk` events, then holds the connection open (long
-poll, server-side 5-minute default — see `FORGE_CI_STREAM_TIMEOUT_SECONDS`)
-emitting new chunks as they arrive, and closes with a `done` event once the
-job is terminal. Auth is dual: the owning runner's Bearer token **or** the
-UI's HTTP basic credentials (browsers can't set `Authorization: Bearer` on
-`EventSource`). The job show page uses this with plain polling as fallback.
-Unauthenticated → `401`.
-
-### Artifacts — `Authorization: Bearer <raw-runner-token>` (upload) / Bearer or UI basic (download)
-
-`POST /api/v1/jobs/:id/artifacts` — multipart form: `file` (required), `path`
-(defaults to the filename), `destination` (optional prefix shown in the UI).
-Only the owning token may upload. Response `201`:
-
-```jsonc
-{ "id": 7, "path": "coverage/index.html", "destination": "reports",
-  "size": 48210,
-  "download_url": "https://…signed…?…" }   // 15-minute TTL — do NOT store it
-```
-
-`GET /api/v1/artifacts/:id/download` — `302` redirect to a **fresh** signed
-blob URL (15-minute TTL). The blob key itself is never a permanent address.
-Old artifacts are purged by `PurgeOldArtifactsJob` after
-`ARTIFACT_RETENTION_DAYS` (default 30).
-
-### Cache — `Authorization: Bearer <raw-runner-token>`
-
-The token must own a `claimed`/`running` job in the project (`403`
-otherwise) — cache access is tied to active work, not to any token.
-
-`PUT /api/v1/projects/:project_id/cache` — multipart form: `key` (required),
-`file` (the tarball, required). Upserts on `(project_id, key)` — re-saving a
-key replaces the blob. Response `200 { key, size }`.
-
-`GET /api/v1/projects/:project_id/cache?keys[]=k1&keys[]=k2` — tries the keys
-in order with CircleCI `restore_cache` semantics: exact match wins, otherwise
-the most recent entry whose stored key **starts with** the requested key
-(longest-prefix fallback). `404 { error: "no matching cache entry" }` when
-nothing matches. Hit response `200`:
-
-```jsonc
-{ "key": "bundle-v1-abc123", "size": 89123456, "download_url": "https://…signed…?…" }
-```
-
-### Contexts (secrets) — `Authorization: Bearer <FORGE_CI_ADMIN_TOKEN>`
-
-Runner tokens can **never** read or rewrite secrets; rotation uses a separate
-admin token. Fail-closed: every request `503`s when
-`FORGE_CI_ADMIN_TOKEN` is blank.
-
-`POST /api/v1/contexts/:id/rotate` — `{ "payload": { "KEY": "new-value", … } }`
-replaces the encrypted payload wholesale (Rails `encrypts` at rest stays as
-is). The response carries **key names only** — values are never echoed back:
-
-```jsonc
-// 200
-{ "id": 3, "name": "deploy", "keys": ["AWS_KEY", "AWS_SECRET"], "updated_at": "2026-10-15T…" }
-// 401 bad token · 404 unknown context · 422 empty payload or blank key · 503 admin token not configured
-```
+Moved to [docs/api.md](../docs/api.md) — full v1 reference: pipeline
+intake, runner claim/lifecycle, logs, artifacts, cache, contexts,
+and the runner contract checklist.
 
 ## GitHub App setup (component 3)
 
@@ -358,39 +180,9 @@ If `.circleci/config.yml` fails to compile, the push still creates a
 error lines. A repo with no config file at the SHA is skipped quietly
 (nothing to build).
 
-## Runner contract (for component 5, the Docker runner)
+## Runner contract
 
-1. Generate a token: `RunnerToken.generate!(name: "worker-1", resource_class: "medium")`
-   (console or a future admin UI) and store the raw token on the runner host.
-2. Poll `POST /api/v1/runner/jobs/claim` every **5–10s** when idle
-   (`{ "resource_class": "medium" }` optional — omit it and the server matches
-   on the token's class).
-3. On `200`: `POST …/start` when the container starts.
-4. `POST …/heartbeat` every **~30s** while the job runs. Miss the
-   **120s** staleness threshold (`JobRun::STALE_HEARTBEAT_AFTER`) and the
-   reclaimer puts the job back to `queued` for another runner.
-5. Stream logs: `POST /api/v1/jobs/:id/log_chunks` with monotonically
-   increasing `seq` (chunk size ~64KB recommended); retries are idempotent.
-   Chunks land in an ActiveStorage blob in seq order. **Mask secret values
-   before sending** — the control plane stores and streams log text verbatim
-   (secret redaction is runner-side, see "Secrets threat model").
-6. Upload artifacts: `POST /api/v1/jobs/:id/artifacts` (multipart `file` +
-   `path`/`destination`) → `201` with a 15-minute signed `download_url`;
-   consumers should use `GET /api/v1/artifacts/:id/download` for a fresh URL.
-7. Cache: `PUT /api/v1/projects/:project_id/cache` with multipart `key` +
-   `file` (tarball) to save; `GET …/cache?keys[]=k1&keys[]=k2` to restore
-   (exact match, then longest-prefix fallback, `404` on miss).
-8. Finish: `POST …/complete` with `status` and per-step `step_results`
-   (`name` must match the step names from the claim payload).
-9. Never invent job IDs, never touch another token's jobs (`403`), never
-   expect raw context values anywhere except the claim payload's merged
-   `environment`.
-
-The claim payload also carries `repository: { url, sha, branch }` (resolved
-from the pipeline's GitHub repo, else the project's `repo_url`, omitted when
-neither is known) — use it for `checkout` instead of requiring a
-`CHECKOUT_REPO_URL` env var. The key is additive, so older runners ignore it
-safely.
+See the checklist in [docs/api.md](../docs/api.md#runner-contract-checklist-for-runner-implementations).
 
 ## Background: reclaiming stale jobs
 

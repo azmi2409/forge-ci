@@ -1,6 +1,9 @@
 # forge-ci
 
 [![CI](https://github.com/azmi2409/forge-ci/actions/workflows/ci.yml/badge.svg)](https://github.com/azmi2409/forge-ci/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](MIT-LICENSE)
+[![Ruby](https://img.shields.io/badge/ruby-%3E%3D%203.0-red.svg)](https://www.ruby-lang.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](docs/contributing.md)
 
 An open-source, **CircleCI-compatible CI/CD system** — pure Ruby, MIT licensed.
 
@@ -10,6 +13,17 @@ An open-source, **CircleCI-compatible CI/CD system** — pure Ruby, MIT licensed
 Push code to GitHub → webhook → config compiled → jobs claimed by polling
 runners → executed in Docker → results and commit statuses posted back. No
 inbound ports on runners, no proprietary control plane.
+
+## Why forge-ci?
+
+- **CircleCI-compatible config** — existing `.circleci/config.yml` files
+  (v2.1 subset) compile and run; the compiler mirrors CircleCI's own
+  `configs/compile` semantics.
+- **Self-hosted, no lock-in** — your runners, your storage, your secrets.
+- **Boring technology** — pure-Ruby gem and runner (stdlib only, no gems),
+  one Rails app, Postgres, S3-compatible storage. Nothing exotic to operate.
+- **Polling runners** — runners need only outbound HTTPS; they work behind
+  NAT and firewalls, and scale by adding hosts.
 
 ## Quickstart
 
@@ -38,11 +52,47 @@ RUNNER_TOKEN="<raw token printed by db:seed>" \
 ```
 
 Then create a pipeline: compile a config with the CLI and `POST` the IR to
-`/api/v1/projects/:id/pipelines` (see `web/README.md` — API reference), or
-install the GitHub App and just push.
+`/api/v1/projects/:id/pipelines` (see [docs/api.md](docs/api.md)), or install
+the GitHub App and just push.
 
 Production deployment: **[DEPLOY.md](DEPLOY.md)** · Remaining work:
 **[TODO.md](TODO.md)**
+
+## Example
+
+```yaml
+# .circleci/config.yml
+version: 2.1
+
+jobs:
+  build:
+    docker:
+      - image: cimg/ruby:3.2
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: bundle install
+      - save_cache:
+          key: gems-v1-{{ checksum "Gemfile.lock" }}
+          paths:
+            - vendor/bundle
+      - run:
+          name: Run tests
+          command: bundle exec rake test
+      - store_artifacts:
+          path: coverage
+
+workflows:
+  build-and-test:
+    jobs:
+      - build
+```
+
+```sh
+$ forge-ci validate .circleci/config.yml
+forge-ci: .circleci/config.yml: valid
+```
 
 ## Architecture
 
@@ -69,6 +119,20 @@ GitHub ──push/PR webhook──▶ ┌─────────────
   server-side into a normalized IR, mirroring CircleCI's own
   `configs/compile` semantics. See the supported-subset table below.
 
+Deep dive: [docs/architecture.md](docs/architecture.md)
+
+## Documentation
+
+| Doc | What |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | System design: compiler stages, state machines, claim protocol, secrets model |
+| [docs/api.md](docs/api.md) | Full v1 API reference + runner contract checklist |
+| [docs/configuration.md](docs/configuration.md) | Every environment variable, per component |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Common problems and fixes |
+| [docs/contributing.md](docs/contributing.md) | Dev setup, test commands, PR process |
+| [DEPLOY.md](DEPLOY.md) | Production deployment guide |
+| [TODO.md](TODO.md) | Remaining work, honestly listed |
+
 ## Repository layout
 
 | Path | What | Component |
@@ -76,6 +140,7 @@ GitHub ──push/PR webhook──▶ ┌─────────────
 | `/` (this dir) | `forge-ci` gem: config **compiler** + CLI | 1 |
 | `web/` | Rails control plane: intake, claim API, GitHub App, log streaming, cache/artifacts, contexts | 2, 3, 4, 6, 7, 8 |
 | `runner/` | Docker runner daemon (stdlib-only Ruby) | 5 |
+| `docs/` | Architecture, API, configuration, troubleshooting, contributing | — |
 | `TODO.md` | Remaining work, honestly listed | — |
 | `DEPLOY.md` | Production deployment guide | — |
 
@@ -262,11 +327,12 @@ cd web && bin/rails test
 cd runner && rake test
 ```
 
+See [docs/contributing.md](docs/contributing.md) for the full guide.
+
 ## Contributing
 
-PRs welcome. Keep the zero-dependency philosophy for the gem and the runner
-(stdlib only). The control plane is a standard Rails 8 app. Please include
-tests — every component ships with its suite green.
+PRs welcome — against `main`, with tests green. See
+[docs/contributing.md](docs/contributing.md).
 
 ## License
 
