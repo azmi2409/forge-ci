@@ -86,7 +86,7 @@ docker run -d --name forge-ci-minio --restart unless-stopped \
   -p 9000:9000 -p 9001:9001 \
   -e MINIO_ROOT_USER=<access-key> -e MINIO_ROOT_PASSWORD=<secret-key> \
   -v miniodata:/data \
-  minio/minio server /data --console-address ":9001"
+  pgsty/minio:RELEASE.2026-08-04T00-00-00Z server /data --console-address ":9001"
 ```
 
 Create a bucket (console at `:9001`, or `mc mb`), e.g. `forge-ci`. The app

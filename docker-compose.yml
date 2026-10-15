@@ -55,7 +55,11 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio
+    # NOTE: MinIO deleted minio/minio and minio/mc from Docker Hub on
+    # 2026-09-11, and quay.io/minio/* is no longer anonymously readable.
+    # pgsty/minio (Silo) is a drop-in MinIO-compatible fork: same on-disk
+    # format, same MINIO_ROOT_* env vars, same console.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -67,7 +71,7 @@ services:
       - "9001:9001" # console
 
   minio-init:
-    image: minio/mc
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
     depends_on:
       - minio
     entrypoint: >
