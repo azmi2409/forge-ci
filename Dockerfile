@@ -2,8 +2,8 @@
 # ForgeCI control plane image. Build from the REPO ROOT:
 #   docker build -t forge-ci-web .
 #   docker compose build
-# (web/Dockerfile is the single-directory variant; this one understands the
-# monorepo layout, where the forge-ci gem lives at the repo root.)
+# This Dockerfile understands the monorepo layout, where the forge-ci gem
+# lives at the repo root (copied to /forge-ci for the path-gem reference).
 
 ARG RUBY_VERSION=3.2.3
 FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
@@ -21,6 +21,12 @@ ENV RAILS_ENV="production" \
     BUNDLE_WITHOUT="development" \
     LD_PRELOAD="/usr/local/lib/libjemalloc.so" \
     FORGE_CI_GEM_PATH="/forge-ci"
+# The Gemfile references the forge-ci compiler as a path gem. Locally (and in
+# CI) that path is `..` (monorepo root) — which is what the committed
+# Gemfile.lock records — but here the gem source is copied to /forge-ci.
+# Frozen mode would reject the mismatch, so explicitly unfreeze: bundler
+# re-resolves just the path source, everything else stays locked.
+ENV BUNDLE_FROZEN="false"
 
 FROM base AS build
 
@@ -42,7 +48,6 @@ RUN bundle install && \
 # App code.
 COPY web/ ./
 RUN bundle exec bootsnap precompile -j 1 app/ lib/
-RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile
 
 FROM base
 

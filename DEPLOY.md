@@ -108,8 +108,9 @@ AWS_SECRET_ACCESS_KEY=<secret-key>
 
 The root `Dockerfile` builds the production image from the repo root (it
 understands the monorepo layout — the `forge-ci` gem is copied to `/forge-ci`
-and `FORGE_CI_GEM_PATH` points bundler at it). `web/Dockerfile` is the
-single-directory variant. Thruster serves on port 80.
+and `FORGE_CI_GEM_PATH` points bundler at it; `BUNDLE_FROZEN=false` is set
+because the committed lockfile records the path as `..`). Thruster serves on
+port 80.
 
 ```sh
 docker build -t forge-ci-web .
