@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 ENV["RAILS_ENV"] ||= "test"
+# Keep the SSE live-tail test fast: a live (non-terminal) job's stream would
+# otherwise hold the full 5-minute production timeout open.
+ENV["FORGE_CI_STREAM_TIMEOUT_SECONDS"] ||= "2"
 require_relative "../config/environment"
 require "rails/test_help"
 

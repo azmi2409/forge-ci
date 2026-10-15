@@ -6,10 +6,18 @@ module Api
     # `Authorization: Bearer <raw-runner-token>`.
     class BaseController < ActionController::API
       before_action :authenticate_runner!
+      before_action :set_active_storage_url_options
 
       private
 
       attr_reader :current_runner_token
+
+      # The Disk ActiveStorage service builds signed URLs from
+      # ActiveStorage::Current.url_options — nothing sets it automatically,
+      # so derive it from the request (the S3 service ignores it).
+      def set_active_storage_url_options
+        ActiveStorage::Current.url_options = { protocol: request.protocol, host: request.host_with_port }
+      end
 
       def authenticate_runner!
         raw = bearer_token

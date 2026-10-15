@@ -40,6 +40,13 @@ class JobRun < ApplicationRecord
   has_many :log_chunks, dependent: :destroy
   has_many :artifacts, dependent: :destroy
 
+  # Durable log store (component 6). LogChunk rows remain as the write-ahead
+  # ingestion buffer — idempotent upserts keyed on (job_run_id, seq) give us
+  # ordering and safe retries — while the blob is the source of truth for
+  # reads. Rows are purged once the job reaches a terminal state and the
+  # final blob is written (see finalize_log_blob!).
+  has_one_attached :log_blob
+
   enum :status, { pending: 0, queued: 1, claimed: 2, running: 3, success: 4, failed: 5, canceled: 6 }
 
   serialize :executor, coder: JSON
@@ -59,6 +66,9 @@ class JobRun < ApplicationRecord
     end
 
     update!(attrs.merge(status: new_status))
+    # Durable log store: once terminal, the blob holds the final log and the
+    # ingestion rows are dropped (see #finalize_log_blob!).
+    finalize_log_blob! if TERMINAL_STATUSES.include?(new_status)
   end
 
   def mark_queued!
@@ -79,6 +89,60 @@ class JobRun < ApplicationRecord
 
   def terminal?
     TERMINAL_STATUSES.include?(status)
+  end
+
+  # --- log storage (component 6) ------------------------------------------------
+
+  # Idempotent chunk ingest: upsert the row, then rebuild the blob from all
+  # ordered chunks. Retried seqs overwrite the row (upsert) and the rebuild
+  # keeps the blob consistent — never duplicated, always in seq order.
+  def append_log_chunk!(seq, chunk)
+    LogChunk.upsert(
+      { job_run_id: id, seq: seq.to_i, chunk: chunk.to_s,
+        created_at: Time.current, updated_at: Time.current },
+      unique_by: :index_log_chunks_on_job_run_id_and_seq
+    )
+    rebuild_log_blob!
+  end
+
+  # Concatenate all chunks in seq order into the blob, replacing any
+  # previous blob. Called on every chunk ingest; chatty jobs re-upload the
+  # blob per chunk — correct for v1, and a documented candidate for a
+  # delta-append optimization later.
+  def rebuild_log_blob!
+    text = log_chunks.order(:seq).map(&:chunk).join
+    log_blob.attach(
+      io: StringIO.new(text),
+      filename: "job-#{id}.log",
+      content_type: "text/plain"
+    )
+  end
+
+  # Full log text: buffered rows while they exist, the blob after they're
+  # purged (job terminal), empty string when there's no output at all.
+  def log_text
+    if log_chunks.exists?
+      log_chunks.order(:seq).map(&:chunk).join
+    elsif log_blob.attached?
+      log_blob.download
+    else
+      ""
+    end
+  end
+
+  def log_chunk_list
+    rows = log_chunks.order(:seq).map { |c| { seq: c.seq, chunk: c.chunk } }
+    return rows if rows.any?
+    return [{ seq: 0, chunk: log_blob.download }] if log_blob.attached?
+
+    []
+  end
+
+  # Write the final blob and drop the ingestion rows. Called automatically
+  # when the job reaches a terminal state.
+  def finalize_log_blob!
+    rebuild_log_blob!
+    log_chunks.delete_all
   end
 
   # --- helpers ---------------------------------------------------------------

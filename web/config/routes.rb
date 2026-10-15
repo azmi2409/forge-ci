@@ -13,8 +13,14 @@ Rails.application.routes.draw do
   namespace :api do
     namespace :v1 do
       # Pipeline intake — the seam the GitHub App (component 3) calls.
+      # Cache API (component 7) — scoped to the project; the Bearer token
+      # must own a claimed/running job in that project.
       resources :projects, only: [] do
         resources :pipelines, only: %i[create]
+        member do
+          put :cache, to: "cache#upsert"
+          get :cache, to: "cache#show"
+        end
       end
 
       # Runner polling API (Bearer-token auth via RunnerToken).
@@ -31,11 +37,29 @@ Rails.application.routes.draw do
         end
       end
 
-      # Log streaming (Bearer-token auth; only the owning token).
+      # Log streaming (component 6). Chunk ingest is Bearer-token authed to the
+      # owning token; logs/stream additionally accepts the UI basic-auth
+      # credentials so the job page can tail without a runner token.
       resources :jobs, only: [] do
         member do
           post :log_chunks, action: :create_log_chunk, controller: "jobs"
           get :logs, controller: "jobs"
+          get "logs/stream", to: "jobs#stream"
+          post :artifacts, to: "artifacts#create"
+        end
+      end
+
+      # Artifact downloads (component 7): redirect to a fresh signed URL.
+      resources :artifacts, only: [] do
+        member do
+          get :download, to: "artifacts#download"
+        end
+      end
+
+      # Contexts (component 8): secret rotation is admin-token authed.
+      resources :contexts, only: [] do
+        member do
+          post :rotate, to: "contexts#rotate"
         end
       end
 

@@ -9,8 +9,14 @@ production:
   reclaim_stale_jobs:
     class: ReclaimStaleJobsJob
     schedule: every minute
+  purge_old_artifacts:
+    class: PurgeOldArtifactsJob
+    schedule: every day at 3am
 
 development:
   reclaim_stale_jobs:
     class: ReclaimStaleJobsJob
     schedule: every minute
+  purge_old_artifacts:
+    class: PurgeOldArtifactsJob
+    schedule: every day at 3am

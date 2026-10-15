@@ -63,4 +63,56 @@ class Api::V1::JobsControllerTest < ActionDispatch::IntegrationTest
          headers: bearer_headers(other_raw), as: :json
     assert_response :forbidden
   end
+
+  # --- blob-backed logs (component 6) -----------------------------------------
+
+  test "chunk posts attach an ordered blob on the job" do
+    post "/api/v1/jobs/#{@job_id}/log_chunks", params: { seq: 1, chunk: "second\n" }, headers: auth, as: :json
+    post "/api/v1/jobs/#{@job_id}/log_chunks", params: { seq: 0, chunk: "first\n" }, headers: auth, as: :json
+
+    job = JobRun.find(@job_id)
+    assert job.log_blob.attached?, "expected a log blob after chunk posts"
+    assert_equal "first\nsecond\n", job.log_blob.download
+  end
+
+  test "terminal jobs purge rows and serve logs from the blob" do
+    post "/api/v1/jobs/#{@job_id}/log_chunks", params: { seq: 0, chunk: "hello\n" }, headers: auth, as: :json
+    post "/api/v1/runner/jobs/#{@job_id}/complete", params: { status: "success", step_results: [] },
+         headers: auth, as: :json
+    assert_response :ok
+
+    job = JobRun.find(@job_id)
+    assert_equal 0, job.log_chunks.count
+    assert job.log_blob.attached?
+
+    get "/api/v1/jobs/#{@job_id}/logs", headers: auth
+    assert_response :ok
+    chunks = json_body["chunks"]
+    assert_equal "hello\n", chunks.map { |c| c["chunk"] }.join
+  end
+
+  test "log stream emits chunks then a done event for a finished job" do
+    post "/api/v1/jobs/#{@job_id}/log_chunks", params: { seq: 0, chunk: "line one\n" }, headers: auth, as: :json
+    post "/api/v1/runner/jobs/#{@job_id}/complete", params: { status: "success", step_results: [] },
+         headers: auth, as: :json
+    assert_response :ok
+
+    get "/api/v1/jobs/#{@job_id}/logs/stream", headers: auth
+    assert_response :ok
+    assert_equal "text/event-stream", response.headers["Content-Type"]
+    body = response.body
+    assert_includes body, "line one\\n"
+    assert_includes body, "event: done"
+  end
+
+  test "log stream accepts UI basic auth" do
+    get "/api/v1/jobs/#{@job_id}/logs/stream", headers: ui_basic_auth_headers
+    assert_response :ok
+    assert_equal "text/event-stream", response.headers["Content-Type"]
+  end
+
+  test "log stream rejects unauthenticated requests" do
+    get "/api/v1/jobs/#{@job_id}/logs/stream"
+    assert_response :unauthorized
+  end
 end

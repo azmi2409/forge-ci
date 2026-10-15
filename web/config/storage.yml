@@ -1,0 +1,23 @@
+# ActiveStorage services for forge-ci: job logs, artifacts, and cache tarballs.
+#
+# Select with ACTIVE_STORAGE_SERVICE (default: local).
+#
+# - local: disk storage under storage/. Fine for dev/test and single-node
+#   deploys. Not shared between machines — don't use it with multiple
+#   control-plane nodes.
+# - amazon: any S3-compatible object storage (AWS S3, MinIO, etc.).
+#   Set AWS_S3_ENDPOINT to override the endpoint (e.g. http://minio:9000)
+#   and AWS_S3_FORCE_PATH_STYLE=true when the store needs path-style URLs.
+
+local:
+  service: Disk
+  root: <%= Rails.root.join("storage") %>
+
+amazon:
+  service: S3
+  access_key_id: <%= ENV["AWS_ACCESS_KEY_ID"] %>
+  secret_access_key: <%= ENV["AWS_SECRET_ACCESS_KEY"] %>
+  region: <%= ENV.fetch("AWS_REGION", "us-east-1") %>
+  bucket: <%= ENV["AWS_S3_BUCKET"] %>
+  endpoint: <%= ENV["AWS_S3_ENDPOINT"].presence %>
+  force_path_style: <%= ENV.fetch("AWS_S3_FORCE_PATH_STYLE", "false") == "true" %>

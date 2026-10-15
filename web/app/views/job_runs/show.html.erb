@@ -62,9 +62,49 @@
 </table>
 
 <h2>Logs</h2>
-<% if @chunks.any? %>
-  <pre class="logs"><% @chunks.each do |c| %><%= c.chunk %><% end %></pre>
-  <p class="note">Live tail is not in v1 — reload the page for new output. Runners poll <span class="mono">GET /api/v1/jobs/:id/logs</span>.</p>
-<% else %>
-  <p class="note">No log output yet.</p>
-<% end %>
+<pre class="logs" id="job-logs"><%= @initial_log %></pre>
+<p class="note" id="log-status">Connecting to live tail…</p>
+<script>
+(function() {
+  var el = document.getElementById('job-logs');
+  var status = document.getElementById('log-status');
+  var streamUrl = "<%= "/api/v1/jobs/#{@job.id}/logs/stream" %>";
+  var pollUrl = "<%= "/api/v1/jobs/#{@job.id}/logs" %>";
+  var terminal = <%= %w[success failed canceled].include?(@job.status) %>;
+  var lastText = el.textContent;
+
+  function setStatus(t) { status.textContent = t; }
+
+  function startPolling() {
+    setStatus("Live stream unavailable — polling every 5s.");
+    setInterval(function() {
+      fetch(pollUrl, { credentials: "same-origin" }).then(function(r) {
+        return r.ok ? r.json() : null;
+      }).then(function(data) {
+        if (!data) return;
+        var text = data.chunks.map(function(c) { return c.chunk; }).join("");
+        if (text !== lastText) { el.textContent = text; lastText = text; }
+      });
+    }, 5000);
+  }
+
+  if (terminal) { setStatus("Job finished — showing full log."); return; }
+  if (typeof EventSource === "undefined") { startPolling(); return; }
+
+  try {
+    var src = new EventSource(streamUrl);
+    src.addEventListener("chunk", function(e) {
+      var data = JSON.parse(e.data);
+      el.textContent += data.chunk;
+      lastText = el.textContent;
+      setStatus("Streaming live…");
+    });
+    src.addEventListener("done", function(e) {
+      var data = JSON.parse(e.data);
+      setStatus("Job finished with status: " + data.status + ".");
+      src.close();
+    });
+    src.onerror = function() { src.close(); startPolling(); };
+  } catch (err) { startPolling(); }
+})();
+</script>

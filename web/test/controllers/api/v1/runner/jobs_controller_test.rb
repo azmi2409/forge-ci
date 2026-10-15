@@ -213,4 +213,35 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
          headers: bearer_headers(other_raw), as: :json
     assert_response :forbidden
   end
+
+  # --- repository info (integration fix) --------------------------------------
+
+  test "claim payload includes repository from the GitHub repo mapping" do
+    inst = GithubInstallation.create!(installation_id: 99, account_login: "octo")
+    inst.github_repositories.create!(full_name: "octo/hello", project: @project)
+    @pipeline.update!(github_repository: inst.github_repositories.sole)
+
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    repo = json_body["repository"]
+    assert_equal "https://github.com/octo/hello.git", repo["url"]
+    assert_equal "abc123", repo["sha"]
+    assert_equal "main", repo["branch"]
+  end
+
+  test "claim payload falls back to project repo_url" do
+    @project.update!(repo_url: "https://git.example.com/acme/app.git")
+
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    repo = json_body["repository"]
+    assert_equal "https://git.example.com/acme/app.git", repo["url"]
+    assert_equal "abc123", repo["sha"]
+  end
+
+  test "claim payload omits repository when nothing is known (backward compatible)" do
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    assert_not json_body.key?("repository")
+  end
 end

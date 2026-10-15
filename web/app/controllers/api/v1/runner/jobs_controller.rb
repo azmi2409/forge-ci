@@ -68,7 +68,8 @@ module Api
 
         # The full job payload. `environment` is the executor environment
         # merged with resolved context payloads (contexts win). Raw Context
-        # records are NEVER returned.
+        # records are NEVER returned. `repository` is additive (nil-safe) so
+        # older runners keep working.
         def job_payload(job)
           pipeline = job.pipeline
           {
@@ -79,8 +80,24 @@ module Api
             steps: job.steps || [],
             environment: job.merged_environment,
             pipeline: { sha: pipeline.sha, branch: pipeline.branch },
-            workflow_run_id: job.workflow_run_id
-          }
+            workflow_run_id: job.workflow_run_id,
+            repository: repository_info(job)
+          }.compact
+        end
+
+        # Where the runner can `git clone` the code for `checkout` steps.
+        # Prefers the GitHub repo the pipeline came from, then the project's
+        # configured repo_url. Omitted entirely when neither is known.
+        def repository_info(job)
+          pipeline = job.pipeline
+          url = if pipeline.github_repository
+                  "https://github.com/#{pipeline.github_repository.full_name}.git"
+                elsif job.project.repo_url.present?
+                  job.project.repo_url
+                end
+          return nil if url.blank?
+
+          { url: url, sha: pipeline.sha, branch: pipeline.branch }
         end
       end
     end

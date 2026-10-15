@@ -13,6 +13,10 @@ gem "forge-ci", path: "../forge-ci", require: "forge_ci"
 # GitHub App auth: RS256 JWTs for installation-token exchange (component 3)
 gem "jwt"
 
+# S3-compatible object storage for ActiveStorage (logs, artifacts, caches).
+# Only loaded when ACTIVE_STORAGE_SERVICE=amazon; local disk is the default.
+gem "aws-sdk-s3", require: false
+
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
 gem "tzinfo-data", platforms: %i[ windows jruby ]
 

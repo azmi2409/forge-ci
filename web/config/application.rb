@@ -5,7 +5,7 @@ require "rails"
 require "active_model/railtie"
 require "active_job/railtie"
 require "active_record/railtie"
-# require "active_storage/engine"
+require "active_storage/engine"
 require "action_controller/railtie"
 # require "action_mailer/railtie"
 # require "action_mailbox/engine"
@@ -41,5 +41,10 @@ module ForgeCiWeb
       payload encrypted_payload token token_digest
       password password_confirmation
     ]
+
+    # Object storage for job logs, artifacts, and cache tarballs (components
+    # 6+7). `local` disk by default; set ACTIVE_STORAGE_SERVICE=amazon with
+    # the AWS_* env vars (see config/storage.yml) for S3-compatible storage.
+    config.active_storage.service = ENV.fetch("ACTIVE_STORAGE_SERVICE", "local").to_sym
   end
 end

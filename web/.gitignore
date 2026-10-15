@@ -2,6 +2,11 @@
 /db/*.sqlite3
 /db/*.sqlite3-*
 /db/*.sqlite3-*-journal
+/db/*.sqlite3_*
+
+# Ignore ActiveStorage disk files (test/dev artifacts; S3 in production)
+/storage/*
+!/storage/.keep
 
 # Ignore credentials
 /config/master.key
