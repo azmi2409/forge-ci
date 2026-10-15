@@ -59,6 +59,43 @@ end
 errors = ForgeCI::Compiler.validate(yaml)
 ```
 
+## CLI
+
+The gem ships a `forge-ci` executable (pure stdlib, no extra gems):
+
+```sh
+# Validate a config: exit 0 if valid, 1 otherwise.
+# Each error is printed to stderr with its YAML line number.
+forge-ci validate .circleci/config.yml
+
+# Compile a config to its IR as JSON (pretty-printed by default).
+forge-ci compile .circleci/config.yml
+
+# Compact JSON output:
+forge-ci compile .circleci/config.yml --json
+
+# Supply pipeline context (resolves << pipeline.git.branch >>,
+# << pipeline.number >> and branch filters):
+forge-ci compile .circleci/config.yml --branch main --sha abc123 --number 42
+
+# Help and version:
+forge-ci --help
+forge-ci --version
+```
+
+`validate` prints `forge-ci: <file>: valid` on success. On failure, each
+error goes to stderr in the same `line N: ...` form the library returns:
+
+```sh
+$ forge-ci validate broken.yml
+forge-ci: broken.yml: line 17: workflows.main.jobs: dependency cycle detected: a -> b -> a
+$ echo $?
+1
+```
+
+`compile` exits 1 (printing the errors to stderr) when the config is invalid,
+and prints the compiled IR to stdout when it is valid.
+
 `compile` returns `[ir, errors]`. `errors` is empty on success; `ir` is `nil`
 when errors are present. `ForgeCI::Error` is raised **only** when the YAML text
 cannot be parsed at all — everything else (unknown keys, bad references,
