@@ -184,10 +184,15 @@ class JobRun < ApplicationRecord
     transaction do
       scope = queued.order(:created_at)
                     .preload(workflow_run: { pipeline: :project })
-                    .where(
-                      "job_runs.resource_class = :rc OR job_runs.resource_class IS NULL OR :rc IS NULL",
-                      rc: token.resource_class
-                    )
+      # NULL on either side matches anything. A NULL token class needs no
+      # filter at all; binding NULL into `OR :rc IS NULL` makes Postgres
+      # unable to infer the parameter type (PG::IndeterminateDatatype).
+      unless token.resource_class.nil?
+        scope = scope.where(
+          "job_runs.resource_class = ? OR job_runs.resource_class IS NULL",
+          token.resource_class
+        )
+      end
       scope = scope.lock("FOR UPDATE SKIP LOCKED") if postgres?
 
       job = scope.detect { |j| j.project.free_slots.positive? }
