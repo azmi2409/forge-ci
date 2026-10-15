@@ -1,5 +1,7 @@
 # forge-ci
 
+[![CI](https://github.com/azmi2409/forge-ci/actions/workflows/ci.yml/badge.svg)](https://github.com/azmi2409/forge-ci/actions/workflows/ci.yml)
+
 An open-source, **CircleCI-compatible CI/CD system** — pure Ruby, MIT licensed.
 
 **Status: MVP complete.** All 8 planned components are built, tested (259 runs,
