@@ -1,0 +1,69 @@
+# frozen_string_literal: true
+
+module ForgeCIRunner
+  # Runner configuration, read from the environment.
+  #
+  # Required:
+  #   CONTROL_PLANE_URL  base URL of the forge-ci control plane, e.g. https://ci.example.com
+  #   RUNNER_TOKEN       raw runner token (generated via RunnerToken.generate! on the server)
+  #
+  # Optional:
+  #   RESOURCE_CLASS       resource class this runner serves (default: token's class)
+  #   POLL_INTERVAL        seconds between claim polls when idle (default: 5)
+  #   MAX_IDLE_INTERVAL    cap for idle backoff (default: 60)
+  #   HEARTBEAT_INTERVAL   seconds between heartbeats while a job runs (default: 15)
+  #   LOG_CHUNK_SIZE       bytes per log chunk POSTed to the server (default: 65536)
+  #   CHECKOUT_REPO_URL    git URL used for `checkout` steps; may embed a token, e.g.
+  #                        https://x-access-token:TOKEN@github.com/org/repo.git
+  #                        (the claim payload carries no repo URL — see README)
+  #   REDACT_MIN_LENGTH    env values shorter than this are not redacted (default: 8)
+  #   DOCKER_BIN           path to the docker CLI (default: "docker")
+  class Config
+    class Error < StandardError; end
+
+    attr_reader :control_plane_url, :runner_token, :resource_class,
+                :poll_interval, :max_idle_interval, :heartbeat_interval,
+                :log_chunk_size, :checkout_repo_url, :redact_min_length,
+                :docker_bin
+
+    def self.from_env(env = ENV)
+      new(
+        control_plane_url: fetch_required(env, "CONTROL_PLANE_URL").sub(%r{/+\z}, ""),
+        runner_token: fetch_required(env, "RUNNER_TOKEN"),
+        resource_class: env["RESOURCE_CLASS"],
+        poll_interval: (env["POLL_INTERVAL"] || 5).to_f,
+        max_idle_interval: (env["MAX_IDLE_INTERVAL"] || 60).to_f,
+        heartbeat_interval: (env["HEARTBEAT_INTERVAL"] || 15).to_f,
+        log_chunk_size: (env["LOG_CHUNK_SIZE"] || 65_536).to_i,
+        checkout_repo_url: env["CHECKOUT_REPO_URL"],
+        redact_min_length: (env["REDACT_MIN_LENGTH"] || 8).to_i,
+        docker_bin: env["DOCKER_BIN"] || "docker"
+      )
+    end
+
+    def self.fetch_required(env, key)
+      env.fetch(key) { raise Error, "#{key} is required" }
+    end
+    private_class_method :fetch_required
+
+    def initialize(control_plane_url:, runner_token:, resource_class: nil,
+                   poll_interval: 5.0, max_idle_interval: 60.0,
+                   heartbeat_interval: 15.0, log_chunk_size: 65_536,
+                   checkout_repo_url: nil, redact_min_length: 8,
+                   docker_bin: "docker")
+      raise Error, "CONTROL_PLANE_URL is required" if control_plane_url.to_s.empty?
+      raise Error, "RUNNER_TOKEN is required" if runner_token.to_s.empty?
+
+      @control_plane_url = control_plane_url.sub(%r{/+\z}, "")
+      @runner_token = runner_token
+      @resource_class = resource_class
+      @poll_interval = poll_interval
+      @max_idle_interval = max_idle_interval
+      @heartbeat_interval = heartbeat_interval
+      @log_chunk_size = log_chunk_size
+      @checkout_repo_url = checkout_repo_url
+      @redact_min_length = redact_min_length
+      @docker_bin = docker_bin
+    end
+  end
+end

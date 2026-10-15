@@ -15,6 +15,9 @@ dependencies. Tested on **Ruby 3.2.3** (requires >= 3.0).
 - `web/` — the **Rails control plane** (MVP components 2 + 4): Postgres models,
   pipeline intake from compiler IR, token-authenticated runner claim API, minimal
   web UI. See `web/README.md`.
+- `runner/` — the **Docker runner** (MVP component 5): zero-dependency Ruby
+  daemon that polls for jobs and executes them in Docker containers. See
+  `runner/README.md`.
 
 ## Install
 

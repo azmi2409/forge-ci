@@ -1,0 +1,76 @@
+# frozen_string_literal: true
+
+module ForgeCIRunner
+  # Buffers log output, redacts secrets, and POSTs seq-numbered chunks to
+  # the control plane. The server upserts on (job_id, seq), so retries are
+  # safe. Thread-safe: stdout/stderr reader threads share one instance.
+  class LogStreamer
+    def initialize(client, job_id, redactor, chunk_size: 65_536)
+      @client = client
+      @job_id = job_id
+      @redactor = redactor
+      @chunk_size = chunk_size
+      @seq = 0
+      @buffer = +""
+      @mutex = Mutex.new
+    end
+
+    attr_reader :seq
+
+    # Append raw output; flushes full chunks as they accumulate.
+    def write(text)
+      return if text.nil? || text.empty?
+
+      pending = nil
+      @mutex.synchronize do
+        @buffer << @redactor.redact(text)
+        pending = extract_chunks_locked
+      end
+      pending.each { |chunk| post_chunk(chunk) }
+    end
+
+    # POST any buffered remainder as a final chunk. Safe to call when empty.
+    def flush
+      pending = nil
+      @mutex.synchronize { pending = extract_chunks_locked(force: true) }
+      pending.each { |chunk| post_chunk(chunk) }
+    end
+
+    private
+
+    # Splits whole chunks off the buffer. With force, emits the remainder
+    # even when smaller than chunk_size.
+    def extract_chunks_locked(force: false)
+      chunks = []
+      while @buffer.bytesize >= @chunk_size
+        chunks << @buffer.byteslice(0, @chunk_size)
+        @buffer = @buffer.byteslice(@chunk_size..-1) || +""
+      end
+      if force && !@buffer.empty?
+        chunks << @buffer
+        @buffer = +""
+      end
+      chunks
+    end
+
+    def post_chunk(chunk)
+      seq = nil
+      @mutex.synchronize do
+        seq = @seq
+        @seq += 1
+      end
+      with_retries { @client.post_log_chunk(@job_id, seq, chunk) }
+    end
+
+    def with_retries(tries: 3)
+      yield
+    rescue StandardError => e
+      tries -= 1
+      if tries.positive?
+        sleep 1
+        retry
+      end
+      $stderr.puts "[forge-ci-runner] log chunk POST failed, dropping chunk: #{e.class}: #{e.message}"
+    end
+  end
+end

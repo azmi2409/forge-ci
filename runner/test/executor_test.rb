@@ -1,0 +1,235 @@
+# frozen_string_literal: true
+
+require "test_helper"
+require "open3"
+
+def test_payload(overrides = {})
+  {
+    "id" => 11,
+    "name" => "build",
+    "working_directory" => "~/project",
+    "executor" => {
+      "type" => "docker",
+      "image" => "cimg/ruby:3.2",
+      "resource_class" => "medium",
+      "environment" => { "RAILS_ENV" => "test" },
+      "secondary_images" => [
+        { "image" => "postgres:16", "name" => "db",
+          "environment" => { "POSTGRES_PASSWORD" => "pw" } }
+      ]
+    },
+    "steps" => [
+      { "type" => "checkout" },
+      { "type" => "run", "name" => "Bundle", "command" => "bundle install" }
+    ],
+    "environment" => { "RAILS_ENV" => "test", "DEPLOY_KEY" => "s3cr3t-long-value" },
+    "pipeline" => { "sha" => "abc123", "branch" => "main" }
+  }.merge(overrides)
+end
+
+def test_config(overrides = {})
+  ForgeCIRunner::Config.new(
+    **{ control_plane_url: "http://localhost:3000",
+        runner_token: "t" }.merge(overrides)
+  )
+end
+
+class NullClient
+  def post_log_chunk(*); end
+end
+
+# Executor with docker calls recorded instead of executed.
+class RecordingExecutor < ForgeCIRunner::Executor
+  attr_reader :commands, :fail_on
+
+  def initialize(*args, fail_on: nil)
+    super(*args)
+    @commands = []
+    @fail_on = fail_on
+  end
+
+  def stream_exec(argv)
+    @commands << [:stream_exec, argv]
+    @fail_on == :exec ? 1 : 0
+  end
+
+  private
+
+  def run_docker(*args)
+    @commands << [:run_docker, args]
+    ["", @fail_on == :docker ? 1 : 0]
+  end
+end
+
+class ExecutorTest < Minitest::Test
+  def executor(payload_overrides = {}, config_overrides = {})
+    RecordingExecutor.new(test_config(config_overrides),
+                          NullClient.new,
+                          test_payload(payload_overrides))
+  end
+
+  def test_expand_workdir
+    ex = executor
+    assert_equal "/root/project", ex.expand_workdir("~/project")
+    assert_equal "/tmp/x", ex.expand_workdir("/tmp/x")
+    assert_nil ex.expand_workdir(nil)
+    assert_nil ex.expand_workdir("")
+  end
+
+  def test_env_args
+    ex = executor
+    assert_equal ["-e", "A=1", "-e", "B=two words"],
+                 ex.env_args({ "A" => "1", "B" => "two words" })
+  end
+
+  def test_primary_run_args
+    ex = executor
+    args = ex.primary_run_args
+    assert_equal "docker", args[0]
+    assert_includes args, "-d"
+    assert_includes args, "--network"
+    assert_includes args, "cimg/ruby:3.2"
+    assert_includes args, "-e"
+    assert_includes args, "RAILS_ENV=test"
+    assert_includes args, "-w"
+    assert_includes args, "/root/project"
+    # long-lived container by default
+    assert_equal ["sleep", "infinity"], args.last(2)
+    # container name embeds the job id
+    name_idx = args.index("--name") + 1
+    assert_match(/\Aforge-ci-job-11-/, args[name_idx])
+  end
+
+  def test_service_run_args_uses_name_and_alias
+    ex = executor
+    name, args = ex.service_run_args(
+      { "image" => "postgres:16", "name" => "db",
+        "environment" => { "POSTGRES_PASSWORD" => "pw" } }, 0)
+    assert_equal "db", name
+    assert_includes args, "--network-alias"
+    assert_includes args, "db"
+    assert_includes args, "POSTGRES_PASSWORD=pw"
+  end
+
+  def test_exec_argv_splits_shell
+    ex = executor
+    ex.instance_variable_set(:@workdir, "/root/project")
+    argv = ex.exec_argv({ "type" => "run", "shell" => "/bin/bash -eo pipefail",
+                          "command" => "make test" })
+    assert_equal %w[docker exec -w /root/project], argv[0, 4]
+    assert_includes argv, "-e"
+    tail = argv.last(5)
+    assert_equal ["/bin/bash", "-eo", "pipefail", "-c", "make test"], tail
+  end
+
+  def test_execute_runs_steps_and_reports
+    ex = executor
+    status, results = ex.execute
+    assert_equal "success", status
+    assert_equal %w[checkout Bundle], results.map { |r| r["name"] }
+    assert results.all? { |r| r["exit_code"] == 0 }
+    assert results.all? { |r| r["started_at"] && r["finished_at"] }
+  end
+
+  def test_execute_respects_when_conditions
+    ex = executor(
+      { "steps" => [
+        { "type" => "run", "name" => "boom", "command" => "exit 1" },
+        { "type" => "run", "name" => "skip-me", "command" => "echo hi" },
+        { "type" => "run", "name" => "on-fail", "command" => "echo cleanup",
+          "when" => "on_fail" },
+        { "type" => "run", "name" => "always", "command" => "echo always",
+          "when" => "always" }
+      ] }
+    )
+    # first exec fails
+    def ex.stream_exec(argv)
+      @commands << [:stream_exec, argv]
+      argv.last == "exit 1" ? 1 : 0
+    end
+    status, results = ex.execute
+    assert_equal "failed", status
+    by_name = results.to_h { |r| [r["name"], r["exit_code"]] }
+    assert_equal 1, by_name["boom"]
+    assert_equal 0, by_name["skip-me"] # skipped: reported 0
+    assert_equal 0, by_name["on-fail"]
+    assert_equal 0, by_name["always"]
+    # only 3 real execs: boom, on-fail, always (skip-me never executed)
+    assert_equal 3, ex.commands.count { |c| c[0] == :stream_exec }
+  end
+
+  def test_execute_cleans_up_in_order_even_on_setup_failure
+    ex = executor({}, {})
+    def ex.setup_containers
+      raise "pull failed"
+    end
+    status, _results = ex.execute
+    assert_equal "failed", status
+    kinds = ex.commands.map(&:first)
+    assert_equal [:run_docker] * kinds.length, kinds # only cleanup ran
+    rm_cmds = ex.commands.map { |c| c[1] }
+    # container rm first, then network rm last
+    assert_match(/forge-ci-job-11-/, rm_cmds.first[3])
+    assert_equal %w[network rm], rm_cmds.last[1, 2]
+  end
+
+  def test_cleanup_runs_after_successful_execute
+    ex = executor
+    ex.execute
+    rm_cmds = ex.commands.select { |c| c[0] == :run_docker }.map { |c| c[1] }
+    # last docker call is the network removal
+    assert_equal "network", rm_cmds.last[1]
+    assert_equal "rm", rm_cmds.last[2]
+  end
+
+  def test_deferred_steps_skip_loudly_without_failing
+    ex = executor(
+      "steps" => [
+        { "type" => "save_cache", "keys" => ["k"], "paths" => [] },
+        { "type" => "store_artifacts", "path" => "out" },
+        { "type" => "run", "name" => "ok", "command" => "true" }
+      ]
+    )
+    status, results = ex.execute
+    assert_equal "success", status
+    assert_equal 3, results.length
+    # no docker exec for the deferred steps
+    assert_equal 1, ex.commands.count { |c| c[0] == :stream_exec }
+  end
+
+  def test_checkout_skipped_without_repo_url
+    ex = executor("steps" => [{ "type" => "checkout" }])
+    status, results = ex.execute
+    assert_equal "success", status
+    assert_equal "checkout", results.first["name"]
+    assert_equal 0, ex.commands.count { |c| c[0] == :stream_exec }
+  end
+
+  def test_shutdown_flag_cancels_remaining_steps
+    ex = executor(
+      "steps" => [
+        { "type" => "run", "name" => "one", "command" => "true" },
+        { "type" => "run", "name" => "two", "command" => "true" }
+      ]
+    )
+    calls = 0
+    shutdown = -> { (calls += 1) > 1 } # false for first step, true after
+    status, results = ex.execute(shutdown)
+    assert_equal "canceled", status
+    assert_equal %w[one two], results.map { |r| r["name"] }
+    assert_equal 1, ex.commands.count { |c| c[0] == :stream_exec }
+  end
+
+  def test_docker_available_returns_boolean
+    result = ForgeCIRunner::Executor.docker_available?("definitely-not-docker-xyz")
+    assert_equal false, result
+  end
+
+  def test_integration_hello_world
+    skip "docker not available on this machine" unless docker_available?
+
+    out, status = Open3.capture2e("docker", "run", "--rm", "hello-world")
+    assert status.success?, out
+    assert_match(/Hello from Docker!/, out)
+  end
+end
