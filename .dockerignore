@@ -1,0 +1,11 @@
+# Docker build context excludes (repo root).
+.git
+web/.git
+runner/.git
+web/log
+web/tmp
+web/storage
+web/.bundle
+**/*.sqlite3*
+**/*.sqlite3-*
+.env

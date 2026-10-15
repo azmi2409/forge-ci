@@ -27,6 +27,21 @@ inbound ports on runners, no proprietary control plane.
 
 ## Quickstart
 
+**Run the whole stack with Docker Compose** (Postgres, MinIO, control plane,
+worker, runner):
+
+```sh
+cp .env.example .env   # dev defaults work as-is
+docker compose up --build -d
+# create a runner token, put it in .env as RUNNER_TOKEN, then:
+docker compose exec web bin/rails runner \
+  'puts RunnerToken.generate!(name: "compose-runner").last'
+docker compose up -d runner
+# → http://localhost:3000 (admin / password from .env)
+```
+
+**Or step by step:**
+
 **1. Validate a config anywhere (Ruby ≥ 3.0 only, no Docker):**
 
 ```sh

@@ -8,7 +8,9 @@ production.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
-| `DATABASE_URL` | yes (prod) | — | Postgres URL. Also accepts `sqlite3:` paths for dev/test |
+| `DATABASE_URL` | yes (prod) | — | Postgres URL for the app DB |
+| `QUEUE_DATABASE_URL` / `CACHE_DATABASE_URL` | yes (prod) | `DATABASE_URL` | Separate Postgres URLs for the Solid Queue / cache DBs — must be separate physical DBs for `db:prepare` to load their schemas |
+| `SECRET_KEY_BASE` | yes (prod) | — | Rails secret (`openssl rand -hex 64`) |
 | `RAILS_MASTER_KEY` | yes (prod) | — | Rails credentials key |
 | `FORGE_CI_UI_USER` / `FORGE_CI_UI_PASSWORD` | yes (prod) | `admin` / `password` (dev only, loud warning) | Web UI basic auth |
 | `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY` | yes (prod) | insecure dev key (loud warning) | Context payload encryption |
@@ -17,8 +19,9 @@ production.
 | `ACTIVE_STORAGE_SERVICE` | yes (prod) | `local` | `amazon` (S3/MinIO) or `local` |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | with `amazon` | — | Storage credentials |
 | `AWS_REGION` | with `amazon` | `us-east-1` | Storage region |
-| `AWS_BUCKET` | with `amazon` | — | Storage bucket |
-| `AWS_ENDPOINT` | for MinIO | — | S3-compatible endpoint, e.g. `http://minio:9000` |
+| `AWS_S3_BUCKET` | with `amazon` | — | Storage bucket |
+| `AWS_S3_ENDPOINT` | for MinIO | — | S3-compatible endpoint, e.g. `http://minio:9000` |
+| `AWS_S3_FORCE_PATH_STYLE` | for MinIO | `false` | Set `true` for MinIO / path-style stores |
 | `ARTIFACT_RETENTION_DAYS` | no | `30` | Artifact retention (`PurgeOldArtifactsJob` runs daily 03:00) |
 | `GITHUB_APP_ID` | for GitHub | — | Numeric GitHub App ID |
 | `GITHUB_APP_PRIVATE_KEY` | for GitHub | — | App private key, PEM text (may contain newlines) |

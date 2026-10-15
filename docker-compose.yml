@@ -1,0 +1,132 @@
+# ForgeCI full stack — one command to run everything locally.
+#
+#   cp .env.example .env   # dev defaults work as-is; replace secrets for real use
+#   docker compose up --build -d
+#
+# Then create a runner token (the seeded demo token is also printed once in
+# `docker compose logs web` on first boot):
+#
+#   docker compose exec web bin/rails runner \
+#     'puts RunnerToken.generate!(name: "compose-runner").last'
+#
+# Put the token in .env as RUNNER_TOKEN and start the runner:
+#
+#   docker compose up -d runner
+#
+# Web UI: http://localhost:3000 (admin / password from .env)
+# MinIO console: http://localhost:9001
+#
+# Push to a repo with the GitHub App installed (or POST a pipeline to the
+# API — see docs/api.md) and watch jobs get claimed and run.
+
+name: forge-ci
+
+x-web-env: &web-env
+  DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/forge_ci
+  QUEUE_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/forge_ci_queue
+  CACHE_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/forge_ci_cache
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE in .env}
+  ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY: ${ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY:?set in .env}
+  ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: ${ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY:?set in .env}
+  ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: ${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT:?set in .env}
+  FORGE_CI_UI_USER: ${FORGE_CI_UI_USER:-admin}
+  FORGE_CI_UI_PASSWORD: ${FORGE_CI_UI_PASSWORD:-password}
+  ACTIVE_STORAGE_SERVICE: amazon
+  AWS_S3_ENDPOINT: http://minio:9000
+  AWS_S3_FORCE_PATH_STYLE: "true"
+  AWS_S3_BUCKET: forge-ci
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+  APP_HOST: ${APP_HOST:-http://localhost:3000}
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9001:9001" # console
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c '
+      until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do sleep 2; done;
+      mc mb -p local/forge-ci >/dev/null 2>&1 || true;
+      echo "bucket ready";
+      '
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "${WEB_PORT:-3000}:80"
+    environment: *web-env
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/up || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy # ensures db:prepare (all 3 DBs) ran first
+    command: ["./bin/jobs"]
+    environment: *web-env
+
+  runner:
+    build:
+      context: ./runner
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      CONTROL_PLANE_URL: http://web:80
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+      RESOURCE_CLASS: ${RUNNER_RESOURCE_CLASS:-medium}
+    # Fails fast with a clear message when RUNNER_TOKEN is empty —
+    # generate one (see header) and `docker compose up -d runner`.
+
+volumes:
+  pgdata:
+  miniodata:

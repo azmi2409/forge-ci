@@ -6,6 +6,10 @@ priority order. Check items off as they land.
 
 ## To launch (blockers)
 
+- [x] **Docker Compose** for the full stack (`docker-compose.yml`: Postgres,
+      MinIO, control plane, Solid Queue worker, runner) — 2026-10-16
+- [x] **Solid Queue installed** (`db/queue_schema.rb`, `config/queue.yml`,
+      `bin/jobs`; per-DB `QUEUE_DATABASE_URL`/`CACHE_DATABASE_URL`) — 2026-10-16
 - [ ] **Deploy the control plane** with a public HTTPS URL ([DEPLOY.md](DEPLOY.md))
 - [ ] **Postgres in production** — SQLite is dev-only; the atomic claim path
       (`FOR UPDATE SKIP LOCKED`) needs Postgres

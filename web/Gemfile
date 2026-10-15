@@ -7,8 +7,10 @@ gem "pg", "~> 1.1"
 # Use the Puma web server [https://github.com/puma/puma]
 gem "puma", ">= 5.0"
 
-# forge-ci config compiler (component 1) — consumed for pipeline intake
-gem "forge-ci", path: "..", require: "forge_ci"
+# forge-ci config compiler (component 1) — consumed for pipeline intake.
+# Path defaults to the repo root (monorepo layout); override with
+# FORGE_CI_GEM_PATH when building from a different context (e.g. Docker).
+gem "forge-ci", path: ENV.fetch("FORGE_CI_GEM_PATH", ".."), require: "forge_ci"
 
 # GitHub App auth: RS256 JWTs for installation-token exchange (component 3)
 gem "jwt"

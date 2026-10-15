@@ -1,5 +1,29 @@
 # Deploying forge-ci
 
+## Fastest path: docker compose
+
+```sh
+cp .env.example .env   # dev defaults work as-is; replace secrets for real use
+docker compose up --build -d
+```
+
+This brings up Postgres, MinIO (S3-compatible storage), the control plane,
+and the Solid Queue worker. Then create a runner token and start the runner
+(the token step is manual — see the header of `docker-compose.yml`):
+
+```sh
+docker compose exec web bin/rails runner \
+  'puts RunnerToken.generate!(name: "compose-runner").last'
+# put the token in .env as RUNNER_TOKEN, then:
+docker compose up -d runner
+```
+
+Web UI: http://localhost:3000 · MinIO console: http://localhost:9001
+
+The rest of this guide covers production-style deployments (Coolify / manual
+Docker). The compose file is also the best reference for the full env var
+set — see [docs/configuration.md](docs/configuration.md).
+
 ## Architecture
 
 ```
@@ -28,21 +52,32 @@ Runners need **outbound** HTTPS to the control plane only — no inbound ports.
 
 ## 1. Postgres
 
-Any Postgres 14+ works. Example with Docker:
+Any Postgres 14+ works. You need **three databases** (or three schemas-worth
+of separation): the app DB, the Solid Queue DB, and the cache DB — see
+`QUEUE_DATABASE_URL` / `CACHE_DATABASE_URL` below. They must be *separate*
+physical databases: `bin/rails db:prepare` skips loading `db/queue_schema.rb`
+when the queue config resolves to an already-initialized database.
+
+Example with Docker:
 
 ```sh
 docker run -d --name forge-ci-pg --restart unless-stopped \
   -e POSTGRES_PASSWORD=<strong-password> \
-  -e POSTGRES_DB=forge_ci_production \
   -v pgdata:/var/lib/postgresql/data \
   postgres:16
 ```
 
-Note the connection URL; it becomes `DATABASE_URL`:
+Connection URLs (the app creates the databases on first `db:prepare`, so the
+role needs `CREATEDB` — or create them upfront):
 
 ```
-postgres://postgres:<strong-password>@<pg-host>:5432/forge_ci_production
+DATABASE_URL=postgres://postgres:<strong-password>@<pg-host>:5432/forge_ci
+QUEUE_DATABASE_URL=postgres://postgres:<strong-password>@<pg-host>:5432/forge_ci_queue
+CACHE_DATABASE_URL=postgres://postgres:<strong-password>@<pg-host>:5432/forge_ci_cache
 ```
+
+Each falls back to `DATABASE_URL` when its own URL isn't set — but then the
+queue tables never load (see above), so set all three in production.
 
 ## 2. Object storage (MinIO)
 
@@ -59,58 +94,46 @@ uses it via:
 
 ```
 ACTIVE_STORAGE_SERVICE=amazon
-AWS_ENDPOINT=http://<minio-host>:9000
-AWS_BUCKET=forge-ci
+AWS_S3_ENDPOINT=http://<minio-host>:9000
+AWS_S3_BUCKET=forge-ci
+AWS_S3_FORCE_PATH_STYLE=true
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=<access-key>
 AWS_SECRET_ACCESS_KEY=<secret-key>
 ```
 
-(Omit `AWS_ENDPOINT` for real AWS S3.)
+(Omit `AWS_S3_ENDPOINT` for real AWS S3.)
 
 ## 3. Control plane
 
-The shipped `web/Dockerfile` is a standard Rails 8 production image (Thruster
-serves on port 80). **One gotcha:** `web/Gemfile` references the compiler as a
-path gem (`gem "forge-ci", path: "../forge-ci"`), which doesn't exist inside a
-`web/`-context Docker build. Until the gem is published to RubyGems, vendor
-the built gem:
+The root `Dockerfile` builds the production image from the repo root (it
+understands the monorepo layout — the `forge-ci` gem is copied to `/forge-ci`
+and `FORGE_CI_GEM_PATH` points bundler at it). `web/Dockerfile` is the
+single-directory variant. Thruster serves on port 80.
 
 ```sh
-cd /path/to/forge-ci
-gem build forge-ci.gemspec                      # → forge-ci-0.1.0.gem
-mkdir -p web/vendor/cache
-cp forge-ci-0.1.0.gem web/vendor/cache/
-# in web/Gemfile, replace the path line with:
-#   gem "forge-ci", "0.1.0"
-```
-
-(`vendor/cache` is picked up by `bundle install --local`; the Dockerfile
-already copies `vendor/`.) Then build and run with `web/` as the build context:
-
-```sh
-cd web
 docker build -t forge-ci-web .
 docker run -d --name forge-ci-web --restart unless-stopped -p 80:80 \
   -e RAILS_ENV=production \
   -e DATABASE_URL="postgres://..." \
-  -e RAILS_MASTER_KEY="$(cat config/master.key)" \
+  -e QUEUE_DATABASE_URL="postgres://..." \
+  -e CACHE_DATABASE_URL="postgres://..." \
+  -e SECRET_KEY_BASE="<openssl rand -hex 64>" \
   -e FORGE_CI_UI_USER=admin -e FORGE_CI_UI_PASSWORD="<strong>" \
   -e ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY="<from: bin/rails db:encryption:init>" \
   -e ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY="<...>" \
   -e ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT="<...>" \
   -e ACTIVE_STORAGE_SERVICE=amazon \
-  -e AWS_ENDPOINT=http://<minio-host>:9000 -e AWS_BUCKET=forge-ci \
+  -e AWS_S3_ENDPOINT=http://<minio-host>:9000 -e AWS_S3_BUCKET=forge-ci \
+  -e AWS_S3_FORCE_PATH_STYLE=true \
   -e AWS_REGION=us-east-1 \
   -e AWS_ACCESS_KEY_ID=<...> -e AWS_SECRET_ACCESS_KEY=<...> \
   -e ARTIFACT_RETENTION_DAYS=30 \
   forge-ci-web
 ```
 
-On Coolify, deploy `web/` as a Dockerfile app with the same env vars
-(generate real values for every secret — the app refuses to boot the UI
-without `FORGE_CI_UI_USER`/`FORGE_CI_UI_PASSWORD` in production, and dev
-encryption keys are loudly insecure).
+The entrypoint runs `db:prepare` on boot, which creates all three databases
+and loads their schemas (`db/schema.rb`, `db/queue_schema.rb`).
 
 ### Background worker (required)
 
@@ -131,13 +154,14 @@ overridden to `./bin/jobs`.)
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `DATABASE_URL` | yes | Postgres URL (production) |
-| `RAILS_MASTER_KEY` | yes | Rails credentials key |
+| `DATABASE_URL` | yes | Postgres URL for the app DB (production) |
+| `QUEUE_DATABASE_URL` / `CACHE_DATABASE_URL` | yes | Separate Postgres URLs for the Solid Queue / cache DBs (each falls back to `DATABASE_URL`, but then queue tables never load — set all three) |
+| `SECRET_KEY_BASE` | yes | Rails secret (`openssl rand -hex 64`) |
 | `FORGE_CI_UI_USER` / `FORGE_CI_UI_PASSWORD` | yes (prod) | Web UI basic auth |
 | `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY` / `_DETERMINISTIC_KEY` / `_KEY_DERIVATION_SALT` | yes (prod) | Context payload encryption |
 | `ACTIVE_STORAGE_SERVICE` | yes | `amazon` (S3/MinIO) or `local` |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` / `AWS_BUCKET` | with `amazon` | Storage credentials |
-| `AWS_ENDPOINT` | for MinIO | S3-compatible endpoint override |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` / `AWS_S3_BUCKET` | with `amazon` | Storage credentials |
+| `AWS_S3_ENDPOINT` / `AWS_S3_FORCE_PATH_STYLE` | for MinIO | S3-compatible endpoint override (force path style for MinIO) |
 | `ARTIFACT_RETENTION_DAYS` | no (30) | Artifact retention |
 | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_WEBHOOK_SECRET` | for GitHub | App auth (see §6) |
 | `APP_HOST` | recommended | Public base URL, e.g. `https://ci.example.com` (commit-status links) |

@@ -74,8 +74,9 @@ Log blobs, artifacts, and cache tarballs live in ActiveStorage, selected by
 
 - `local` (default): disk storage under `storage/` — fine for dev/test and
   single-node deploys. Signed download URLs are served by the app itself.
-- `amazon`: S3-compatible via `aws-sdk-s3`. Set `AWS_BUCKET` plus credentials;
-  point `AWS_ENDPOINT` at MinIO (or any S3-compatible store) for self-hosted
+- `amazon`: S3-compatible via `aws-sdk-s3`. Set `AWS_S3_BUCKET` plus credentials;
+  point `AWS_S3_ENDPOINT` at MinIO (or any S3-compatible store) for self-hosted
+  setups, with `AWS_S3_FORCE_PATH_STYLE=true`
   setups. Signed URLs come straight from the bucket (15-minute TTL), so the
   app never proxies file bytes.
 

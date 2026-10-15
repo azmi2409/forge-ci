@@ -46,11 +46,18 @@ production:
     database: forge_ci_web_production
     username: forge_ci_web
     password: <%= ENV["FORGE_CI_WEB_DATABASE_PASSWORD"] %>
+  # The queue (and cache) databases must be SEPARATE physical databases for
+  # `bin/rails db:prepare` to load their schemas (db/queue_schema.rb,
+  # db/cache_schema.rb) — sharing one DATABASE_URL makes Rails skip them as
+  # "already initialized". Each falls back to DATABASE_URL when its own URL
+  # isn't set.
   cache:
     <<: *primary_production
+    url: <%= ENV.fetch("CACHE_DATABASE_URL", ENV["DATABASE_URL"]).presence&.inspect %>
     database: forge_ci_web_production_cache
     migrations_paths: db/cache_migrate
   queue:
     <<: *primary_production
+    url: <%= ENV.fetch("QUEUE_DATABASE_URL", ENV["DATABASE_URL"]).presence&.inspect %>
     database: forge_ci_web_production_queue
     migrations_paths: db/queue_migrate
