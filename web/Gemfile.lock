@@ -1,5 +1,5 @@
 PATH
-  remote: ../forge-ci
+  remote: ..
   specs:
     forge-ci (0.1.0)
 

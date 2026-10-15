@@ -7,7 +7,7 @@ Docker runner (component 5) drives: **claim → start → heartbeat → log chun
 complete**.
 
 Component 1 is the [`forge-ci`](https://github.com/azmi2409/forge-ci) config-compiler
-gem, consumed here as a path gem (`gem "forge-ci", path: "../forge-ci"`).
+gem, consumed here as a path gem (`gem "forge-ci", path: ".."`).
 
 ## Versions used
 
@@ -409,7 +409,7 @@ tunable in one place (`app/models/job_run.rb`).
 
 The compiler resolved `requires` edges and topologically sorted jobs but did
 **not** emit the edges in the IR — the control plane needs them to unblock
-dependents. Fixed additively in `../forge-ci` (commit `ca9f633`):
+dependents. Fixed additively in the repo root (commit `ca9f633`):
 
 - `compiler.rb` step 5 threads each job's pruned dependency list
   (`pruned[inst]`) through `build_job_ir` into `IR.job`;

@@ -8,7 +8,7 @@ gem "pg", "~> 1.1"
 gem "puma", ">= 5.0"
 
 # forge-ci config compiler (component 1) — consumed for pipeline intake
-gem "forge-ci", path: "../forge-ci", require: "forge_ci"
+gem "forge-ci", path: "..", require: "forge_ci"
 
 # GitHub App auth: RS256 JWTs for installation-token exchange (component 3)
 gem "jwt"
