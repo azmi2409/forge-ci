@@ -13,9 +13,9 @@ module ForgeCIRunner
   #   MAX_IDLE_INTERVAL    cap for idle backoff (default: 60)
   #   HEARTBEAT_INTERVAL   seconds between heartbeats while a job runs (default: 15)
   #   LOG_CHUNK_SIZE       bytes per log chunk POSTed to the server (default: 65536)
-  #   CHECKOUT_REPO_URL    git URL used for `checkout` steps; may embed a token, e.g.
+  #   CHECKOUT_REPO_URL    fallback git URL for `checkout` steps when the claim
+  #                        payload has no repository.url; may embed a token, e.g.
   #                        https://x-access-token:TOKEN@github.com/org/repo.git
-  #                        (the claim payload carries no repo URL — see README)
   #   REDACT_MIN_LENGTH    env values shorter than this are not redacted (default: 8)
   #   DOCKER_BIN           path to the docker CLI (default: "docker")
   class Config

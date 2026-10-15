@@ -4,6 +4,9 @@ require "open3"
 require "shellwords"
 require "securerandom"
 require "time"
+require "tmpdir"
+require "fileutils"
+require "json"
 
 module ForgeCIRunner
   # Executes one claimed job in Docker containers.
@@ -18,14 +21,19 @@ module ForgeCIRunner
   # interpolation). Steps share the primary container's filesystem, so
   # intra-job state just works.
   class Executor
-    # Step types that need component 7 (object storage). Loudly skipped,
-    # never failed — failing here would be lying about the job.
+    # Step types with no runner implementation yet. Loudly skipped, never
+    # failed — failing here would be lying about the job.
     DEFERRED_STEPS = %w[
-      save_cache restore_cache
-      persist_to_workspace attach_workspace
-      store_artifacts store_test_results
+      store_test_results
       add_ssh_keys
     ].freeze
+
+    # Workspaces are implemented on top of the cache API: each workflow gets
+    # a reserved key namespace, plus a manifest listing the persisted roots.
+    # persist_to_workspace uploads one tarball per root; attach_workspace
+    # reads the manifest and extracts every root tarball at `at`.
+    WORKSPACE_KEY_PREFIX = "forge-ci-workspace"
+    WORKSPACE_MANIFEST_NAME = "manifest.json"
 
     Result = Struct.new(:name, :exit_code, :started_at, :finished_at, :note,
                         keyword_init: true) do
@@ -49,6 +57,10 @@ module ForgeCIRunner
       @streamer = LogStreamer.new(client, @job_id, @redactor,
                                   chunk_size: config.log_chunk_size)
       @workdir = nil
+      @project_id = payload["project_id"]
+      @workflow_run_id = payload["workflow_run_id"]
+      @cache_store = @project_id ? CacheStore.new(@client, @project_id) : nil
+      @artifact_store = ArtifactStore.new(@client, @job_id)
     end
 
     def self.docker_available?(docker_bin = "docker")
@@ -238,6 +250,11 @@ module ForgeCIRunner
         case step["type"]
         when "run" then execute_run(step)
         when "checkout" then execute_checkout(step)
+        when "save_cache" then execute_save_cache(step)
+        when "restore_cache" then execute_restore_cache(step)
+        when "store_artifacts" then execute_store_artifacts(step)
+        when "persist_to_workspace" then execute_persist_workspace(step)
+        when "attach_workspace" then execute_attach_workspace(step)
         when *DEFERRED_STEPS then deferred_skip(step)
         else
           log_line("[forge-ci] WARNING: unknown step type #{step["type"].inspect}; skipping")
@@ -262,11 +279,13 @@ module ForgeCIRunner
     end
 
     def execute_checkout(step)
-      repo = @config.checkout_repo_url
-      sha = @payload.dig("pipeline", "sha")
+      repo_info = @payload["repository"]
+      repo_info = {} unless repo_info.is_a?(Hash)
+      repo = repo_info["url"] || @config.checkout_repo_url
+      sha = repo_info["sha"] || @payload.dig("pipeline", "sha")
       if repo.nil? || repo.empty?
-        log_line("[forge-ci] WARNING: skipping checkout — CHECKOUT_REPO_URL is not set.")
-        log_line("[forge-ci] (the claim payload carries no repo URL; see README \"Contract gaps\")")
+        log_line("[forge-ci] WARNING: skipping checkout — no repository.url in " \
+                 "the claim payload and CHECKOUT_REPO_URL is not set.")
         return 0
       end
 
@@ -284,9 +303,307 @@ module ForgeCIRunner
       stream_exec([@config.docker_bin, "exec", @container, "/bin/sh", "-c", cmds.join(" && ")])
     end
 
+    # --- cache / artifacts / workspaces (object storage is live) ---
+
+    # Warns + returns 0. Cache steps address the project-scoped cache API,
+    # which needs project_id from the claim payload.
+    def warn_zero(message)
+      log_line("[forge-ci] WARNING: #{message}")
+      0
+    end
+
+    def require_project_id(step)
+      return @project_id unless @project_id.nil?
+
+      log_line("[forge-ci] WARNING: skipping #{step["type"]} — the claim payload " \
+               "carries no project_id, so the cache API cannot be addressed. " \
+               "(The control plane should include project_id in the job payload.)")
+      nil
+    end
+
+    def resolve_key(template)
+      KeyTemplate.resolve(
+        template,
+        branch: @payload.dig("pipeline", "branch"),
+        checksum: ->(rel) { container_sha256(rel) },
+        warn: ->(m) { log_line("[forge-ci] WARNING: cache key: #{m}") }
+      )
+    end
+
+    # SHA256 of a file inside the primary container (path relative to the
+    # job working directory). Nil when missing/unreadable. Silent: query
+    # output must not pollute the job log.
+    def container_sha256(relative_path)
+      workdir = @workdir || "/root/project"
+      target = File.join(workdir, relative_path)
+      out, status = capture_silent(@config.docker_bin, "exec", @container,
+                                   "sha256sum", "--", target)
+      return nil unless status.success?
+
+      out.split.first
+    rescue StandardError
+      nil
+    end
+
+    # Open3 without streaming to the job log (small queries like sha256sum).
+    def capture_silent(*args)
+      Open3.capture2e(*args)
+    end
+
+    # Pure argv builders for container-side tar (unit-tested).
+    def tar_create_argv(tgz, paths, base_dir)
+      [@config.docker_bin, "exec", @container, "tar", "-czf", tgz,
+       "-C", base_dir, *paths]
+    end
+
+    def tar_extract_argv(tgz, dest_dir)
+      [@config.docker_bin, "exec", @container, "tar", "-xzf", tgz,
+       "-C", dest_dir]
+    end
+
+    # Copies a container-side tarball to a host temp dir. Returns the host
+    # path; the caller owns the temp dir (delete it when done). When
+    # +host_dir+ is given the tarball lands there instead of a fresh dir.
+    def fetch_tarball(container_tgz, host_dir = nil)
+      host_dir ||= Dir.mktmpdir("forge-ci-fetch")
+      host_tgz = File.join(host_dir, File.basename(container_tgz))
+      _out, code = run_docker(@config.docker_bin, "cp",
+                              "#{@container}:#{container_tgz}", host_tgz)
+      raise "docker cp from container failed (exit #{code})" unless code.zero?
+
+      host_tgz
+    end
+
+    # Copies a host tarball into the container. Returns the container path.
+    def send_tarball(host_tgz)
+      container_tgz = "/tmp/forge-ci-send-#{SecureRandom.hex(6)}.tgz"
+      _out, code = run_docker(@config.docker_bin, "cp",
+                              host_tgz, "#{@container}:#{container_tgz}")
+      raise "docker cp to container failed (exit #{code})" unless code.zero?
+
+      container_tgz
+    end
+
+    def execute_save_cache(step)
+      return 0 unless require_project_id(step)
+
+      key = resolve_key(step["keys"]&.first || step["key"])
+      return warn_zero("save_cache has no usable key; skipping") if key.nil? || key.empty?
+
+      paths = Array(step["paths"]).map(&:to_s).reject(&:empty?)
+      return warn_zero("save_cache has no paths; skipping") if paths.empty?
+
+      workdir = @workdir || "/root/project"
+      container_tgz = "/tmp/forge-ci-cache-#{SecureRandom.hex(6)}.tgz"
+      _out, code = run_docker(*tar_create_argv(container_tgz, paths, workdir))
+      return warn_zero("save_cache: tar of cache paths failed (exit #{code})") unless code.zero?
+
+      host_tgz = nil
+      begin
+        host_tgz = fetch_tarball(container_tgz)
+        resp = @cache_store.save(key, host_tgz)
+        log_line("[forge-ci] save_cache: stored key #{key} (#{resp["size"]} bytes)")
+      rescue StandardError => e
+        return warn_zero("save_cache failed: #{e.class}: #{e.message}")
+      ensure
+        run_docker(@config.docker_bin, "exec", @container, "rm", "-f", container_tgz)
+        FileUtils.rm_rf(File.dirname(host_tgz)) if host_tgz
+      end
+      0
+    end
+
+    def execute_restore_cache(step)
+      return 0 unless require_project_id(step)
+
+      keys = Array(step["keys"]).map(&:to_s).reject(&:empty?)
+      return warn_zero("restore_cache has no keys; skipping") if keys.empty?
+
+      resolved = keys.map { |k| resolve_key(k) }.reject(&:empty?)
+      log_line("[forge-ci] restore_cache: trying #{resolved.join(", ")}")
+
+      host_tgz = @cache_store.restore(resolved)
+      if host_tgz.nil?
+        log_line("[forge-ci] restore_cache: no matching cache entry (miss).")
+        return 0
+      end
+
+      workdir = @workdir || "/root/project"
+      container_tgz = nil
+      begin
+        container_tgz = send_tarball(host_tgz)
+        _out, code = run_docker(*tar_extract_argv(container_tgz, workdir))
+        return warn_zero("restore_cache: extract failed (exit #{code})") unless code.zero?
+
+        log_line("[forge-ci] restore_cache: hit, extracted into #{workdir}")
+      rescue StandardError => e
+        return warn_zero("restore_cache failed: #{e.class}: #{e.message}")
+      ensure
+        if container_tgz
+          run_docker(@config.docker_bin, "exec", @container, "rm", "-f", container_tgz)
+        end
+        FileUtils.rm_rf(File.dirname(host_tgz)) if host_tgz
+      end
+      0
+    end
+
+    def execute_store_artifacts(step)
+      src = step["path"].to_s
+      return warn_zero("store_artifacts has no path; skipping") if src.empty?
+
+      destination = step["destination"]
+      workdir = @workdir || "/root/project"
+      container_tgz = "/tmp/forge-ci-artifacts-#{SecureRandom.hex(6)}.tgz"
+      _out, code = run_docker(*tar_create_argv(container_tgz, [src], workdir))
+      return warn_zero("store_artifacts: could not archive #{src} (exit #{code})") unless code.zero?
+
+      host_dir = Dir.mktmpdir("forge-ci-artifacts")
+      begin
+        host_tgz = fetch_tarball(container_tgz, host_dir)
+        files_dir = File.join(host_dir, "files")
+        Tarball.extract(host_tgz, dest_dir: files_dir)
+        files = Dir.glob(File.join(files_dir, "**", "*")).select { |f| File.file?(f) }
+        return warn_zero("store_artifacts: nothing found at #{src}") if files.empty?
+
+        files.each do |f|
+          rel = f.sub("#{files_dir}/", "")
+          resp = @artifact_store.upload(f, path: rel, destination: destination)
+          suffix = destination.to_s.empty? ? "" : " -> #{destination}"
+          log_line("[forge-ci] artifact stored: #{rel}#{suffix} (#{resp["size"]} bytes)")
+        end
+      rescue StandardError => e
+        return warn_zero("store_artifacts failed: #{e.class}: #{e.message}")
+      ensure
+        run_docker(@config.docker_bin, "exec", @container, "rm", "-f", container_tgz)
+        FileUtils.rm_rf(host_dir) if host_dir
+      end
+      0
+    end
+
+    # Workspace key layout (documented in README): one reserved cache
+    # namespace per workflow, one tarball per persisted root, plus a
+    # manifest.json listing the roots so attach_workspace can discover
+    # them. attach extracts every root tarball at `at`.
+    def workspace_key_prefix
+      "#{WORKSPACE_KEY_PREFIX}/#{@workflow_run_id}"
+    end
+
+    def workspace_manifest_key
+      "#{workspace_key_prefix}/#{WORKSPACE_MANIFEST_NAME}"
+    end
+
+    def workspace_root_key(root)
+      safe = root.to_s.gsub(%r{\A\./}, "").gsub(/[^A-Za-z0-9]+/, "-").gsub(/\A-+|-+\z/, "")
+      safe = "root" if safe.empty?
+      "#{workspace_key_prefix}/#{safe}.tgz"
+    end
+
+    def workspace_manifest
+      hit = @client.get_cache(@project_id, [workspace_manifest_key])
+      return [] if hit.nil? || hit["download_url"].to_s.empty?
+
+      dir = Dir.mktmpdir("forge-ci-ws-manifest")
+      begin
+        dest = File.join(dir, "manifest.json")
+        @client.download(hit["download_url"], dest)
+        JSON.parse(File.read(dest))
+      rescue StandardError => e
+        log_line("[forge-ci] WARNING: workspace manifest unreadable (#{e.message}); starting fresh")
+        []
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    def save_workspace_manifest(roots)
+      dir = Dir.mktmpdir("forge-ci-ws-manifest")
+      begin
+        path = File.join(dir, "manifest.json")
+        File.write(path, JSON.generate(roots.uniq))
+        @client.put_cache(@project_id, workspace_manifest_key, path)
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    def execute_persist_workspace(step)
+      return 0 unless require_project_id(step)
+      return warn_zero("persist_to_workspace: no workflow_run_id in payload; skipping") if @workflow_run_id.nil?
+
+      root = step["root"].to_s
+      paths = Array(step["paths"]).map(&:to_s).reject(&:empty?)
+      return warn_zero("persist_to_workspace needs root and paths; skipping") if root.empty? || paths.empty?
+
+      base_dir = File.join(@workdir || "/root/project", root)
+      container_tgz = "/tmp/forge-ci-ws-#{SecureRandom.hex(6)}.tgz"
+      _out, code = run_docker(*tar_create_argv(container_tgz, paths, base_dir))
+      return warn_zero("persist_to_workspace: tar failed (exit #{code})") unless code.zero?
+
+      host_tgz = nil
+      begin
+        host_tgz = fetch_tarball(container_tgz)
+        key = workspace_root_key(root)
+        resp = @cache_store.save(key, host_tgz)
+        save_workspace_manifest(workspace_manifest + [root])
+        log_line("[forge-ci] persist_to_workspace: stored #{paths.join(", ")} " \
+                 "as #{key} (#{resp["size"]} bytes)")
+      rescue StandardError => e
+        return warn_zero("persist_to_workspace failed: #{e.class}: #{e.message}")
+      ensure
+        run_docker(@config.docker_bin, "exec", @container, "rm", "-f", container_tgz)
+        FileUtils.rm_rf(File.dirname(host_tgz)) if host_tgz
+      end
+      0
+    end
+
+    def execute_attach_workspace(step)
+      return 0 unless require_project_id(step)
+      return warn_zero("attach_workspace: no workflow_run_id in payload; skipping") if @workflow_run_id.nil?
+
+      at = step["at"].to_s
+      return warn_zero("attach_workspace needs an 'at' path; skipping") if at.empty?
+
+      roots = workspace_manifest
+      if roots.empty?
+        log_line("[forge-ci] attach_workspace: workspace is empty; nothing to attach.")
+        return 0
+      end
+
+      dest_base = File.join(@workdir || "/root/project", at)
+      run_docker(@config.docker_bin, "exec", @container, "mkdir", "-p", dest_base)
+
+      roots.each do |root|
+        key = workspace_root_key(root)
+        host_tgz = @cache_store.restore([key])
+        if host_tgz.nil?
+          log_line("[forge-ci] WARNING: attach_workspace: missing tarball for " \
+                   "root #{root.inspect}; skipping it.")
+          next
+        end
+        container_tgz = nil
+        begin
+          container_tgz = send_tarball(host_tgz)
+          _out, code = run_docker(*tar_extract_argv(container_tgz, dest_base))
+          if code.zero?
+            log_line("[forge-ci] attach_workspace: attached #{root} at #{at}")
+          else
+            log_line("[forge-ci] WARNING: attach_workspace: extract of #{root} " \
+                     "failed (exit #{code})")
+          end
+        ensure
+          if container_tgz
+            run_docker(@config.docker_bin, "exec", @container, "rm", "-f", container_tgz)
+          end
+          FileUtils.rm_rf(File.dirname(host_tgz)) if host_tgz
+        end
+      end
+      0
+    rescue StandardError => e
+      warn_zero("attach_workspace failed: #{e.class}: #{e.message}")
+    end
+
     def deferred_skip(step)
-      log_line("[forge-ci] WARNING: #{step["type"]} needs component 7 " \
-               "(object storage) — skipping loudly, not failing the job.")
+      log_line("[forge-ci] WARNING: #{step["type"]} is not implemented yet — " \
+               "skipping loudly, not failing the job.")
       0
     end
 

@@ -25,16 +25,27 @@ Per claimed job the runner:
 3. Starts service containers first (reachable by name via network aliases),
    then the primary container (long-lived — steps run via `docker exec`).
 4. Executes steps in order:
-   - `checkout` — `git init` + fetch the pipeline SHA (see below).
+   - `checkout` — clones `repository.url` from the claim payload (falls back
+     to `CHECKOUT_REPO_URL`, then skips loudly) at the pipeline SHA.
    - `run` — `docker exec` with the step's `shell` (default `/bin/sh -c`),
      environment, and working directory; stdout/stderr streamed as
      seq-numbered log chunks. `when: on_success/on_fail/always` is
      evaluated at runtime: a non-zero exit skips remaining `on_success`
      steps, `on_fail`/`always` steps still run, the job is marked `failed`.
-   - `save_cache` / `restore_cache` / `store_artifacts` /
-     `persist_to_workspace` / `attach_workspace` / `store_test_results` /
-     `add_ssh_keys` — need component 7 (object storage); **skipped loudly
-     with a warning, never failed** (failing would be lying about the job).
+   - `save_cache` / `restore_cache` — tarballs moved between the job
+     container and the control plane's cache API. Key templates resolved
+     at runtime: `{{ checksum "path" }}` (SHA256 of file contents, relative
+     to the working directory; missing file → empty string + warning),
+     `{{ .Branch }}`, `{{ epoch }}`; anything else is left as-is with a
+     warning. Restore tries keys in order (server: exact, then
+     longest-prefix fallback); a clean miss never fails the job.
+   - `store_artifacts` — each file under `path` uploaded individually
+     (`destination` passed through as the UI prefix).
+   - `persist_to_workspace` / `attach_workspace` — implemented on top of
+     the cache API under a reserved namespace (see below).
+   - `store_test_results` / `add_ssh_keys` — not implemented yet; **skipped
+     loudly with a warning, never failed** (failing would be lying about
+     the job).
 5. Always cleans up: `docker rm -f` the primary + service containers and
    removes the network, in `ensure` blocks — even on failure or signal.
 
@@ -85,24 +96,47 @@ Built exactly against the Runner API documented in `web/README.md`
 - `POST /api/v1/runner/jobs/:id/complete` with `{status, step_results}` —
   step names follow the server convention `step["name"] || step["type"]`
 - `POST /api/v1/jobs/:id/log_chunks` with `{seq, chunk}` (idempotent)
+- `POST /api/v1/jobs/:id/artifacts` — multipart `file` + `path` +
+  `destination?` → `201` artifact hash
+- `PUT /api/v1/projects/:id/cache` — multipart `key` + `file` (tarball) →
+  `200 {key, size}`
+- `GET /api/v1/projects/:id/cache?keys[]=k1&keys[]=k2` → `200`
+  `{key, size, download_url}` or `404`
 
 No endpoints invented; nothing else assumed.
 
 ### Contract gaps (found while building)
 
-1. **The claim payload carries no repo URL or checkout token.**
-   `pipeline` is `{sha, branch}` only. `checkout` therefore clones from
-   `CHECKOUT_REPO_URL` when set, and otherwise skips with a loud warning.
-   Future contract should include `pipeline.repo_url` plus a short-lived
-   checkout token.
-2. **Secrets are not distinguished from plain env vars.** The payload
+1. ~~The claim payload carries no repo URL or checkout token.~~ **Resolved:**
+   the payload now includes `repository: { url, sha, branch }`
+   (`CHECKOUT_REPO_URL` remains as fallback).
+2. **The claim payload carries no `project_id`.** The cache API is
+   project-scoped (`PUT/GET /api/v1/projects/:id/cache`), so `save_cache`,
+   `restore_cache`, `persist_to_workspace`, and `attach_workspace` skip
+   loudly until the control plane includes `project_id` in the job payload.
+3. **Secrets are not distinguished from plain env vars.** The payload
    merges executor env with context payloads ("contexts win") with no
    marker for which values are secrets, so the runner redacts *all*
    values ≥ `REDACT_MIN_LENGTH` chars. A future contract should return an
    explicit secret key list.
-3. **Step name collisions.** The server matches `step_results` to StepRuns
+4. **Step name collisions.** The server matches `step_results` to StepRuns
    by name (`find_by`); two steps with the same name update the same
    record (last write wins). The runner reports every step once.
+
+### Workspaces
+
+CircleCI has one workspace per workflow. The runner implements it on the
+cache API under a reserved namespace:
+
+- `forge-ci-workspace/<workflow_run_id>/<root>.tgz` — one tarball per
+  persisted root (`root` sanitized: non-alphanumerics → `-`)
+- `forge-ci-workspace/<workflow_run_id>/manifest.json` — JSON list of
+  persisted roots, so `attach_workspace` can discover them
+
+`persist_to_workspace` tars `paths` relative to `root` and uploads;
+`attach_workspace` downloads every root tarball and extracts them at `at`.
+Concurrent persists from parallel jobs can race on the manifest
+(last write wins) — acceptable for v1, documented here.
 
 ## Tests
 
@@ -113,11 +147,13 @@ rake test
 45 runs, 134 assertions. The one Docker-dependent integration test
 (`hello-world` container) skips gracefully when `docker info` fails —
 pure logic (payload handling, `when` evaluation, redaction, backoff,
-cleanup ordering, HTTP contract) is fully covered without Docker.
+cleanup ordering, key templates, tar round-trips, multipart streaming,
+cache/artifact/workspace flows against a fake control plane, HTTP
+contract) is fully covered without Docker.
 
 ## Not yet (deferred)
 
-- Cache / artifact / workspace upload/download on object storage (component 7)
+- `store_test_results` parsing (JUnit → timing DB) and `add_ssh_keys`
 - Per-step timeouts (a hung step hangs until the process is killed)
 - CPU/memory resource limits on containers
 - Multi-arch image selection

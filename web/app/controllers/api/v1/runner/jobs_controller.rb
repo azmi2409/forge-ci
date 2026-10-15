@@ -81,6 +81,7 @@ module Api
             environment: job.merged_environment,
             pipeline: { sha: pipeline.sha, branch: pipeline.branch },
             workflow_run_id: job.workflow_run_id,
+            project_id: job.project.id,
             repository: repository_info(job)
           }.compact
         end

@@ -3,64 +3,6 @@
 require "test_helper"
 require "open3"
 
-def test_payload(overrides = {})
-  {
-    "id" => 11,
-    "name" => "build",
-    "working_directory" => "~/project",
-    "executor" => {
-      "type" => "docker",
-      "image" => "cimg/ruby:3.2",
-      "resource_class" => "medium",
-      "environment" => { "RAILS_ENV" => "test" },
-      "secondary_images" => [
-        { "image" => "postgres:16", "name" => "db",
-          "environment" => { "POSTGRES_PASSWORD" => "pw" } }
-      ]
-    },
-    "steps" => [
-      { "type" => "checkout" },
-      { "type" => "run", "name" => "Bundle", "command" => "bundle install" }
-    ],
-    "environment" => { "RAILS_ENV" => "test", "DEPLOY_KEY" => "s3cr3t-long-value" },
-    "pipeline" => { "sha" => "abc123", "branch" => "main" }
-  }.merge(overrides)
-end
-
-def test_config(overrides = {})
-  ForgeCIRunner::Config.new(
-    **{ control_plane_url: "http://localhost:3000",
-        runner_token: "t" }.merge(overrides)
-  )
-end
-
-class NullClient
-  def post_log_chunk(*); end
-end
-
-# Executor with docker calls recorded instead of executed.
-class RecordingExecutor < ForgeCIRunner::Executor
-  attr_reader :commands, :fail_on
-
-  def initialize(*args, fail_on: nil)
-    super(*args)
-    @commands = []
-    @fail_on = fail_on
-  end
-
-  def stream_exec(argv)
-    @commands << [:stream_exec, argv]
-    @fail_on == :exec ? 1 : 0
-  end
-
-  private
-
-  def run_docker(*args)
-    @commands << [:run_docker, args]
-    ["", @fail_on == :docker ? 1 : 0]
-  end
-end
-
 class ExecutorTest < Minitest::Test
   def executor(payload_overrides = {}, config_overrides = {})
     RecordingExecutor.new(test_config(config_overrides),
@@ -185,8 +127,8 @@ class ExecutorTest < Minitest::Test
   def test_deferred_steps_skip_loudly_without_failing
     ex = executor(
       "steps" => [
-        { "type" => "save_cache", "keys" => ["k"], "paths" => [] },
-        { "type" => "store_artifacts", "path" => "out" },
+        { "type" => "store_test_results", "path" => "junit" },
+        { "type" => "add_ssh_keys" },
         { "type" => "run", "name" => "ok", "command" => "true" }
       ]
     )
@@ -194,6 +136,21 @@ class ExecutorTest < Minitest::Test
     assert_equal "success", status
     assert_equal 3, results.length
     # no docker exec for the deferred steps
+    assert_equal 1, ex.commands.count { |c| c[0] == :stream_exec }
+  end
+
+  def test_cache_steps_skip_loudly_without_project_id
+    ex = executor(
+      "steps" => [
+        { "type" => "save_cache", "keys" => ["k"], "paths" => ["vendor"] },
+        { "type" => "restore_cache", "keys" => ["k"] },
+        { "type" => "run", "name" => "ok", "command" => "true" }
+      ]
+    )
+    status, results = ex.execute
+    assert_equal "success", status
+    assert_equal 3, results.length
+    # cache steps skipped before any docker work; only the run step execs
     assert_equal 1, ex.commands.count { |c| c[0] == :stream_exec }
   end
 

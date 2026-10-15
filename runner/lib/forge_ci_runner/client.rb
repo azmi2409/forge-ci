@@ -59,7 +59,103 @@ module ForgeCIRunner
       post("/api/v1/jobs/#{job_id}/log_chunks", { "seq" => seq, "chunk" => chunk })
     end
 
+    # PUT /api/v1/projects/:id/cache — multipart: key, file (tarball).
+    # Upserts on (project_id, key). Returns { "key", "size" }.
+    def put_cache(project_id, key, tarball_path)
+      body = Multipart::Body.new(
+        { "key" => key },
+        [{ name: "file", filename: File.basename(tarball_path),
+           path: tarball_path, content_type: "application/gzip" }]
+      )
+      request_multipart(:put, "/api/v1/projects/#{project_id}/cache", body)
+    end
+
+    # GET /api/v1/projects/:id/cache?keys[]=k1&keys[]=k2 — the server tries
+    # the keys in order (exact match, then longest-prefix fallback).
+    # Returns the hit hash ({ "key", "size", "download_url" }) or nil on 404.
+    def get_cache(project_id, keys)
+      query = URI.encode_www_form(Array(keys).map { |k| ["keys[]", k] })
+      get("/api/v1/projects/#{project_id}/cache?#{query}")
+    rescue HTTPError => e
+      return nil if e.code == "404"
+
+      raise
+    end
+
+    # POST /api/v1/jobs/:id/artifacts — multipart: file, path, destination?.
+    # Returns the artifact hash including a 15-minute download_url.
+    def post_artifact(job_id, local_path, path:, destination: nil)
+      fields = { "path" => path }
+      fields["destination"] = destination unless destination.nil? || destination.to_s.empty?
+      body = Multipart::Body.new(
+        fields,
+        [{ name: "file", filename: File.basename(local_path), path: local_path }]
+      )
+      request_multipart(:post, "/api/v1/jobs/#{job_id}/artifacts", body)
+    end
+
+    # Downloads a (signed) URL to a local file. No Authorization header —
+    # the URL is pre-authenticated. Follows up to 3 redirects.
+    def download(url, dest_path, limit = 3)
+      raise HTTPError.new("0", "too many redirects") if limit.zero?
+
+      uri = URI.parse(url)
+      Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https",
+                      open_timeout: 10, read_timeout: 120) do |http|
+        http.request_get(uri.request_uri) do |resp|
+          case resp
+          when Net::HTTPRedirection
+            location = resp["location"]
+            raise HTTPError.new(resp.code, "redirect without location") if location.nil?
+
+            return download(URI.join(url, location).to_s, dest_path, limit - 1)
+          when Net::HTTPSuccess
+            File.open(dest_path, "wb") do |f|
+              resp.read_body { |chunk| f.write(chunk) }
+            end
+            return dest_path
+          else
+            raise HTTPError.new(resp.code, resp.body.to_s[0, 200])
+          end
+        end
+      end
+    end
+
     private
+
+    def get(path)
+      uri = URI.join(@base + "/", path.sub(%r{\A/}, ""))
+      request = Net::HTTP::Get.new(uri)
+      request["Authorization"] = "Bearer #{@token}"
+      request["Accept"] = "application/json"
+
+      response = Net::HTTP.start(uri.host, uri.port,
+                                 use_ssl: uri.scheme == "https",
+                                 open_timeout: 10, read_timeout: 60) do |http|
+        http.request(request)
+      end
+
+      parse_response(response)
+    end
+
+    def request_multipart(method, path, body)
+      uri = URI.join(@base + "/", path.sub(%r{\A/}, ""))
+      klass = method == :put ? Net::HTTP::Put : Net::HTTP::Post
+      request = klass.new(uri)
+      request["Authorization"] = "Bearer #{@token}"
+      request["Accept"] = "application/json"
+      request["Content-Type"] = body.content_type
+      request["Content-Length"] = body.size.to_s
+      request.body_stream = body
+
+      response = Net::HTTP.start(uri.host, uri.port,
+                                 use_ssl: uri.scheme == "https",
+                                 open_timeout: 10, read_timeout: 300) do |http|
+        http.request(request)
+      end
+
+      parse_response(response)
+    end
 
     def post(path, payload)
       uri = URI.join(@base + "/", path.sub(%r{\A/}, ""))
