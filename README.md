@@ -1,14 +1,20 @@
 # forge-ci
 
-An open-source, CircleCI-compatible CI toolkit — starting with the **config compiler**.
+An open-source, CircleCI-compatible CI toolkit.
 
 `forge-ci` compiles CircleCI v2.1-style pipeline YAML (`.circleci/config.yml`) into a
 normalized, JSON-serializable **intermediate representation (IR)** that a scheduler
-and runner can execute. It is component 1 of the ForgeCI project; the control plane
-and Docker runner come next.
+and runner can execute. It is component 1 of the ForgeCI project.
 
 Pure Ruby, **stdlib only** (psych, json in tests) — no network, no processes, no
 dependencies. Tested on **Ruby 3.2.3** (requires >= 3.0).
+
+## Repository layout
+
+- `/` — the `forge-ci` gem: the **config compiler** (MVP component 1)
+- `web/` — the **Rails control plane** (MVP components 2 + 4): Postgres models,
+  pipeline intake from compiler IR, token-authenticated runner claim API, minimal
+  web UI. See `web/README.md`.
 
 ## Install
 

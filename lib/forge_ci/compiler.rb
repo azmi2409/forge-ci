@@ -430,14 +430,14 @@ module ForgeCI
       lookup = instances.to_h { |inst, base, cfg, combo| [inst, [base, cfg, combo]] }
       jobs_ir = order.map do |inst|
         base, _cfg, combo = lookup[inst]
-        build_job_ir(inst, base, combo, jobs_def, errors, ctx, on_missing)
+        build_job_ir(inst, base, combo, jobs_def, errors, ctx, on_missing, pruned[inst] || [])
       end
       return nil if errors.any?
 
       IR.workflow(wf_name, jobs_ir)
     end
 
-    def build_job_ir(instance_name, base_name, matrix_values, jobs_def, errors, ctx, on_missing)
+    def build_job_ir(instance_name, base_name, matrix_values, jobs_def, errors, ctx, on_missing, requires = [])
       job_def = deep_dup(jobs_def[base_name])
       job_ctx = ctx.merge("matrix" => matrix_values)
       job_def = Interpolator.interpolate(job_def, job_ctx, errors, ["jobs", base_name], on_missing: on_missing)
@@ -451,7 +451,7 @@ module ForgeCI
         return nil
       end
       job_def["steps"] = evaluate_conditionals(job_def["steps"] || [], errors, ["jobs", base_name, "steps"])
-      IR.job(instance_name, job_def)
+      IR.job(instance_name, job_def, requires)
     end
 
     def matrix_combinations(parameters)

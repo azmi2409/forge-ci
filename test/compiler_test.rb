@@ -190,6 +190,15 @@ class CompilerTest < Minitest::Test
     assert_equal "report", jobs.last[:name], "report must run after all matrix jobs"
   end
 
+  def test_requires_edges_survive_compilation_for_control_plane
+    ir, errors = compile_full
+    assert_empty errors, "expected no errors, got: #{errors.inspect}"
+    by_name = first_workflow(ir)[:jobs].to_h { |j| [j[:name], j] }
+    assert_equal [], by_name["build"][:requires], "root job has no dependencies"
+    assert_equal ["build"], by_name["test"][:requires], "test depends on build"
+    assert_equal ["test"], by_name["deploy"][:requires], "deploy depends on test"
+  end
+
   # --- errors ----------------------------------------------------------------
 
   def test_dependency_cycle_is_an_error

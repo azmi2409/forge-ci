@@ -22,9 +22,13 @@ module ForgeCI
       { name: name, jobs: jobs }
     end
 
-    def job(name, job_def)
+    def job(name, job_def, requires = [])
       {
         name: name,
+        # Pruned `requires` edges for this job instance (topological scheduler
+        # seam for the control plane): names of jobs in the same workflow that
+        # must complete successfully before this job may run.
+        requires: Array(requires).map(&:to_s),
         executor: executor(job_def),
         working_directory: job_def["working_directory"],
         steps: Array(job_def["steps"]).map { |s| step(s) }

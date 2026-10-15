@@ -1,0 +1,16 @@
+# Solid Queue recurring tasks (run with `bin/jobs`).
+#
+# Reclaim jobs whose runner stopped heartbeating (crashed runner, lost
+# network, killed container) so they go back to `queued` and another runner
+# can claim them. Runs every 60s; a job is stale after 120s without a
+# heartbeat — see JobRun::RECLAIM_INTERVAL / JobRun::STALE_HEARTBEAT_AFTER.
+# Both thresholds are constants so they can be tuned in one place.
+production:
+  reclaim_stale_jobs:
+    class: ReclaimStaleJobsJob
+    schedule: every minute
+
+development:
+  reclaim_stale_jobs:
+    class: ReclaimStaleJobsJob
+    schedule: every minute

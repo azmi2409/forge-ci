@@ -1,0 +1,48 @@
+<% content_for(:title, "Projects — ForgeCI") %>
+
+<h1>Projects</h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Repo</th>
+      <th>Default branch</th>
+      <th>Max concurrency</th>
+      <th>Pipelines</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @projects.each do |project| %>
+      <tr>
+        <td><%= project.name %></td>
+        <td class="mono"><%= project.repo_url %></td>
+        <td class="mono"><%= project.default_branch %></td>
+        <td><%= project.max_concurrency %></td>
+        <td><%= project.pipelines.count %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<% if @projects.empty? %>
+  <p class="note">No projects yet. Create one from the Rails console and POST a pipeline to <span class="mono">/api/v1/projects/:id/pipelines</span> — see README.</p>
+<% end %>
+
+<h2>Recent pipelines</h2>
+<table>
+  <thead>
+    <tr><th>Project</th><th>SHA</th><th>Branch</th><th>Status</th><th>Created</th></tr>
+  </thead>
+  <tbody>
+    <% Pipeline.includes(:project).order(created_at: :desc).limit(20).each do |pipeline| %>
+      <tr>
+        <td><%= pipeline.project.name %></td>
+        <td class="mono"><%= link_to pipeline.sha[0, 10], project_pipeline_path(pipeline.project, pipeline) %></td>
+        <td class="mono"><%= pipeline.branch %></td>
+        <td><%= status_badge(pipeline.status) %></td>
+        <td class="meta"><%= pipeline.created_at.strftime("%Y-%m-%d %H:%M") %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>

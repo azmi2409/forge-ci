@@ -1,0 +1,40 @@
+# Ignore all SQLite databases (dev/test fallback; Postgres is the supported DB)
+/db/*.sqlite3
+/db/*.sqlite3-*
+/db/*.sqlite3-*-journal
+
+# Ignore credentials
+/config/master.key
+/config/credentials/*.key
+
+# Logs and tempfiles
+/log/*
+!/log/.keep
+/tmp/*
+!/tmp/.keep
+!/tmp/pids/.keep
+!/tmp/cache/.keep
+!/tmp/storage/.keep
+
+# Bundler
+/.bundle/
+/vendor/bundle
+
+# bootsnap cache
+/tmp/cache/bootsnap*
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test artifacts
+/coverage/

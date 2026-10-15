@@ -1,0 +1,36 @@
+<% content_for(:title, "Pipeline #{@pipeline.sha[0, 10]} — ForgeCI") %>
+
+<p class="meta"><%= link_to "← projects", root_path %> / <%= @project.name %></p>
+<h1>Pipeline <span class="mono"><%= @pipeline.sha[0, 12] %></span></h1>
+<p>
+  <%= status_badge(@pipeline.status) %>
+  <span class="meta">branch <span class="mono"><%= @pipeline.branch %></span> · <%= @pipeline.created_at.strftime("%Y-%m-%d %H:%M") %></span>
+</p>
+
+<% @workflows.each do |wf| %>
+  <h2>Workflow: <%= wf.name %> <%= status_badge(wf.status) %></h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Job</th>
+        <th>Status</th>
+        <th>Requires</th>
+        <th>Resource class</th>
+        <th>Claimed by</th>
+        <th>Steps</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% wf.job_runs.each do |job| %>
+        <tr>
+          <td><%= link_to job.name, job_run_path(job), class: "mono" %></td>
+          <td><%= status_badge(job.status) %></td>
+          <td class="requires mono"><%= job.requires_list.any? ? job.requires_list.join(", ") : "—" %></td>
+          <td class="mono"><%= job.resource_class || "any" %></td>
+          <td class="mono"><%= job.claimed_by || "—" %></td>
+          <td><%= job.step_runs.count %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

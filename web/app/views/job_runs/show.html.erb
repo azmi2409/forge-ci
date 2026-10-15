@@ -1,0 +1,70 @@
+<% content_for(:title, "Job #{@job.name} — ForgeCI") %>
+
+<% pipeline = @job.pipeline %>
+<p class="meta">
+  <%= link_to "← projects", root_path %> /
+  <%= link_to "pipeline #{pipeline.sha[0, 10]}", project_pipeline_path(pipeline.project, pipeline) %> /
+  <%= @job.workflow_run.name %>
+</p>
+
+<h1>Job <span class="mono"><%= @job.name %></span></h1>
+<p>
+  <%= status_badge(@job.status) %>
+  <span class="meta">
+    requires <span class="mono"><%= @job.requires_list.any? ? @job.requires_list.join(", ") : "—" %></span> ·
+    resource class <span class="mono"><%= @job.resource_class || "any" %></span> ·
+    claimed by <span class="mono"><%= @job.claimed_by || "—" %></span>
+  </span>
+</p>
+
+<h2>Executor</h2>
+<table>
+  <tbody>
+    <tr><th>Type</th><td class="mono"><%= @job.executor_hash["type"] %></td></tr>
+    <tr><th>Image</th><td class="mono"><%= @job.executor_hash["image"] %></td></tr>
+    <tr><th>Working directory</th><td class="mono"><%= @job.working_directory %></td></tr>
+    <tr><th>Environment</th>
+      <td>
+        <% env_keys = (@job.executor_hash["environment"] || {}).keys %>
+        <% if env_keys.any? %>
+          <span class="mono"><%= env_keys.join(", ") %></span>
+          <span class="meta">(values hidden<% if @job.context_environment.present? %>, plus <%= @job.context_environment.size %> context variable(s)<% end %>)</span>
+        <% else %>
+          <span class="meta">—</span>
+        <% end %>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Steps</h2>
+<table>
+  <thead>
+    <tr><th>#</th><th>Name</th><th>Status</th><th>Exit code</th><th>Duration</th></tr>
+  </thead>
+  <tbody>
+    <% @job.step_runs.each_with_index do |step, i| %>
+      <tr>
+        <td class="mono"><%= i %></td>
+        <td class="mono"><%= step.name %></td>
+        <td><%= status_badge(step.status) %></td>
+        <td class="mono"><%= step.exit_code.nil? ? "—" : step.exit_code %></td>
+        <td class="mono">
+          <% if step.started_at && step.finished_at %>
+            <%= ((step.finished_at - step.started_at).round(1)) %>s
+          <% else %>
+            —
+          <% end %>
+        </td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<h2>Logs</h2>
+<% if @chunks.any? %>
+  <pre class="logs"><% @chunks.each do |c| %><%= c.chunk %><% end %></pre>
+  <p class="note">Live tail is not in v1 — reload the page for new output. Runners poll <span class="mono">GET /api/v1/jobs/:id/logs</span>.</p>
+<% else %>
+  <p class="note">No log output yet.</p>
+<% end %>

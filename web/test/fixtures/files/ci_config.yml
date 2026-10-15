@@ -1,0 +1,39 @@
+version: 2.1
+jobs:
+  build:
+    docker:
+      - image: cimg/ruby:3.2
+    resource_class: medium
+    working_directory: ~/project
+    environment:
+      RAILS_ENV: test
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: bundle install
+  test:
+    docker:
+      - image: cimg/ruby:3.2
+    resource_class: medium
+    steps:
+      - checkout
+      - run:
+          name: Run tests
+          command: bin/rails test
+  deploy:
+    docker:
+      - image: cimg/ruby:3.2
+    resource_class: large
+    steps:
+      - run:
+          name: Deploy
+          command: ./deploy.sh
+workflows:
+  build-test-deploy:
+    jobs:
+      - build
+      - test:
+          requires: [build]
+      - deploy:
+          requires: [test]
