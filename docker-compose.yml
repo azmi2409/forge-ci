@@ -53,6 +53,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - forge-ci
 
   minio:
     # NOTE: MinIO deleted minio/minio and minio/mc from Docker Hub on
@@ -69,6 +71,8 @@ services:
       - miniodata:/data
     ports:
       - "9001:9001" # console
+    networks:
+      - forge-ci
 
   minio-init:
     image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
@@ -83,6 +87,8 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    networks:
+      - forge-ci
 
   web:
     build:
@@ -103,6 +109,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
+    networks:
+      - forge-ci
 
   worker:
     build:
@@ -114,6 +122,8 @@ services:
         condition: service_healthy # ensures db:prepare (all 3 DBs) ran first
     command: ["./bin/jobs"]
     environment: *web-env
+    networks:
+      - forge-ci
 
   runner:
     build:
@@ -130,6 +140,12 @@ services:
       RESOURCE_CLASS: ${RUNNER_RESOURCE_CLASS:-medium}
     # Fails fast with a clear message when RUNNER_TOKEN is empty —
     # generate one (see header) and `docker compose up -d runner`.
+    networks:
+      - forge-ci
+
+networks:
+  forge-ci:
+    driver: bridge
 
 volumes:
   pgdata:
