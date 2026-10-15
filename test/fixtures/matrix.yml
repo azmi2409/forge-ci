@@ -1,0 +1,27 @@
+version: 2.1
+
+jobs:
+  test:
+    docker:
+      - image: cimg/ruby:<< matrix.ruby >>
+    steps:
+      - run:
+          name: Test on Ruby << matrix.ruby >>
+          command: bundle exec rake test RUBY=<< matrix.ruby >>
+  report:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run: echo "all matrix jobs done"
+
+workflows:
+  matrix-flow:
+    jobs:
+      - test:
+          matrix:
+            alias: ruby-matrix
+            parameters:
+              ruby: ["3.1", "3.2"]
+      - report:
+          requires:
+            - ruby-matrix

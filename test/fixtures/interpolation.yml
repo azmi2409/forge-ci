@@ -1,0 +1,22 @@
+version: 2.1
+
+parameters:
+  greeting:
+    type: string
+    default: "hello"
+
+jobs:
+  echo:
+    docker:
+      - image: cimg/base:stable
+    environment:
+      GREETING: << parameters.greeting >>
+    steps:
+      - run:
+          name: Greet
+          command: 'echo "<< parameters.greeting >> from branch << pipeline.git.branch >> (build #<< pipeline.number >>)"'
+
+workflows:
+  main:
+    jobs:
+      - echo

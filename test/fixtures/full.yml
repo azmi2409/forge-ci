@@ -1,0 +1,139 @@
+version: 2.1
+
+parameters:
+  node_version:
+    type: string
+    default: "20"
+    description: "Node.js major version for the build image"
+  deploy_env:
+    type: enum
+    default: "staging"
+    enum: ["staging", "production"]
+  run_e2e:
+    type: boolean
+    default: false
+
+commands:
+  install-deps:
+    description: "Install dependencies with the project package manager"
+    parameters:
+      frozen:
+        type: boolean
+        default: true
+    steps:
+      - run:
+          name: Install dependencies
+          command: |
+            if [ "<< parameters.frozen >>" = "true" ]; then
+              npm ci
+            else
+              npm install
+            fi
+
+  notify:
+    parameters:
+      channel:
+        type: string
+        default: "#builds"
+    steps:
+      - run:
+          name: Notify
+          command: echo "notifying << parameters.channel >> about << pipeline.git.branch >>"
+
+executors:
+  node-executor:
+    description: "Node image parameterized by version"
+    parameters:
+      version:
+        type: string
+        default: "20"
+    docker:
+      - image: cimg/node:<< parameters.version >>
+
+jobs:
+  build:
+    executor:
+      name: node-executor
+      version: << parameters.node_version >>
+    working_directory: ~/project
+    environment:
+      NODE_ENV: test
+    resource_class: medium
+    steps:
+      - checkout
+      - install-deps
+      - run:
+          name: Build
+          command: npm run build
+      - save_cache:
+          keys:
+            - node-deps-v1-{{ checksum "package.json" }}
+            - node-deps-v1-
+          paths:
+            - node_modules
+      - persist_to_workspace:
+          root: .
+          paths:
+            - dist
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: dist/bundle.js
+          destination: bundle
+
+  test:
+    docker:
+      - image: cimg/node:<< parameters.node_version >>
+        environment:
+          NODE_ENV: test
+      - image: redis:7
+        name: redis
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/workspace
+      - restore_cache:
+          keys:
+            - node-deps-v1-{{ checksum "package.json" }}
+      - run: npm test
+      - run:
+          name: E2E tests
+          command: npm run e2e
+          when: on_success
+      - when:
+          condition: << parameters.run_e2e >>
+          steps:
+            - run:
+                name: Extra E2E
+                command: npm run e2e:extra
+
+  deploy:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - attach_workspace:
+          at: /tmp/workspace
+      - add_ssh_keys:
+          fingerprints:
+            - "aa:bb:cc:dd"
+      - run:
+          name: Deploy to << parameters.deploy_env >>
+          command: ./deploy.sh << parameters.deploy_env >> << pipeline.number >>
+      - notify:
+          channel: "#deploys"
+
+workflows:
+  build-test-deploy:
+    jobs:
+      - build
+      - test:
+          requires:
+            - build
+      - deploy:
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - main
+                - /release\/.*/

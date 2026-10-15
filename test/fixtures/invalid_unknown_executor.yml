@@ -1,0 +1,12 @@
+version: 2.1
+
+jobs:
+  build:
+    machine: true
+    steps:
+      - run: echo hi
+
+workflows:
+  main:
+    jobs:
+      - build

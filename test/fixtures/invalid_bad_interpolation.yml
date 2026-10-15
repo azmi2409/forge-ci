@@ -1,0 +1,18 @@
+version: 2.1
+
+parameters:
+  known:
+    type: string
+    default: "yes"
+
+jobs:
+  build:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run: echo << parameters.typo >> and << pipeline.git.sha >>
+
+workflows:
+  main:
+    jobs:
+      - build

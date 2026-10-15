@@ -1,0 +1,23 @@
+version: 2.1
+
+jobs:
+  a:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run: echo a
+  b:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run: echo b
+
+workflows:
+  main:
+    jobs:
+      - a:
+          requires:
+            - b
+      - b:
+          requires:
+            - a

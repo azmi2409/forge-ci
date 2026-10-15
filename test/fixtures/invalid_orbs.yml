@@ -1,0 +1,16 @@
+version: 2.1
+
+orbs:
+  node: circleci/node@5.0.0
+
+jobs:
+  build:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - node/install-packages
+
+workflows:
+  main:
+    jobs:
+      - build

@@ -1,0 +1,15 @@
+version: 2.1
+
+jobs:
+  build:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - frobnicate:
+          widgets: 3
+
+workflows:
+  main:
+    jobs:
+      - build
