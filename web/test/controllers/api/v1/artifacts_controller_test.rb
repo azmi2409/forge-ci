@@ -69,7 +69,8 @@ class Api::V1::ArtifactsControllerTest < ActionDispatch::IntegrationTest
     post "/api/v1/jobs/#{@job_id}/artifacts", params: { file: upload_fixture }, headers: auth
     id = json_body["id"]
 
-    get "/api/v1/artifacts/#{id}/download", headers: ui_basic_auth_headers
+    sign_in_as_admin
+    get "/api/v1/artifacts/#{id}/download"
     assert_response :redirect
   end
 

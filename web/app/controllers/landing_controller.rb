@@ -2,7 +2,7 @@
 
 # Public marketing landing page — the only unauthenticated HTML page.
 class LandingController < ApplicationController
-  skip_before_action :require_ui_auth
+  skip_before_action :require_login
 
   layout "landing"
 

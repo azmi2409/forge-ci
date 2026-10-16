@@ -6,7 +6,7 @@ module Api
     # (disk or S3-compatible, see config/storage.yml).
     #
     # Upload is Bearer-authed to the owning runner token. Download accepts
-    # the owning token OR the UI's basic-auth credentials (same dual-auth
+    # the owning token OR a signed-in UI session (same dual-auth
     # story as the log stream).
     class ArtifactsController < BaseController
       # Signed download URLs stay valid this long.
@@ -64,27 +64,11 @@ module Api
 
       def can_download?(artifact)
         token = RunnerToken.authenticate(bearer_token)
-        (token.present? && artifact.job_run.claimed_by == token.name) || ui_basic_auth_valid?
+        (token.present? && artifact.job_run.claimed_by == token.name) || ui_session_valid?
       end
 
-      # Same UI basic-auth mirror as Api::V1::JobsController#valid_ui_basic_auth?.
-      def ui_basic_auth_valid?
-        header = request.headers["Authorization"].to_s
-        scheme, _, credentials = header.partition(" ")
-        return false unless scheme.casecmp("basic").zero?
-
-        user, password = Base64.decode64(credentials.to_s).split(":", 2)
-        expected_user = ENV["FORGE_CI_UI_USER"]
-        expected_password = ENV["FORGE_CI_UI_PASSWORD"]
-        if expected_user.blank? || expected_password.blank?
-          return false if Rails.env.production?
-
-          expected_user, expected_password = "admin", "password"
-        end
-        ActiveSupport::SecurityUtils.secure_compare(user.to_s, expected_user) &
-          ActiveSupport::SecurityUtils.secure_compare(password.to_s, expected_password)
-      rescue ArgumentError
-        false
+      def ui_session_valid?
+        SessionAuth.user_for(request.session).present?
       end
 
       def artifact_json(artifact)

@@ -31,11 +31,25 @@
       .meta { color: #8b949e; font-size: 14px; }
       pre.logs { background: #010409; border: 1px solid #30363d; border-radius: 6px; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
       .requires { color: #8b949e; }
+      .flash-alert { background: #5f1f1f; color: #ff7b72; border-radius: 6px; padding: 10px 14px; font-size: 14px; }
+      .flash-notice { background: #1f5f3a; color: #7ee787; border-radius: 6px; padding: 10px 14px; font-size: 14px; }
+      .stack { max-width: 380px; }
+      .stack label { display: block; font-size: 13px; color: #8b949e; margin: 14px 0 6px; }
+      input[type=text], input[type=password], select { width: 100%; box-sizing: border-box; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; padding: 8px 10px; font-size: 14px; }
+      button, input[type=submit] { background: #238636; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font-size: 14px; font-weight: 600; cursor: pointer; }
+      .stack button { margin-top: 18px; }
+      .inline-form { display: inline; margin-left: 8px; }
+      button.inline-btn, .userbar button { background: transparent; color: #58a6ff; padding: 0; font-weight: 400; }
+      .userbar { float: right; margin-top: 3px; font-size: 14px; color: #8b949e; }
+      .userbar form { display: inline; }
+      .userbar a { font-weight: 400; font-size: 14px; color: #58a6ff; margin-left: 12px; }
       .note { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 16px; font-size: 14px; color: #8b949e; }
     </style>
   </head>
   <body>
-    <header><a href="/projects">&#9881; ForgeCI</a> <span class="meta">control plane</span><a class="home-link" href="/">&larr; back to site</a></header>
+    <header><a href="/projects">&#9881; ForgeCI</a> <span class="meta">control plane</span><span class="userbar"><% if signed_in? %><%= current_user.username %>
+      <%= link_to "Account", account_path %><% if current_user.admin? %><%= link_to "Users", users_path %><% end %>
+      <%= button_to "Sign out", logout_path, method: :delete, form: { class: "inline-form" }, class: "inline-btn" %><% end %></span></header>
     <main><%= yield %></main>
   </body>
 </html>

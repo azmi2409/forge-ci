@@ -12,7 +12,7 @@ production.
 | `QUEUE_DATABASE_URL` / `CACHE_DATABASE_URL` | yes (prod) | `DATABASE_URL` | Separate Postgres URLs for the Solid Queue / cache DBs — must be separate physical DBs for `db:prepare` to load their schemas |
 | `SECRET_KEY_BASE` | yes (prod) | — | Rails secret (`openssl rand -hex 64`) |
 | `RAILS_MASTER_KEY` | yes (prod) | — | Rails credentials key |
-| `FORGE_CI_UI_USER` / `FORGE_CI_UI_PASSWORD` | yes (prod) | `admin` / `password` (dev only, loud warning) | Web UI basic auth |
+| `FORGE_CI_UI_USER` / `FORGE_CI_UI_PASSWORD` | yes (prod) | `admin` / `password` (dev only, loud warning) | Bootstrap for the first admin account (only used while there are no users) |
 | `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY` | yes (prod) | insecure dev key (loud warning) | Context payload encryption |
 | `ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY` | yes (prod) | insecure dev key (loud warning) | Context payload encryption |
 | `ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT` | yes (prod) | insecure dev key (loud warning) | Context payload encryption |

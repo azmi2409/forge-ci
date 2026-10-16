@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= content_for(:title) || "Sign in — ForgeCI" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="robots" content="noindex">
+    <%= csrf_meta_tags %>
+    <style>
+      body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; margin: 0; background: #0d1117; color: #e6edf3; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+      .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 32px; width: 100%; max-width: 360px; margin: 16px; box-sizing: border-box; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      .sub { color: #8b949e; font-size: 14px; margin: 0 0 24px; }
+      label { display: block; font-size: 13px; color: #8b949e; margin: 14px 0 6px; }
+      input[type=text], input[type=password] { width: 100%; box-sizing: border-box; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; padding: 10px 12px; font-size: 15px; }
+      input:focus { outline: 2px solid #1f6feb; border-color: #1f6feb; }
+      button { width: 100%; margin-top: 22px; background: #238636; color: #fff; border: 0; border-radius: 6px; padding: 10px; font-size: 15px; font-weight: 600; cursor: pointer; }
+      button:hover { background: #2ea043; }
+      .alert { background: #5f1f1f; color: #ff7b72; border-radius: 6px; padding: 10px 12px; font-size: 14px; margin-bottom: 8px; }
+      .notice { background: #1f5f3a; color: #7ee787; border-radius: 6px; padding: 10px 12px; font-size: 14px; margin-bottom: 8px; }
+      .hint { color: #8b949e; font-size: 13px; margin-top: 18px; }
+      a { color: #58a6ff; }
+    </style>
+  </head>
+  <body><%= yield %></body>
+</html>

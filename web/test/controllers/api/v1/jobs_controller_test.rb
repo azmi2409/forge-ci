@@ -106,7 +106,8 @@ class Api::V1::JobsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "log stream accepts UI basic auth" do
-    get "/api/v1/jobs/#{@job_id}/logs/stream", headers: ui_basic_auth_headers
+    sign_in_as_admin
+    get "/api/v1/jobs/#{@job_id}/logs/stream"
     assert_response :ok
     assert_equal "text/event-stream", response.headers["Content-Type"]
   end

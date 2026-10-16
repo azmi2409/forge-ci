@@ -111,7 +111,8 @@ class Api::V1::AdminApiTest < ActionDispatch::IntegrationTest
 
   test "UI cancel button cancels the pipeline" do
     pipeline = start_pipeline
-    post "/projects/#{@project.id}/pipelines/#{pipeline.id}/cancel", headers: ui_basic_auth_headers
+    sign_in_as_admin
+    post "/projects/#{@project.id}/pipelines/#{pipeline.id}/cancel"
     assert_redirected_to "/projects/#{@project.id}/pipelines/#{pipeline.id}"
     assert_equal "canceled", pipeline.reload.status
   end

@@ -91,7 +91,7 @@ documented future optimization is delta-append instead of full rebuild.
 
 ## Web UI
 
-Server-rendered ERB, no CSS/JS framework (small inline styles). Basic auth
+Server-rendered ERB, no CSS/JS framework (small inline styles). Cookie-session login (`/login`; see "Authentication")
 (see above; real login/RBAC is deferred).
 
 - `/` — projects index + recent pipelines
@@ -236,9 +236,26 @@ dependents. Fixed additively in the repo root (commit `ca9f633`):
   logged, rendered, or returned raw)
 - `RunnerToken` — name, token_digest (SHA256 hex **only**), resource_class
 
+## Authentication
+
+The UI uses a cookie session (`/login`). Users live in the `users` table
+(salted PBKDF2-HMAC-SHA256, no extra gem). Roles: **admin** (everything,
+including `/users`) and **member** (view + cancel pipelines).
+
+- First run: while no users exist, the first login with
+  `FORGE_CI_UI_USER` / `FORGE_CI_UI_PASSWORD` creates an admin. Or:
+  `FORGE_USERNAME=alice FORGE_PASSWORD='long passphrase' bin/rails forge_ci:create_user`
+  (also resets a password; `FORGE_ROLE=member` for non-admins).
+- 5 consecutive bad passwords lock the account for 15 minutes; passwords need
+  10+ characters; sessions expire after 12h idle / 7 days absolute; changing a
+  password or "Sign out everywhere else" invalidates other sessions.
+- The log stream/artifact download endpoints accept the same session cookie
+  (or the owning runner's bearer token). Runner and admin APIs are unchanged.
+- Behind HTTPS set `FORCE_SSL=true` for a Secure cookie and HSTS.
+
 ## Not yet (deferred)
 
-- Real UI auth (login, RBAC) — v1 is HTTP basic auth via env vars
+- SSO/OIDC, 2FA, per-project permissions
 - Per-branch context scoping; secret redaction stays runner-side (see
   "Secrets threat model"); rotation audit log
 - Log blob delta-append (currently each chunk POST rewrites the whole blob

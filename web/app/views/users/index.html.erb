@@ -1,0 +1,24 @@
+<% content_for(:title, "Users — ForgeCI") %>
+<h1>Users</h1>
+<%= render "shared/flash" %>
+<p><%= link_to "New user", new_user_path %></p>
+<table>
+  <thead><tr><th>Username</th><th>Role</th><th>Last sign-in</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+    <% @users.each do |user| %>
+      <tr>
+        <td class="mono"><%= user.username %><%= " (you)" if user == current_user %></td>
+        <td><%= user.role %></td>
+        <td class="meta"><%= user.last_login_at ? user.last_login_at.strftime("%Y-%m-%d %H:%M") : "never" %></td>
+        <td class="meta"><%= user.locked? ? "locked until #{user.locked_until.strftime('%H:%M')}" : "active" %></td>
+        <td>
+          <%= link_to "Edit", edit_user_path(user) %>
+          <% unless user == current_user %>
+            <%= button_to "Delete", user_path(user), method: :delete, class: "inline-btn",
+                          form: { class: "inline-form", data: { turbo_confirm: "Delete #{user.username}?" } } %>
+          <% end %>
+        </td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>

@@ -155,7 +155,8 @@ overridden to `./bin/jobs`.)
 | `DATABASE_URL` | yes | Postgres URL for the app DB (production) |
 | `QUEUE_DATABASE_URL` / `CACHE_DATABASE_URL` | yes | Separate Postgres URLs for the Solid Queue / cache DBs (each falls back to `DATABASE_URL`, but then queue tables never load — set all three) |
 | `SECRET_KEY_BASE` | yes | Rails secret (`openssl rand -hex 64`) |
-| `FORGE_CI_UI_USER` / `FORGE_CI_UI_PASSWORD` | yes (prod) | Web UI basic auth |
+| `FORGE_CI_UI_USER` / `FORGE_CI_UI_PASSWORD` | first boot only | Creates the first **admin** account when no users exist. After signing in, change the password under *Account* (or add users under *Users*); you can then remove these variables |
+| `FORCE_SSL` | recommended | `true` behind an HTTPS proxy: Secure session cookie, HSTS, HTTPS redirects |
 | `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY` / `_DETERMINISTIC_KEY` / `_KEY_DERIVATION_SALT` | yes (prod) | Context payload encryption |
 | `ACTIVE_STORAGE_SERVICE` | yes | `amazon` (AWS S3) or `local` |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` / `AWS_S3_BUCKET` | with `amazon` | Storage credentials (create the bucket first) |
