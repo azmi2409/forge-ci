@@ -7,7 +7,7 @@ class UiSmokeTest < ActionDispatch::IntegrationTest
   setup do
     project = Project.create!(name: "demo", repo_url: "https://example.com/demo", max_concurrency: 4)
     post "/api/v1/projects/#{project.id}/pipelines",
-         params: { sha: "abc123def", branch: "main", ir: compile_test_ir }, as: :json
+         params: { sha: "abc123def", branch: "main", ir: compile_test_ir }, headers: admin_headers, as: :json
     assert_response :created
     @pipeline_id = json_body["id"]
     @project_id = project.id

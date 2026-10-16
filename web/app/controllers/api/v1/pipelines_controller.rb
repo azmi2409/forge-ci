@@ -2,10 +2,27 @@
 
 module Api
   module V1
-    # Pipeline intake — the seam the GitHub App (component 3) calls.
-    # Unauthenticated in v1 (auth is deferred, see README); accepts the
+    # Pipeline intake (`forge-ci trigger` / curl) plus status and cancel.
+    # Admin-token authed (FORGE_CI_ADMIN_TOKEN); the GitHub flow does not use
+    # this controller — it goes through the HMAC-verified webhook. Accepts the
     # compiler IR as JSON.
     class PipelinesController < ActionController::API
+      include AdminAuthentication
+
+      def show
+        render json: pipeline_json(Pipeline.find(params[:id]))
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: "pipeline not found" }, status: :not_found
+      end
+
+      def cancel
+        pipeline = Pipeline.find(params[:id])
+        pipeline.cancel!
+        render json: pipeline_json(pipeline.reload)
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: "pipeline not found" }, status: :not_found
+      end
+
       def create
         project = Project.find(params[:project_id])
         pipeline = PipelineIntake.call!(

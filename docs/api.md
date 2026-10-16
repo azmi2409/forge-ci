@@ -5,8 +5,11 @@ multipart). Base path: `/api/v1`.
 
 ## Pipeline intake
 
-`POST /api/v1/projects/:project_id/pipelines` — unauthenticated in v1 (the
-GitHub flow goes through the HMAC-verified webhook instead).
+`POST /api/v1/projects/:project_id/pipelines` — requires
+`Authorization: Bearer <FORGE_CI_ADMIN_TOKEN>` (`401` otherwise, `503` while
+the admin token is not configured). The GitHub flow goes through the
+HMAC-verified webhook instead. The easiest client is the CLI:
+`forge-ci trigger .circleci/config.yml --project NAME --wait`.
 
 ```jsonc
 {
@@ -33,6 +36,21 @@ GitHub flow goes through the HMAC-verified webhook instead).
     "jobs": [{ "id": 1, "name": "build", "status": "queued", "requires": [] },
              { "id": 2, "name": "test", "status": "pending", "requires": ["build"] }] }] }
 ```
+
+## Admin API — `Authorization: Bearer <FORGE_CI_ADMIN_TOKEN>`
+
+| Call | Purpose |
+|---|---|
+| `GET /api/v1/projects` | list projects (`{ projects: [{ id, name, repo_url, default_branch, max_concurrency }] }`) |
+| `POST /api/v1/projects` `{ name, repo_url?, default_branch?, max_concurrency? }` | create a project (`201`; `422` on invalid/duplicate name) |
+| `POST /api/v1/projects/:id/contexts` `{ name, payload: { KEY: "value" } }` | create a context, or replace the payload of the same-named one. Responds with key names only |
+| `POST /api/v1/contexts/:id/rotate` `{ payload: {...} }` | replace a context's secrets |
+| `GET /api/v1/pipelines/:id` | pipeline + workflow + job statuses (same shape as the intake response) |
+| `POST /api/v1/pipelines/:id/cancel` | cancel every unfinished job. Running jobs are stopped by their runner on its next heartbeat (`status: "canceled"` in the heartbeat reply). Idempotent |
+
+When a job fails, jobs that (transitively) `require` it are canceled instead
+of being left pending, and the pipeline/workflow only becomes `failed` once
+no job is still in flight.
 
 ## Runner API — `Authorization: Bearer <raw-runner-token>` on every call
 

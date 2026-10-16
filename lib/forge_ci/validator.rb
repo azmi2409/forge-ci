@@ -242,6 +242,12 @@ module ForgeCI
       if cfg.key?("when") && !RUN_WHEN_VALUES.include?(cfg["when"].to_s)
         errors.add(path + ["when"], "\"when:\" must be one of: #{RUN_WHEN_VALUES.join(', ')}")
       end
+      if cfg.key?("environment") && !cfg["environment"].is_a?(Hash)
+        errors.add(path + ["environment"], "\"environment:\" must be a mapping of variable names to values")
+      end
+      if cfg.key?("no_output_timeout") && !cfg["no_output_timeout"].to_s.match?(/\A\d+(\.\d+)?[smh]?\z/)
+        errors.add(path + ["no_output_timeout"], "\"no_output_timeout:\" must look like 30s, 10m or 1h")
+      end
       return unless cfg.key?("background") && ![true, false].include?(cfg["background"])
 
       errors.add(path + ["background"], "\"background:\" must be true or false")

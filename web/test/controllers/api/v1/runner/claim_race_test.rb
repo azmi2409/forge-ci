@@ -18,7 +18,7 @@ class RunnerClaimRaceTest < ActionDispatch::IntegrationTest
     ir, errors = ForgeCI::Compiler.compile(yaml)
     assert_empty errors
     post "/api/v1/projects/#{@project.id}/pipelines",
-         params: { sha: "race", branch: "main", ir: JSON.parse(ir.to_json) }, as: :json
+         params: { sha: "race", branch: "main", ir: JSON.parse(ir.to_json) }, headers: admin_headers, as: :json
     assert_response :created
   end
 

@@ -16,7 +16,7 @@ class Api::V1::PipelinesControllerTest < ActionDispatch::IntegrationTest
     assert_difference %w[Pipeline.count WorkflowRun.count], 1 do
       assert_difference %w[JobRun.count], 3 do
         post "/api/v1/projects/#{@project.id}/pipelines",
-             params: intake_params, as: :json
+             params: intake_params, headers: admin_headers, as: :json
       end
     end
 
@@ -44,7 +44,7 @@ class Api::V1::PipelinesControllerTest < ActionDispatch::IntegrationTest
 
   test "resolves named contexts and merges their payloads into jobs" do
     post "/api/v1/projects/#{@project.id}/pipelines",
-         params: intake_params(contexts: ["deploy"]), as: :json
+         params: intake_params(contexts: ["deploy"]), headers: admin_headers, as: :json
     assert_response :created
 
     pipeline = Pipeline.find(json_body["id"])
@@ -55,7 +55,7 @@ class Api::V1::PipelinesControllerTest < ActionDispatch::IntegrationTest
 
   test "executor environment merged with contexts, contexts win" do
     post "/api/v1/projects/#{@project.id}/pipelines",
-         params: intake_params(contexts: ["deploy"]), as: :json
+         params: intake_params(contexts: ["deploy"]), headers: admin_headers, as: :json
     build = Pipeline.find(json_body["id"]).job_runs.find_by(name: "build")
     # executor env has RAILS_ENV=test; context adds DEPLOY_KEY/SHARED
     assert_equal "test", build.merged_environment["RAILS_ENV"]
@@ -64,20 +64,20 @@ class Api::V1::PipelinesControllerTest < ActionDispatch::IntegrationTest
 
   test "unknown context name returns 404" do
     post "/api/v1/projects/#{@project.id}/pipelines",
-         params: intake_params(contexts: ["nope"]), as: :json
+         params: intake_params(contexts: ["nope"]), headers: admin_headers, as: :json
     assert_response :not_found
     assert_match "nope", json_body["error"]
   end
 
   test "invalid IR returns 422 with details" do
     post "/api/v1/projects/#{@project.id}/pipelines",
-         params: { sha: "abc", branch: "main", ir: { "workflows" => [] } }, as: :json
+         params: { sha: "abc", branch: "main", ir: { "workflows" => [] } }, headers: admin_headers, as: :json
     assert_response :unprocessable_entity
     assert_not_empty json_body["details"]
   end
 
   test "missing project returns 404" do
-    post "/api/v1/projects/999999/pipelines", params: intake_params, as: :json
+    post "/api/v1/projects/999999/pipelines", params: intake_params, headers: admin_headers, as: :json
     assert_response :not_found
   end
 end

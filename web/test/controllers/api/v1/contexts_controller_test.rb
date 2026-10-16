@@ -66,7 +66,25 @@ class Api::V1::ContextsControllerTest < ActionDispatch::IntegrationTest
          params: { payload: { "A" => "b" } }, headers: admin_headers, as: :json
     assert_response :service_unavailable
   ensure
-    ENV["FORGE_CI_ADMIN_TOKEN"] = nil
+    ENV["FORGE_CI_ADMIN_TOKEN"] = TEST_ADMIN_TOKEN
+  end
+
+  test "create makes a context and echoes key names only" do
+    post "/api/v1/projects/#{@project.id}/contexts",
+         params: { name: "staging", payload: { "TOKEN" => "abc-secret-value" } },
+         headers: admin_headers, as: :json
+    assert_response :created
+    assert_equal %w[TOKEN], json_body["keys"]
+    assert_not response.body.include?("abc-secret-value")
+    assert_equal({ "TOKEN" => "abc-secret-value" }, @project.contexts.find_by!(name: "staging").payload)
+  end
+
+  test "create requires the admin token and a non-empty payload" do
+    post "/api/v1/projects/#{@project.id}/contexts", params: { name: "x", payload: { "A" => "b" } }, as: :json
+    assert_response :unauthorized
+    post "/api/v1/projects/#{@project.id}/contexts", params: { name: "x", payload: {} },
+         headers: admin_headers, as: :json
+    assert_response :unprocessable_entity
   end
 
   test "rotate on a missing context is 404" do
@@ -87,7 +105,7 @@ class Api::V1::ContextsControllerTest < ActionDispatch::IntegrationTest
   test "claim payload exposes merged env but never raw context records" do
     _rec, raw = RunnerToken.generate!(name: "runner-1", resource_class: "medium")
     post "/api/v1/projects/#{@project.id}/pipelines",
-         params: { sha: "abc", branch: "main", ir: compile_test_ir, contexts: ["deploy"] }, as: :json
+         params: { sha: "abc", branch: "main", ir: compile_test_ir, contexts: ["deploy"] }, headers: admin_headers, as: :json
     post "/api/v1/runner/jobs/claim", headers: bearer_headers(raw)
     body = json_body
     assert_equal "old-secret", body["environment"]["DEPLOY_KEY"]

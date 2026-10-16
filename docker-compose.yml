@@ -37,6 +37,13 @@ x-web-env: &web-env
   # "static-runner" token; the runner presents it as RUNNER_TOKEN. No need
   # to copy tokens out of logs.
   FORGE_CI_RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+  # Admin API token (create projects/contexts, start/cancel pipelines via
+  # `forge-ci trigger`). The admin API answers 503 while this is empty.
+  FORGE_CI_ADMIN_TOKEN: ${FORGE_CI_ADMIN_TOKEN:-}
+  # GitHub App (optional — only needed for push/PR webhooks + commit statuses)
+  GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+  GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+  GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
   ACTIVE_STORAGE_SERVICE: amazon
   AWS_S3_BUCKET: "${AWS_S3_BUCKET:?set AWS_S3_BUCKET in .env}"
   AWS_REGION: ${AWS_REGION:-us-east-1}

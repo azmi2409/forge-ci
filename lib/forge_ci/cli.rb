@@ -2,6 +2,10 @@
 
 require "optparse"
 require "json"
+require "net/http"
+require "openssl"
+require "uri"
+require "open3"
 
 module ForgeCI
   # Command-line interface for forge-ci.
@@ -25,6 +29,19 @@ module ForgeCI
                                                     its IR as JSON
                                                     (pretty JSON by default,
                                                     --json for compact)
+        trigger <config.yml> --project P [--url URL] [--token T]
+                [--branch B] [--sha S] [--context NAME]... [--wait]
+                                                    compile a config and start a
+                                                    pipeline on a forge-ci server
+                                                    (URL/token default to the
+                                                    FORGE_CI_URL and
+                                                    FORGE_CI_ADMIN_TOKEN env vars;
+                                                    branch/sha default to the
+                                                    current git checkout; --wait
+                                                    blocks until it finishes and
+                                                    exits 1 if it did not succeed)
+        cancel <pipeline-id> [--url URL] [--token T]
+                                                    cancel a running pipeline
 
       Options:
         -h, --help      show this help and exit
@@ -50,6 +67,8 @@ module ForgeCI
       case command
       when "validate" then validate_command(argv)
       when "compile" then compile_command(argv)
+      when "trigger" then trigger_command(argv)
+      when "cancel" then cancel_command(argv)
       when "-h", "--help", nil then help
       when "-v", "--version" then version
       else usage_error("unknown command #{command.inspect}")
@@ -184,6 +203,171 @@ module ForgeCI
           0
         end
       end
+    end
+
+    # -- forge-ci trigger <config.yml> --project P ... ----------------------
+
+    def trigger_command(argv)
+      options = { contexts: [], url: ENV["FORGE_CI_URL"], token: ENV["FORGE_CI_ADMIN_TOKEN"], poll: 5 }
+      parser = OptionParser.new do |opts|
+        opts.banner = "Usage: forge-ci trigger <config.yml> --project P [options]"
+        opts.on("--project P", "project id or name on the server") { |v| options[:project] = v }
+        opts.on("--url URL", "server base URL (env FORGE_CI_URL)") { |v| options[:url] = v }
+        opts.on("--token TOKEN", "admin token (env FORGE_CI_ADMIN_TOKEN)") { |v| options[:token] = v }
+        opts.on("--branch B", "branch (default: current git branch)") { |v| options[:branch] = v }
+        opts.on("--sha S", "commit sha (default: current git HEAD)") { |v| options[:sha] = v }
+        opts.on("--context NAME", "context to inject (repeatable)") { |v| options[:contexts] << v }
+        opts.on("--wait", "wait for the pipeline to finish") { options[:wait] = true }
+        opts.on("--poll SECONDS", Integer, "poll interval for --wait (default 5)") { |v| options[:poll] = v }
+        opts.on("-h", "--help", "show this help and exit") do
+          @out.puts opts
+          return 0
+        end
+      end
+
+      begin
+        parser.parse!(argv)
+      rescue OptionParser::ParseError => e
+        return usage_error(e.message)
+      end
+
+      path = argv.shift
+      return usage_error("trigger requires a <config.yml> argument") if path.nil?
+      return usage_error("trigger takes exactly one <config.yml> argument") unless argv.empty?
+      return usage_error("--project is required") if options[:project].to_s.empty?
+
+      err = server_options_error(options)
+      return usage_error(err) if err
+
+      options[:branch] ||= git_output("rev-parse", "--abbrev-ref", "HEAD")
+      options[:sha] ||= git_output("rev-parse", "HEAD")
+      if options[:branch].to_s.empty? || options[:sha].to_s.empty?
+        return usage_error("could not detect git branch/sha — pass --branch and --sha")
+      end
+
+      with_parsed_yaml(path) do |yaml|
+        ir, errors = ForgeCI::Compiler.compile(
+          yaml, pipeline_params: { "branch" => options[:branch], "sha" => options[:sha] }
+        )
+        if errors.any?
+          errors.each { |error| @err.puts "forge-ci: #{path}: #{error}" }
+          next 1
+        end
+
+        begin
+          project_id = resolve_project_id(options)
+          pipeline = api_request(options, :post, "/api/v1/projects/#{project_id}/pipelines",
+                                 sha: options[:sha], branch: options[:branch],
+                                 ir: JSON.parse(JSON.generate(ir)), contexts: options[:contexts])
+          @out.puts "forge-ci: pipeline #{pipeline["id"]} started " \
+                    "(#{options[:url].sub(%r{/+\z}, "")}/projects/#{project_id}/pipelines/#{pipeline["id"]})"
+          options[:wait] ? wait_for_pipeline(options, pipeline["id"]) : 0
+        rescue ApiError => e
+          @err.puts "forge-ci: #{e.message}"
+          1
+        end
+      end
+    end
+
+    # -- forge-ci cancel <pipeline-id> ----------------------------------------
+
+    def cancel_command(argv)
+      options = { url: ENV["FORGE_CI_URL"], token: ENV["FORGE_CI_ADMIN_TOKEN"] }
+      parser = OptionParser.new do |opts|
+        opts.banner = "Usage: forge-ci cancel <pipeline-id> [--url URL] [--token T]"
+        opts.on("--url URL", "server base URL (env FORGE_CI_URL)") { |v| options[:url] = v }
+        opts.on("--token TOKEN", "admin token (env FORGE_CI_ADMIN_TOKEN)") { |v| options[:token] = v }
+        opts.on("-h", "--help", "show this help and exit") do
+          @out.puts opts
+          return 0
+        end
+      end
+
+      begin
+        parser.parse!(argv)
+      rescue OptionParser::ParseError => e
+        return usage_error(e.message)
+      end
+
+      id = argv.shift
+      return usage_error("cancel requires a <pipeline-id> argument") if id.nil?
+
+      err = server_options_error(options)
+      return usage_error(err) if err
+
+      pipeline = api_request(options, :post, "/api/v1/pipelines/#{id}/cancel")
+      @out.puts "forge-ci: pipeline #{pipeline["id"]} is #{pipeline["status"]}"
+      0
+    rescue ApiError => e
+      @err.puts "forge-ci: #{e.message}"
+      1
+    end
+
+    class ApiError < StandardError; end
+
+    def server_options_error(options)
+      return "--url (or FORGE_CI_URL) is required" if options[:url].to_s.empty?
+      return "--token (or FORGE_CI_ADMIN_TOKEN) is required" if options[:token].to_s.empty?
+
+      nil
+    end
+
+    def git_output(*args)
+      out, status = Open3.capture2("git", *args, err: File::NULL)
+      status.success? ? out.strip : nil
+    rescue SystemCallError
+      nil
+    end
+
+    def resolve_project_id(options)
+      return options[:project] if options[:project].match?(/\A\d+\z/)
+
+      projects = api_request(options, :get, "/api/v1/projects")
+      match = Array(projects["projects"]).find { |p| p["name"] == options[:project] }
+      raise ApiError, "project #{options[:project].inspect} not found on server" unless match
+
+      match["id"]
+    end
+
+    def wait_for_pipeline(options, id)
+      last = nil
+      loop do
+        pipeline = api_request(options, :get, "/api/v1/pipelines/#{id}")
+        if pipeline["status"] != last
+          @out.puts "forge-ci: pipeline #{id}: #{pipeline["status"]}"
+          last = pipeline["status"]
+        end
+        return(pipeline["status"] == "success" ? 0 : 1) unless %w[pending running].include?(pipeline["status"])
+
+        sleep options[:poll]
+      end
+    end
+
+    def api_request(options, verb, path, body = nil)
+      uri = URI.join(options[:url].sub(%r{/+\z}, "") + "/", path.sub(%r{\A/}, ""))
+      klass = verb == :post ? Net::HTTP::Post : Net::HTTP::Get
+      req = klass.new(uri)
+      req["Authorization"] = "Bearer #{options[:token]}"
+      req["Accept"] = "application/json"
+      if body
+        req["Content-Type"] = "application/json"
+        req.body = JSON.generate(body)
+      end
+      res = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https",
+                                                open_timeout: 10, read_timeout: 60) { |http| http.request(req) }
+      parsed = begin
+        JSON.parse(res.body.to_s)
+      rescue JSON::ParserError
+        {}
+      end
+      unless res.is_a?(Net::HTTPSuccess)
+        detail = Array(parsed["details"]).any? ? ": #{Array(parsed["details"]).join("; ")}" : ""
+        raise ApiError, "server returned HTTP #{res.code} for #{verb.to_s.upcase} #{path}: " \
+                        "#{parsed["error"] || res.message}#{detail}"
+      end
+      parsed
+    rescue SystemCallError, SocketError, Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError => e
+      raise ApiError, "could not reach #{options[:url]}: #{e.message}"
     end
 
     def build_pipeline_params(options)

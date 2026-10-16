@@ -8,7 +8,7 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     @project.contexts.create!(name: "deploy", payload: { "DEPLOY_KEY" => "s3cr3t", "SHARED" => "from-context" })
     @token_record, @raw = RunnerToken.generate!(name: "runner-1", resource_class: "medium")
     post "/api/v1/projects/#{@project.id}/pipelines",
-         params: { sha: "abc123", branch: "main", ir: compile_test_ir, contexts: ["deploy"] }, as: :json
+         params: { sha: "abc123", branch: "main", ir: compile_test_ir, contexts: ["deploy"] }, headers: admin_headers, as: :json
     assert_response :created
     @pipeline = Pipeline.find(json_body["id"])
   end
@@ -187,13 +187,14 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "success", @pipeline.reload.status
   end
 
-  test "failed job keeps dependents pending and fails the workflow/pipeline" do
+  test "failed job cancels its pending dependents and fails the workflow/pipeline" do
     post "/api/v1/runner/jobs/claim", headers: auth
     build_id = json_body["id"]
     post "/api/v1/runner/jobs/#{build_id}/complete", params: { status: "failed" }, headers: auth, as: :json
     assert_response :ok
 
-    assert job_named("test").reload.pending?, "dependents stay pending after failure"
+    assert job_named("test").reload.canceled?, "dependents are canceled after a failure"
+    assert job_named("deploy").reload.canceled?, "transitive dependents are canceled too"
     assert_equal "failed", @pipeline.workflow_runs.sole.reload.status
     assert_equal "failed", @pipeline.reload.status
   end

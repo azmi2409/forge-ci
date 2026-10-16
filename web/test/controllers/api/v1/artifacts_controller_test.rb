@@ -7,7 +7,7 @@ class Api::V1::ArtifactsControllerTest < ActionDispatch::IntegrationTest
     @project = Project.create!(name: "demo", max_concurrency: 4)
     @token_record, @raw = RunnerToken.generate!(name: "runner-1", resource_class: "medium")
     post "/api/v1/projects/#{@project.id}/pipelines",
-         params: { sha: "abc123", branch: "main", ir: compile_test_ir }, as: :json
+         params: { sha: "abc123", branch: "main", ir: compile_test_ir }, headers: admin_headers, as: :json
     assert_response :created
     post "/api/v1/runner/jobs/claim", headers: bearer_headers(@raw)
     assert_response :ok

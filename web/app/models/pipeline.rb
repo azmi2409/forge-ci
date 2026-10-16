@@ -25,16 +25,28 @@ class Pipeline < ApplicationRecord
   # Roll up workflow statuses. Called inside the job-completion transaction.
   def recompute_status!
     new_status =
-      if workflow_runs.failed.exists?
+      if workflow_runs.where(status: %w[pending running]).exists?
+        "running"
+      elsif workflow_runs.failed.exists?
         "failed"
       elsif workflow_runs.canceled.exists?
         "canceled"
-      elsif workflow_runs.where(status: %w[pending running]).exists?
-        "running"
       else
         "success"
       end
     update!(status: new_status) if status != new_status
+  end
+
+  # Cancel every job that has not finished yet. Jobs already running are
+  # marked canceled here; the runner notices on its next heartbeat and
+  # stops the container. Returns self.
+  def cancel!
+    transaction do
+      job_runs.where.not(status: JobRun::TERMINAL_STATUSES).find_each(&:cancel!)
+      workflow_runs.each(&:recompute_status!)
+      recompute_status!
+    end
+    self
   end
 
   private
