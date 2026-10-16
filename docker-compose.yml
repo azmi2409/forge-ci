@@ -108,7 +108,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 60s
+      start_period: 180s # db:prepare creates 3 DBs + loads schemas on first boot
     networks:
       - forge-ci
 

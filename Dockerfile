@@ -19,6 +19,7 @@ ENV RAILS_ENV="production" \
     BUNDLE_DEPLOYMENT="1" \
     BUNDLE_PATH="/usr/local/bundle" \
     BUNDLE_WITHOUT="development" \
+    BUNDLE_JOBS="4" \
     LD_PRELOAD="/usr/local/lib/libjemalloc.so" \
     FORGE_CI_GEM_PATH="/forge-ci"
 # The Gemfile references the forge-ci compiler as a path gem. Locally (and in
