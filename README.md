@@ -27,8 +27,8 @@ inbound ports on runners, no proprietary control plane.
 
 ## Quickstart
 
-**Run the whole stack with Docker Compose** (Postgres, MinIO, control plane,
-worker, runner):
+**Run the whole stack with Docker Compose** (Postgres, control plane,
+worker, runner; object storage is AWS S3):
 
 ```sh
 cp .env.example .env   # dev defaults work as-is
@@ -117,7 +117,7 @@ GitHub ──push/PR webhook──▶ ┌─────────────
                              │  (Rails 8)       │◀─heartbeats── │   Runner   │
                              │                  │──log chunks──▶│  (Docker)  │
                              │  Postgres        │               └────────────┘
-                             │  S3/MinIO        │               ┌────────────┐
+                             │  AWS S3          │               ┌────────────┐
                              └──────────────────┘◀─heartbeats── │   Runner   │
                                        │                       │  (Docker)  │
                                        ▼                       └────────────┘

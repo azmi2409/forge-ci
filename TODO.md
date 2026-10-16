@@ -7,13 +7,13 @@ priority order. Check items off as they land.
 ## To launch (blockers)
 
 - [x] **Docker Compose** for the full stack (`docker-compose.yml`: Postgres,
-      MinIO, control plane, Solid Queue worker, runner) — 2026-10-16
+      control plane, Solid Queue worker, runner; AWS S3 for storage) — 2026-10-16
 - [x] **Solid Queue installed** (`db/queue_schema.rb`, `config/queue.yml`,
       `bin/jobs`; per-DB `QUEUE_DATABASE_URL`/`CACHE_DATABASE_URL`) — 2026-10-16
 - [ ] **Deploy the control plane** with a public HTTPS URL ([DEPLOY.md](DEPLOY.md))
 - [ ] **Postgres in production** — SQLite is dev-only; the atomic claim path
       (`FOR UPDATE SKIP LOCKED`) needs Postgres
-- [ ] **S3-compatible storage** for logs/artifacts/cache (MinIO self-hosted or AWS S3)
+- [ ] **S3 bucket** for logs/artifacts/cache (AWS S3; create the bucket before deploying)
 - [ ] **Register the GitHub App** and install it on the account
       (blocked on the public URL; checklist in `web/README.md`)
 - [ ] **Generate production secrets**: `ACTIVE_RECORD_ENCRYPTION_*` keys

@@ -16,12 +16,12 @@ production.
 | `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY` | yes (prod) | insecure dev key (loud warning) | Context payload encryption |
 | `ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY` | yes (prod) | insecure dev key (loud warning) | Context payload encryption |
 | `ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT` | yes (prod) | insecure dev key (loud warning) | Context payload encryption |
-| `ACTIVE_STORAGE_SERVICE` | yes (prod) | `local` | `amazon` (S3/MinIO) or `local` |
+| `ACTIVE_STORAGE_SERVICE` | yes (prod) | `local` | `amazon` (AWS S3) or `local` |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | with `amazon` | — | Storage credentials |
 | `AWS_REGION` | with `amazon` | `us-east-1` | Storage region |
 | `AWS_S3_BUCKET` | with `amazon` | — | Storage bucket |
-| `AWS_S3_ENDPOINT` | for MinIO | — | S3-compatible endpoint, e.g. `http://minio:9000` |
-| `AWS_S3_FORCE_PATH_STYLE` | for MinIO | `false` | Set `true` for MinIO / path-style stores |
+| `AWS_S3_ENDPOINT` | for S3-compatible stores | — | Endpoint override, e.g. MinIO at `http://minio:9000` (leave unset for AWS S3) |
+| `AWS_S3_FORCE_PATH_STYLE` | for S3-compatible stores | `false` | Set `true` for MinIO / path-style stores |
 | `ARTIFACT_RETENTION_DAYS` | no | `30` | Artifact retention (`PurgeOldArtifactsJob` runs daily 03:00) |
 | `GITHUB_APP_ID` | for GitHub | — | Numeric GitHub App ID |
 | `GITHUB_APP_PRIVATE_KEY` | for GitHub | — | App private key, PEM text (may contain newlines) |

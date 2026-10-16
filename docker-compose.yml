@@ -1,6 +1,6 @@
 # ForgeCI full stack — one command to run everything locally.
 #
-#   cp .env.example .env   # dev defaults work as-is; replace secrets for real use
+#   cp .env.example .env   # then fill in your AWS S3 credentials + bucket
 #   docker compose up --build -d
 #
 # Then create a runner token (the seeded demo token is also printed once in
@@ -14,7 +14,11 @@
 #   docker compose up -d runner
 #
 # Web UI: http://localhost:3000 (admin / password from .env)
-# MinIO console: http://localhost:9001
+#
+# Object storage (job logs, artifacts, cache tarballs) is AWS S3 — create
+# the bucket first (the app does not create it for you):
+#
+#   aws s3 mb s3://<your-bucket> --region <your-region>
 #
 # Push to a repo with the GitHub App installed (or POST a pipeline to the
 # API — see docs/api.md) and watch jobs get claimed and run.
@@ -32,12 +36,10 @@ x-web-env: &web-env
   FORGE_CI_UI_USER: ${FORGE_CI_UI_USER:-admin}
   FORGE_CI_UI_PASSWORD: ${FORGE_CI_UI_PASSWORD:-password}
   ACTIVE_STORAGE_SERVICE: amazon
-  AWS_S3_ENDPOINT: http://minio:9000
-  AWS_S3_FORCE_PATH_STYLE: "true"
-  AWS_S3_BUCKET: forge-ci
-  AWS_REGION: us-east-1
-  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+  AWS_S3_BUCKET: "${AWS_S3_BUCKET:?set AWS_S3_BUCKET in .env}"
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID in .env}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY in .env}
   APP_HOST: ${APP_HOST:-http://localhost:3000}
 
 services:
@@ -56,40 +58,6 @@ services:
     networks:
       - forge-ci
 
-  minio:
-    # NOTE: MinIO deleted minio/minio and minio/mc from Docker Hub on
-    # 2026-09-11, and quay.io/minio/* is no longer anonymously readable.
-    # pgsty/minio (Silo) is a drop-in MinIO-compatible fork: same on-disk
-    # format, same MINIO_ROOT_* env vars, same console.
-    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
-    volumes:
-      - miniodata:/data
-    ports:
-      - "9001:9001" # console
-    networks:
-      - forge-ci
-
-  minio-init:
-    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c '
-      until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do sleep 2; done;
-      mc mb -p local/forge-ci >/dev/null 2>&1 || true;
-      echo "bucket ready";
-      '
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
-    networks:
-      - forge-ci
-
   web:
     build:
       context: .
@@ -98,8 +66,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
     ports:
       - "${WEB_PORT:-3000}:80"
     environment: *web-env
@@ -149,4 +115,3 @@ networks:
 
 volumes:
   pgdata:
-  miniodata:

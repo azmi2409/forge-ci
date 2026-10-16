@@ -7,8 +7,8 @@ cp .env.example .env   # dev defaults work as-is; replace secrets for real use
 docker compose up --build -d
 ```
 
-This brings up Postgres, MinIO (S3-compatible storage), the control plane,
-and the Solid Queue worker. Then create a runner token and start the runner
+This brings up Postgres, the control plane,
+and the Solid Queue worker (object storage is AWS S3 — see §2). Then create a runner token and start the runner
 (the token step is manual — see the header of `docker-compose.yml`):
 
 ```sh
@@ -18,7 +18,7 @@ docker compose exec web bin/rails runner \
 docker compose up -d runner
 ```
 
-Web UI: http://localhost:3000 · MinIO console: http://localhost:9001
+Web UI: http://localhost:3000
 
 The rest of this guide covers production-style deployments (Coolify / manual
 Docker). The compose file is also the best reference for the full env var
@@ -46,7 +46,7 @@ Runners need **outbound** HTTPS to the control plane only — no inbound ports.
 |---|---|
 | Control plane host | 2 GB RAM, Docker (a Coolify-managed VPS works) |
 | Postgres | 14+ (Coolify one-click Postgres, or any managed/external instance) |
-| Object storage | MinIO (self-hosted) or AWS S3 — holds logs, artifacts, cache tarballs |
+| Object storage | AWS S3 — holds logs, artifacts, cache tarballs |
 | Runner hosts (1+) | Docker Engine, Ruby ≥ 3.0, outbound HTTPS to the control plane |
 | Domain | Public HTTPS URL for the control plane (**required** for GitHub webhooks) |
 
@@ -79,30 +79,27 @@ CACHE_DATABASE_URL=postgres://postgres:<strong-password>@<pg-host>:5432/forge_ci
 Each falls back to `DATABASE_URL` when its own URL isn't set — but then the
 queue tables never load (see above), so set all three in production.
 
-## 2. Object storage (MinIO)
+## 2. Object storage (AWS S3)
+
+Job logs, artifacts, and cache tarballs live in S3. Create the bucket first
+(the app does not create it for you):
 
 ```sh
-docker run -d --name forge-ci-minio --restart unless-stopped \
-  -p 9000:9000 -p 9001:9001 \
-  -e MINIO_ROOT_USER=<access-key> -e MINIO_ROOT_PASSWORD=<secret-key> \
-  -v miniodata:/data \
-  pgsty/minio:RELEASE.2026-08-04T00-00-00Z server /data --console-address ":9001"
+aws s3 mb s3://forge-ci --region us-east-1
 ```
 
-Create a bucket (console at `:9001`, or `mc mb`), e.g. `forge-ci`. The app
-uses it via:
+The app uses it via:
 
 ```
 ACTIVE_STORAGE_SERVICE=amazon
-AWS_S3_ENDPOINT=http://<minio-host>:9000
 AWS_S3_BUCKET=forge-ci
-AWS_S3_FORCE_PATH_STYLE=true
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=<access-key>
 AWS_SECRET_ACCESS_KEY=<secret-key>
 ```
 
-(Omit `AWS_S3_ENDPOINT` for real AWS S3.)
+(`AWS_S3_ENDPOINT` / `AWS_S3_FORCE_PATH_STYLE` are only needed for
+S3-compatible stores like MinIO — leave them unset for real AWS S3.)
 
 ## 3. Control plane
 
@@ -125,8 +122,7 @@ docker run -d --name forge-ci-web --restart unless-stopped -p 80:80 \
   -e ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY="<...>" \
   -e ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT="<...>" \
   -e ACTIVE_STORAGE_SERVICE=amazon \
-  -e AWS_S3_ENDPOINT=http://<minio-host>:9000 -e AWS_S3_BUCKET=forge-ci \
-  -e AWS_S3_FORCE_PATH_STYLE=true \
+  -e AWS_S3_BUCKET=forge-ci \
   -e AWS_REGION=us-east-1 \
   -e AWS_ACCESS_KEY_ID=<...> -e AWS_SECRET_ACCESS_KEY=<...> \
   -e ARTIFACT_RETENTION_DAYS=30 \
@@ -160,9 +156,9 @@ overridden to `./bin/jobs`.)
 | `SECRET_KEY_BASE` | yes | Rails secret (`openssl rand -hex 64`) |
 | `FORGE_CI_UI_USER` / `FORGE_CI_UI_PASSWORD` | yes (prod) | Web UI basic auth |
 | `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY` / `_DETERMINISTIC_KEY` / `_KEY_DERIVATION_SALT` | yes (prod) | Context payload encryption |
-| `ACTIVE_STORAGE_SERVICE` | yes | `amazon` (S3/MinIO) or `local` |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` / `AWS_S3_BUCKET` | with `amazon` | Storage credentials |
-| `AWS_S3_ENDPOINT` / `AWS_S3_FORCE_PATH_STYLE` | for MinIO | S3-compatible endpoint override (force path style for MinIO) |
+| `ACTIVE_STORAGE_SERVICE` | yes | `amazon` (AWS S3) or `local` |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` / `AWS_S3_BUCKET` | with `amazon` | Storage credentials (create the bucket first) |
+| `AWS_S3_ENDPOINT` / `AWS_S3_FORCE_PATH_STYLE` | for S3-compatible stores | Endpoint override, e.g. MinIO (leave unset for real AWS S3) |
 | `ARTIFACT_RETENTION_DAYS` | no (30) | Artifact retention |
 | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_WEBHOOK_SECRET` | for GitHub | App auth (see §6) |
 | `APP_HOST` | recommended | Public base URL, e.g. `https://ci.example.com` (commit-status links) |
@@ -236,7 +232,7 @@ auto-creates its forge-ci project.
 
 - **Updating**: `git pull`, rebuild the image, recreate the containers.
   Runners pick up nothing cached — they're stateless.
-- **Backups**: Postgres dumps + the MinIO/S3 bucket. Everything else is
+- **Backups**: Postgres dumps + the S3 bucket. Everything else is
   disposable.
 - **Retention**: artifacts purge after `ARTIFACT_RETENTION_DAYS` (Solid Queue
   daily job); logs live on blobs indefinitely until you add a policy.
