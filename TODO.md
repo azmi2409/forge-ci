@@ -29,13 +29,15 @@ priority order. Check items off as they land.
 ## Hardening
 
 - [ ] Real UI auth (login, RBAC) — v1 is HTTP basic auth via env vars
-- [ ] Auth on the raw pipeline-intake endpoint (currently unauthenticated;
-      the GitHub flow goes through the HMAC-verified webhook instead)
-- [ ] Pipeline cancel API (cancel a running pipeline from the UI/API)
+- [x] Auth on the raw pipeline-intake endpoint (admin bearer token) — 2026-10-16
+- [x] Pipeline cancel (API, CLI `forge-ci cancel`, UI button; runners stop on heartbeat) — 2026-10-16
+- [x] Admin API for projects/contexts + `forge-ci trigger [--wait]` so CI can be
+      driven without the GitHub App or a Rails console — 2026-10-16
+- [x] Failed jobs cancel their dependents; pipeline only finishes when nothing is in flight — 2026-10-16
 - [ ] Per-branch context scoping (v1: a context is all-or-nothing per project)
 - [ ] Audit log for secret rotation
 - [ ] Log blob delta-append (each chunk POST currently rewrites the whole blob)
-- [ ] Runner: per-step timeouts (a hung step hangs until killed)
+- [x] Runner: no-output step timeout + job timeout, per-step `environment:` — 2026-10-16
 - [ ] Runner: container CPU/memory limits
 - [ ] Runner: `store_test_results` (JUnit → timing DB) and `add_ssh_keys`
 - [ ] Publish the `forge-ci` gem to RubyGems (then `web/` can depend on the

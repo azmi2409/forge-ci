@@ -85,6 +85,7 @@ class JobRun < ApplicationRecord
 
   def cancel!
     transition_to!("canceled")
+    step_runs.where(status: "pending").update_all(status: StepRun.statuses.fetch("canceled"))
   end
 
   def terminal?
@@ -236,7 +237,7 @@ class JobRun < ApplicationRecord
       end
 
       transition_to!(status)
-      unblock_dependents! if status == "success"
+      status == "success" ? unblock_dependents! : cancel_unreachable_dependents!
       workflow_run.recompute_status!
       workflow_run.pipeline.recompute_status!
     end
@@ -258,6 +259,19 @@ class JobRun < ApplicationRecord
 
   # Move pending jobs in this workflow to queued once every job they require
   # has succeeded. Called after a successful completion.
+  # A job that failed/was canceled can never satisfy its dependents' requires,
+  # so cancel the pending jobs that (transitively) wait on it instead of
+  # leaving them pending forever.
+  def cancel_unreachable_dependents!
+    loop do
+      dead = workflow_run.job_runs.where(status: %w[failed canceled]).pluck(:name).to_set
+      doomed = workflow_run.job_runs.pending.select { |j| j.requires_list.any? { |r| dead.include?(r) } }
+      break if doomed.empty?
+
+      doomed.each(&:cancel!)
+    end
+  end
+
   def unblock_dependents!
     successful = workflow_run.job_runs.success.pluck(:name).to_set
     workflow_run.job_runs.pending.find_each do |job|

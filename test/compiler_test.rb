@@ -275,4 +275,42 @@ class CompilerTest < Minitest::Test
     run = build[:steps].find { |s| s[:type] == "run" && s[:name] == "Build" }
     assert_equal %i[type name command shell background when].sort, run.keys.sort
   end
+
+  def test_run_step_carries_environment_and_no_output_timeout
+    yaml = <<~YAML
+      version: 2.1
+      jobs:
+        a:
+          docker: [{image: "ruby:3.3"}]
+          steps:
+            - run:
+                command: ./slow.sh
+                environment: {FOO: bar}
+                no_output_timeout: 30m
+      workflows:
+        w:
+          jobs: [a]
+    YAML
+    ir, errors = ForgeCI::Compiler.compile(yaml)
+    assert_empty errors
+    run = ir[:workflows].first[:jobs].first[:steps].first
+    assert_equal({ "FOO" => "bar" }, run[:environment])
+    assert_equal "30m", run[:no_output_timeout]
+  end
+
+  def test_bad_no_output_timeout_is_a_validation_error
+    yaml = <<~YAML
+      version: 2.1
+      jobs:
+        a:
+          docker: [{image: "ruby:3.3"}]
+          steps:
+            - run: {command: x, no_output_timeout: soon}
+      workflows:
+        w:
+          jobs: [a]
+    YAML
+    _ir, errors = ForgeCI::Compiler.compile(yaml)
+    assert(errors.any? { |e| e.to_s.include?("no_output_timeout") })
+  end
 end

@@ -80,7 +80,7 @@ module ForgeCI
         when "checkout"
           { type: "checkout", path: cfg["path"] }
         when "run"
-          {
+          run = {
             type: "run",
             name: cfg["name"] || cfg["command"],
             command: cfg["command"],
@@ -88,6 +88,11 @@ module ForgeCI
             background: cfg.fetch("background", false),
             when: cfg.fetch("when", "on_success")
           }
+          # Optional per-step settings — only emitted when set so existing
+          # IR consumers see no change.
+          run[:environment] = cfg["environment"] if cfg["environment"].is_a?(Hash)
+          run[:no_output_timeout] = cfg["no_output_timeout"].to_s if cfg["no_output_timeout"]
+          run
         when "save_cache"
           { type: "save_cache", keys: cache_keys(cfg), paths: cfg["paths"] || [] }
         when "restore_cache"

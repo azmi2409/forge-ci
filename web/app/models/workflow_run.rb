@@ -9,17 +9,19 @@ class WorkflowRun < ApplicationRecord
 
   validates :name, presence: true, uniqueness: { scope: :pipeline_id }
 
-  # Roll up job statuses: failed wins, then canceled, then running while any
-  # job is still in flight, else success.
+  # Roll up job statuses: running while any job is still in flight, then
+  # failed wins over canceled, else success. (Waiting for in-flight jobs
+  # keeps the terminal status — and the GitHub commit status — from firing
+  # while work is still running.)
   def recompute_status!
     jobs = job_runs
     new_status =
-      if jobs.failed.exists?
+      if jobs.where(status: %w[pending queued claimed running]).exists?
+        "running"
+      elsif jobs.failed.exists?
         "failed"
       elsif jobs.canceled.exists?
         "canceled"
-      elsif jobs.where(status: %w[pending queued claimed running]).exists?
-        "running"
       else
         "success"
       end

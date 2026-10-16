@@ -4,6 +4,8 @@ ENV["RAILS_ENV"] ||= "test"
 # Keep the SSE live-tail test fast: a live (non-terminal) job's stream would
 # otherwise hold the full 5-minute production timeout open.
 ENV["FORGE_CI_STREAM_TIMEOUT_SECONDS"] ||= "2"
+TEST_ADMIN_TOKEN = "test-admin-token-123"
+ENV["FORGE_CI_ADMIN_TOKEN"] = TEST_ADMIN_TOKEN
 require_relative "../config/environment"
 require "rails/test_help"
 
@@ -23,6 +25,10 @@ module ActiveSupport
       ir, errors = ForgeCI::Compiler.compile(yaml)
       assert_empty errors, "fixture failed to compile: #{errors.inspect}"
       ::JSON.parse(ir.to_json)
+    end
+
+    def admin_headers
+      { "Authorization" => "Bearer #{TEST_ADMIN_TOKEN}" }
     end
 
     def bearer_headers(raw_token)

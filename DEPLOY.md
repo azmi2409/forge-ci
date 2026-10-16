@@ -163,7 +163,7 @@ overridden to `./bin/jobs`.)
 | `ARTIFACT_RETENTION_DAYS` | no (30) | Artifact retention |
 | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_WEBHOOK_SECRET` | for GitHub | App auth (see §6) |
 | `APP_HOST` | recommended | Public base URL, e.g. `https://ci.example.com` (commit-status links) |
-| `FORGE_CI_ADMIN_TOKEN` | for rotation | Bearer token for context rotation API |
+| `FORGE_CI_ADMIN_TOKEN` | **yes** (for any non-GitHub use) | Bearer token for the admin API: create projects/contexts, rotate secrets, start/cancel pipelines (`forge-ci trigger`). Admin endpoints answer 503 while unset |
 | `FORGE_CI_STREAM_TIMEOUT_SECONDS` | no (300) | SSE live-tail hold time |
 
 ## 4. Runner hosts

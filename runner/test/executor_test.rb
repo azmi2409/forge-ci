@@ -85,7 +85,7 @@ class ExecutorTest < Minitest::Test
       ] }
     )
     # first exec fails
-    def ex.stream_exec(argv)
+    def ex.stream_exec(argv, **)
       @commands << [:stream_exec, argv]
       argv.last == "exit 1" ? 1 : 0
     end

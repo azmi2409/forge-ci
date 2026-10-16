@@ -7,8 +7,8 @@
 
 An open-source, **CircleCI-compatible CI/CD system** — pure Ruby, MIT licensed.
 
-**Status: MVP complete.** All 8 planned components are built, tested (259 runs,
-1023 assertions, green), and running from this repo.
+**Status: MVP complete.** All 8 planned components are built, tested (292 runs,
+1090 assertions, green), and running from this repo.
 
 Push code to GitHub → webhook → config compiled → jobs claimed by polling
 runners → executed in Docker → results and commit statuses posted back. No
@@ -63,9 +63,32 @@ RUNNER_TOKEN="<raw token printed by db:seed>" \
   bin/forge-ci-runner
 ```
 
-Then create a pipeline: compile a config with the CLI and `POST` the IR to
-`/api/v1/projects/:id/pipelines` (see [docs/api.md](docs/api.md)), or install
-the GitHub App and just push.
+## Using it for your CI/CD (no GitHub App needed)
+
+Set `FORGE_CI_ADMIN_TOKEN` on the server (`openssl rand -hex 32`), then:
+
+```sh
+export FORGE_CI_URL=https://ci.example.com FORGE_CI_ADMIN_TOKEN=...
+
+# one-time: a project and (optionally) a secrets context
+curl -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"name":"myapp","repo_url":"https://github.com/me/myapp.git"}' $FORGE_CI_URL/api/v1/projects
+curl -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"name":"prod","payload":{"DEPLOY_KEY":"..."}}' $FORGE_CI_URL/api/v1/projects/1/contexts
+
+# every run: compile .circleci/config.yml and start a pipeline for the
+# current git branch/sha; --wait blocks and exits non-zero on failure
+forge-ci trigger .circleci/config.yml --project myapp --context prod --wait
+
+forge-ci cancel 42          # stop a running pipeline
+```
+
+Or install the GitHub App and just push (see [DEPLOY.md](DEPLOY.md)).
+Private repos: set `CHECKOUT_REPO_URL` on the runner with a token embedded
+(`https://x-access-token:TOKEN@github.com/org/repo.git`), or use the GitHub App.
+Steps are killed after `STEP_NO_OUTPUT_TIMEOUT` seconds of silence (default
+600; per-step `no_output_timeout:` is honored) and jobs after `JOB_TIMEOUT`
+(default 3600).
 
 Production deployment: **[DEPLOY.md](DEPLOY.md)** · Remaining work:
 **[TODO.md](TODO.md)**

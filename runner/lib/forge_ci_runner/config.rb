@@ -20,13 +20,18 @@ module ForgeCIRunner
   #                        https://x-access-token:TOKEN@github.com/org/repo.git
   #   REDACT_MIN_LENGTH    env values shorter than this are not redacted (default: 8)
   #   DOCKER_BIN           path to the docker CLI (default: "docker")
+  #   STEP_NO_OUTPUT_TIMEOUT  seconds a `run` step may stay silent before it is
+  #                        killed (default: 600, like CircleCI; a step's own
+  #                        `no_output_timeout:` overrides it; 0 disables)
+  #   JOB_TIMEOUT          wall-clock seconds a whole job may run (default: 3600;
+  #                        0 disables)
   class Config
     class Error < StandardError; end
 
     attr_reader :control_plane_url, :runner_token, :resource_class,
                 :poll_interval, :max_idle_interval, :heartbeat_interval,
                 :log_chunk_size, :checkout_repo_url, :redact_min_length,
-                :docker_bin
+                :docker_bin, :step_no_output_timeout, :job_timeout
 
     def self.from_env(env = ENV)
       new(
@@ -39,7 +44,9 @@ module ForgeCIRunner
         log_chunk_size: (env["LOG_CHUNK_SIZE"] || 65_536).to_i,
         checkout_repo_url: env["CHECKOUT_REPO_URL"],
         redact_min_length: (env["REDACT_MIN_LENGTH"] || 8).to_i,
-        docker_bin: env["DOCKER_BIN"] || "docker"
+        docker_bin: env["DOCKER_BIN"] || "docker",
+        step_no_output_timeout: (env["STEP_NO_OUTPUT_TIMEOUT"] || 600).to_f,
+        job_timeout: (env["JOB_TIMEOUT"] || 3600).to_f
       )
     end
 
@@ -52,7 +59,8 @@ module ForgeCIRunner
                    poll_interval: 5.0, max_idle_interval: 60.0,
                    heartbeat_interval: 15.0, log_chunk_size: 65_536,
                    checkout_repo_url: nil, redact_min_length: 8,
-                   docker_bin: "docker")
+                   docker_bin: "docker", step_no_output_timeout: 600.0,
+                   job_timeout: 3600.0)
       raise Error, "CONTROL_PLANE_URL is required" if control_plane_url.to_s.empty?
       if runner_token.to_s.empty?
         raise Error, "RUNNER_TOKEN is required — set it to the same secret as " \
@@ -69,6 +77,8 @@ module ForgeCIRunner
       @checkout_repo_url = checkout_repo_url
       @redact_min_length = redact_min_length
       @docker_bin = docker_bin
+      @step_no_output_timeout = step_no_output_timeout
+      @job_timeout = job_timeout
     end
   end
 end

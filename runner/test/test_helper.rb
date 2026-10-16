@@ -160,7 +160,7 @@ class RecordingExecutor < ForgeCIRunner::Executor
     @fail_on = fail_on
   end
 
-  def stream_exec(argv)
+  def stream_exec(argv, **)
     @commands << [:stream_exec, argv]
     @fail_on == :exec ? 1 : 0
   end

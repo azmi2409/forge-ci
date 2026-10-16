@@ -1,4 +1,5 @@
 <% content_for(:title, "Pipeline #{@pipeline.sha[0, 10]} — ForgeCI") %>
+<% content_for(:head) { tag.meta(http_equiv: "refresh", content: "5") } unless @pipeline.terminal? %>
 
 <p class="meta"><%= link_to "← projects", root_path %> / <%= @project.name %></p>
 <h1>Pipeline <span class="mono"><%= @pipeline.sha[0, 12] %></span></h1>
@@ -6,6 +7,11 @@
   <%= status_badge(@pipeline.status) %>
   <span class="meta">branch <span class="mono"><%= @pipeline.branch %></span> · <%= @pipeline.created_at.strftime("%Y-%m-%d %H:%M") %></span>
 </p>
+<% unless @pipeline.terminal? %>
+  <%= button_to "Cancel pipeline", cancel_project_pipeline_path(@project, @pipeline),
+                method: :post, data: { turbo_confirm: "Cancel this pipeline?" } %>
+<% end %>
+<% if flash[:notice] %><p class="note"><%= flash[:notice] %></p><% end %>
 
 <% @workflows.each do |wf| %>
   <h2>Workflow: <%= wf.name %> <%= status_badge(wf.status) %></h2>

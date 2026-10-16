@@ -74,10 +74,12 @@ module ForgeCIRunner
     # "success" | "failed" | "canceled" and step_results matches the
     # control plane's complete contract (names follow the server's
     # `step["name"] || step["type"]` convention).
-    def execute(shutdown_check = -> { false })
+    def execute(shutdown_check = -> { false }, cancel_check: -> { false })
       results = []
       failed = false
       shutting_down = false
+      @cancel_check = cancel_check
+      @job_deadline = @config.job_timeout.to_f.positive? ? monotonic + @config.job_timeout : nil
 
       begin
         log_line("[forge-ci] starting job ##{@job_id} " \
@@ -85,9 +87,9 @@ module ForgeCIRunner
         setup_containers
 
         StepPlanner.plan(@payload["steps"]).each do |entry|
-          if shutdown_check.call
+          if shutdown_check.call || @cancel_check.call
             shutting_down = true
-            results << skipped_result(entry, "runner shutting down")
+            results << skipped_result(entry, @cancel_check.call ? "job canceled" : "runner shutting down")
             next
           end
 
@@ -109,6 +111,7 @@ module ForgeCIRunner
         cleanup_containers
       end
 
+      shutting_down ||= @cancel_check.call
       status = shutting_down ? "canceled" : (failed ? "failed" : "success")
       [status, results.map(&:to_h)]
     end
@@ -165,6 +168,7 @@ module ForgeCIRunner
       args << "-d" if detached
       args += ["-w", @workdir] if @workdir
       args += env_args(@environment)
+      args += env_args(step["environment"]) if step["environment"].is_a?(Hash)
       args << @container
       args + shell + ["-c", step["command"].to_s]
     end
@@ -183,23 +187,87 @@ module ForgeCIRunner
       [out, status.exitstatus]
     end
 
-    def stream_exec(argv)
+    TIMEOUT_EXIT = 124
+    CANCEL_EXIT = 130
+
+    # Streams a command's output to the job log. Kills it (and returns 124)
+    # when it is silent for longer than +no_output_timeout+ seconds or the job
+    # deadline passes, and (returning 130) when the job is canceled.
+    # The `docker exec` client is what gets killed; the process inside the
+    # container dies with the job container at cleanup.
+    def stream_exec(argv, no_output_timeout: @config.step_no_output_timeout)
       exit_code = nil
+      last_output = monotonic
       Open3.popen3(*argv) do |stdin, stdout, stderr, wait_thr|
         stdin.close
         readers = [stdout, stderr].map do |io|
           Thread.new do
             begin
-              io.each_line { |line| @streamer.write(line) }
+              io.each_line do |line|
+                last_output = monotonic
+                @streamer.write(line)
+              end
             rescue IOError
               # stream closed; done
             end
           end
         end
-        readers.each(&:join)
-        exit_code = wait_thr.value.exitstatus
+
+        reason = nil
+        until wait_thr.join(0.5)
+          now = monotonic
+          if @cancel_check&.call
+            reason = :canceled
+          elsif no_output_timeout.to_f.positive? && now - last_output > no_output_timeout
+            reason = :no_output
+          elsif @job_deadline && now > @job_deadline
+            reason = :job_timeout
+          end
+          next unless reason
+
+          kill_process(wait_thr)
+          # A grandchild may still hold the pipes open; don't wait on it.
+          [stdout, stderr].each { |io| io.close unless io.closed? }
+          break
+        end
+
+        readers.each { |t| t.join(5) }
+        status = wait_thr.value
+        exit_code = status.exitstatus || TIMEOUT_EXIT
+        case reason
+        when :canceled
+          log_line("[forge-ci] step stopped: job was canceled")
+          exit_code = CANCEL_EXIT
+        when :no_output
+          log_line("[forge-ci] step killed: no output for #{no_output_timeout.to_i}s (no_output_timeout)")
+          exit_code = TIMEOUT_EXIT
+        when :job_timeout
+          log_line("[forge-ci] step killed: job exceeded #{@config.job_timeout.to_i}s (JOB_TIMEOUT)")
+          exit_code = TIMEOUT_EXIT
+        end
       end
       exit_code
+    end
+
+    def kill_process(wait_thr)
+      Process.kill("TERM", wait_thr.pid)
+      return if wait_thr.join(5)
+
+      Process.kill("KILL", wait_thr.pid)
+    rescue Errno::ESRCH
+      nil
+    end
+
+    def monotonic
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    # "30s" / "10m" / "1h" / bare seconds -> seconds (nil when unparseable).
+    def parse_duration(value)
+      m = value.to_s.strip.match(/\A(\d+(?:\.\d+)?)([smh]?)\z/)
+      return nil unless m
+
+      m[1].to_f * { "" => 1, "s" => 1, "m" => 60, "h" => 3600 }.fetch(m[2])
     end
 
     def setup_containers
@@ -275,7 +343,8 @@ module ForgeCIRunner
         return code
       end
 
-      stream_exec(exec_argv(step))
+      timeout = parse_duration(step["no_output_timeout"]) || @config.step_no_output_timeout
+      stream_exec(exec_argv(step), no_output_timeout: timeout)
     end
 
     def execute_checkout(step)

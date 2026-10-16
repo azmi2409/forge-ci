@@ -238,10 +238,7 @@ dependents. Fixed additively in the repo root (commit `ca9f633`):
 
 ## Not yet (deferred)
 
-- GitHub App auth on the raw intake endpoint (currently unauthenticated; the
-  GitHub flow goes through the HMAC-verified webhook instead)
 - Real UI auth (login, RBAC) — v1 is HTTP basic auth via env vars
-- Pipeline cancel API
 - Per-branch context scoping; secret redaction stays runner-side (see
   "Secrets threat model"); rotation audit log
 - Log blob delta-append (currently each chunk POST rewrites the whole blob

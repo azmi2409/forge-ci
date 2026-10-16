@@ -8,7 +8,9 @@ Rails.application.routes.draw do
   # --- Web UI (HTTP basic auth, see ApplicationController) -------------------
 
   resources :projects, only: %i[index] do
-    resources :pipelines, only: %i[show]
+    resources :pipelines, only: %i[show] do
+      member { post :cancel }
+    end
   end
   resources :job_runs, only: %i[show]
 
@@ -18,12 +20,18 @@ Rails.application.routes.draw do
       # Pipeline intake — the seam the GitHub App (component 3) calls.
       # Cache API (component 7) — scoped to the project; the Bearer token
       # must own a claimed/running job in that project.
-      resources :projects, only: [] do
+      resources :projects, only: %i[index create] do
         resources :pipelines, only: %i[create]
+        resources :contexts, only: %i[create]
         member do
           put :cache, to: "cache#upsert"
           get :cache, to: "cache#show"
         end
+      end
+
+      # Pipeline status / cancel (admin-token authed).
+      resources :pipelines, only: %i[show] do
+        member { post :cancel }
       end
 
       # Runner polling API (Bearer-token auth via RunnerToken).

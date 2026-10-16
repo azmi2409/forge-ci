@@ -185,4 +185,117 @@ class CLITest < Minitest::Test
     exe = File.expand_path("../exe/forge-ci", __dir__)
     assert File.executable?(exe), "exe/forge-ci should be executable"
   end
+
+  # -- trigger / cancel ------------------------------------------------------
+
+  require "socket"
+
+  # Tiny one-shot-per-request HTTP server recording requests.
+  def with_fake_server(routes)
+    server = TCPServer.new("127.0.0.1", 0)
+    requests = []
+    thread = Thread.new do
+      loop do
+        sock = server.accept
+        request_line = sock.gets.to_s
+        headers = {}
+        while (line = sock.gets) && line != "\r\n"
+          k, v = line.split(": ", 2)
+          headers[k.downcase] = v.to_s.strip
+        end
+        body = headers["content-length"] ? sock.read(headers["content-length"].to_i) : ""
+        verb, path, = request_line.split
+        requests << { verb: verb, path: path, headers: headers, body: body }
+        code, payload = routes.fetch("#{verb} #{path}") { [404, { error: "nope" }] }
+        json = JSON.generate(payload)
+        sock.write "HTTP/1.1 #{code} X\r\nContent-Type: application/json\r\n" \
+                   "Content-Length: #{json.bytesize}\r\nConnection: close\r\n\r\n#{json}"
+        sock.close
+      end
+    rescue IOError, Errno::EBADF
+      nil
+    end
+    yield "http://127.0.0.1:#{server.addr[1]}", requests
+  ensure
+    server&.close
+    thread&.kill
+  end
+
+  def test_trigger_compiles_and_posts_the_pipeline
+    routes = { "POST /api/v1/projects/7/pipelines" => [201, { id: 42, status: "running" }] }
+    with_fake_server(routes) do |url, requests|
+      status, out, err = run_cli("trigger", fixture_path("full.yml"), "--project", "7", "--url", url,
+                                 "--token", "adm", "--branch", "main", "--sha", "deadbeef", "--context", "prod")
+      assert_equal 0, status, err
+      assert_match(/pipeline 42 started/, out)
+      req = requests.first
+      assert_equal "Bearer adm", req[:headers]["authorization"]
+      body = JSON.parse(req[:body])
+      assert_equal "deadbeef", body["sha"]
+      assert_equal "main", body["branch"]
+      assert_equal ["prod"], body["contexts"]
+      assert body["ir"]["workflows"].any?
+    end
+  end
+
+  def test_trigger_resolves_project_names_and_waits_for_success
+    routes = {
+      "GET /api/v1/projects" => [200, { projects: [{ id: 9, name: "demo" }] }],
+      "POST /api/v1/projects/9/pipelines" => [201, { id: 5 }],
+      "GET /api/v1/pipelines/5" => [200, { id: 5, status: "success" }]
+    }
+    with_fake_server(routes) do |url, _requests|
+      status, out, err = run_cli("trigger", fixture_path("full.yml"), "--project", "demo", "--url", url,
+                                 "--token", "t", "--branch", "b", "--sha", "s", "--wait", "--poll", "0")
+      assert_equal 0, status, err
+      assert_match(/pipeline 5: success/, out)
+    end
+  end
+
+  def test_trigger_wait_exits_one_when_pipeline_fails
+    routes = {
+      "POST /api/v1/projects/9/pipelines" => [201, { id: 5 }],
+      "GET /api/v1/pipelines/5" => [200, { id: 5, status: "failed" }]
+    }
+    with_fake_server(routes) do |url, _requests|
+      status, = run_cli("trigger", fixture_path("full.yml"), "--project", "9", "--url", url,
+                        "--token", "t", "--branch", "b", "--sha", "s", "--wait", "--poll", "0")
+      assert_equal 1, status
+    end
+  end
+
+  def test_trigger_reports_server_errors
+    routes = { "POST /api/v1/projects/9/pipelines" => [401, { error: "unauthorized" }] }
+    with_fake_server(routes) do |url, _requests|
+      status, _out, err = run_cli("trigger", fixture_path("full.yml"), "--project", "9", "--url", url,
+                                  "--token", "bad", "--branch", "b", "--sha", "s")
+      assert_equal 1, status
+      assert_match(/HTTP 401.*unauthorized/, err)
+    end
+  end
+
+  def test_trigger_requires_project_url_and_token
+    status, _out, err = run_cli("trigger", fixture_path("full.yml"), "--url", "http://x", "--token", "t")
+    assert_equal 2, status
+    assert_match(/--project/, err)
+    status, _out, err = run_cli("trigger", fixture_path("full.yml"), "--project", "1")
+    assert_equal 2, status
+    assert_match(/--url/, err)
+  end
+
+  def test_trigger_does_not_contact_server_for_an_invalid_config
+    status, _out, err = run_cli("trigger", fixture_path("invalid_cycle.yml"), "--project", "1", "--url", "http://127.0.0.1:1",
+                                "--token", "t", "--branch", "b", "--sha", "s")
+    assert_equal 1, status
+    refute_match(/could not reach/, err)
+  end
+
+  def test_cancel_posts_to_the_cancel_endpoint
+    routes = { "POST /api/v1/pipelines/3/cancel" => [200, { id: 3, status: "canceled" }] }
+    with_fake_server(routes) do |url, _requests|
+      status, out, = run_cli("cancel", "3", "--url", url, "--token", "t")
+      assert_equal 0, status
+      assert_match(/canceled/, out)
+    end
+  end
 end

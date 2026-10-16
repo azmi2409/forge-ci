@@ -16,7 +16,9 @@ module Github
   end
 
   def self.private_key_pem
-    ENV["GITHUB_APP_PRIVATE_KEY"].presence
+    # .env files / PaaS dashboards often store the PEM on one line with
+    # literal "\n" sequences — restore the real newlines.
+    ENV["GITHUB_APP_PRIVATE_KEY"].presence&.gsub("\\n", "\n")
   end
 
   def self.webhook_secret

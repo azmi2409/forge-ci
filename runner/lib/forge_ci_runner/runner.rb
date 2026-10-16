@@ -57,7 +57,7 @@ module ForgeCIRunner
 
       heartbeat = start_heartbeat(job_id)
       begin
-        status, step_results = executor.execute(-> { @shutdown })
+        status, step_results = executor.execute(-> { @shutdown }, cancel_check: -> { @job_canceled })
         @client.complete_job(job_id, status, step_results)
         log("job ##{job_id} #{status}")
       rescue Client::HTTPError => e
@@ -77,13 +77,20 @@ module ForgeCIRunner
 
     def start_heartbeat(job_id)
       @heartbeat_stop = false
+      @job_canceled = false
       Thread.new do
         until @heartbeat_stop
           sleep @config.heartbeat_interval
           break if @heartbeat_stop
 
           begin
-            @client.heartbeat(job_id)
+            reply = @client.heartbeat(job_id)
+            # The control plane cancels a job (pipeline canceled) by flipping
+            # its status; the heartbeat reply tells us to stop.
+            if reply.is_a?(Hash) && reply["status"] == "canceled" && !@job_canceled
+              log("job ##{job_id} was canceled by the control plane; stopping")
+              @job_canceled = true
+            end
           rescue StandardError => e
             log("heartbeat failed for job ##{job_id}: #{e.class}: #{e.message}")
           end
