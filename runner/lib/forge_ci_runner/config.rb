@@ -5,7 +5,9 @@ module ForgeCIRunner
   #
   # Required:
   #   CONTROL_PLANE_URL  base URL of the forge-ci control plane, e.g. https://ci.example.com
-  #   RUNNER_TOKEN       raw runner token (generated via RunnerToken.generate! on the server)
+  #   RUNNER_TOKEN       shared runner secret — set the SAME value as the
+  #                        server's FORGE_CI_RUNNER_TOKEN (pick any strong
+  #                        random string, e.g. `openssl rand -hex 32`)
   #
   # Optional:
   #   RESOURCE_CLASS       resource class this runner serves (default: token's class)
@@ -52,7 +54,10 @@ module ForgeCIRunner
                    checkout_repo_url: nil, redact_min_length: 8,
                    docker_bin: "docker")
       raise Error, "CONTROL_PLANE_URL is required" if control_plane_url.to_s.empty?
-      raise Error, "RUNNER_TOKEN is required" if runner_token.to_s.empty?
+      if runner_token.to_s.empty?
+        raise Error, "RUNNER_TOKEN is required — set it to the same secret as " \
+                     "the server's FORGE_CI_RUNNER_TOKEN (e.g. `openssl rand -hex 32`)"
+      end
 
       @control_plane_url = control_plane_url.sub(%r{/+\z}, "")
       @runner_token = runner_token

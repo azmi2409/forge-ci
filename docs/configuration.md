@@ -38,7 +38,8 @@ Generate encryption keys with `bin/rails db:encryption:init`.
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `CONTROL_PLANE_URL` | yes | — | Base URL of the control plane |
-| `RUNNER_TOKEN` | yes | — | Raw runner token (Bearer auth) |
+| `RUNNER_TOKEN` | yes (runner) | — | Shared runner secret (same value as the server's `FORGE_CI_RUNNER_TOKEN`) |
+| `FORGE_CI_RUNNER_TOKEN` | to enable (server) | — | Operator-chosen runner secret; runners presenting it authenticate as `static-runner` (no per-token provisioning needed) |
 | `RESOURCE_CLASS` | no | token's class | Passed to the claim endpoint; the server matches jobs on it |
 | `POLL_INTERVAL` | no | `5` | Idle poll interval, seconds (backoff base) |
 | `MAX_IDLE_INTERVAL` | no | `60` | Idle backoff cap, seconds |

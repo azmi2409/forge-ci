@@ -1,0 +1,164 @@
+<% content_for(:title, "ForgeCI — CI/CD that speaks CircleCI") %>
+
+<!-- ================= HERO ================= -->
+<section style="padding-top: 88px;">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <span class="eyebrow">Open source &middot; MIT licensed</span>
+        <h1 class="hero-title">CI/CD that speaks <span class="accent">CircleCI</span></h1>
+        <p class="hero-sub">
+          ForgeCI runs your <code>.circleci/config.yml</code>-style pipelines on your own
+          infrastructure. A pure-Ruby compiler turns CircleCI&nbsp;2.1 configs into
+          pipelines; Docker runners execute them and stream the logs back live.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="/projects">Open dashboard</a>
+          <a class="btn btn-secondary" href="https://github.com/azmi2409/forge-ci">View on GitHub</a>
+        </div>
+      </div>
+      <div class="terminal">
+        <div class="terminal-bar">
+          <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+          <span class="terminal-title">.forge-ci/config.yml</span>
+        </div>
+<pre class="terminal-body"><code><span class="c"># Looks like CircleCI. That's the point.</span>
+<span class="k">version</span>: <span class="s">2.1</span>
+
+<span class="k">jobs</span>:
+  <span class="k">build</span>:
+    <span class="k">docker</span>:
+      - <span class="k">image</span>: <span class="s">cimg/ruby:3.4</span>
+    <span class="k">steps</span>:
+      - <span class="k">checkout</span>
+      - <span class="k">run</span>:
+          <span class="k">name</span>: <span class="s">Install dependencies</span>
+          <span class="k">command</span>: <span class="s">bundle install</span>
+      - <span class="k">run</span>:
+          <span class="k">name</span>: <span class="s">Run tests</span>
+          <span class="k">command</span>: <span class="s">bundle exec rake test</span>
+
+<span class="k">workflows</span>:
+  <span class="k">build-and-test</span>:
+    <span class="k">jobs</span>:
+      - <span class="k">build</span></code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FEATURES ================= -->
+<section id="features">
+  <div class="wrap">
+    <h2 class="section-title">Everything a CI needs. Nothing it doesn't.</h2>
+    <p class="section-sub">A complete continuous-integration system in two pieces: a Rails control plane and zero-dependency Docker runners.</p>
+    <div class="features">
+      <div class="feature">
+        <div class="icon">&#128260;</div>
+        <h3>CircleCI 2.1 compatible</h3>
+        <p>A pure-Ruby, zero-dependency config compiler turns CircleCI-style YAML into executable pipelines. Bring your existing config and muscle memory.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">&#128051;</div>
+        <h3>Docker runners</h3>
+        <p>Stdlib-only Ruby runners claim queued jobs and run each step in isolated Docker containers. Scale horizontally — just add more runners.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">&#128225;</div>
+        <h3>Live log streaming</h3>
+        <p>Watch job output in real time. Runners push log chunks over the API; the dashboard tails them via Server-Sent Events.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">&#128190;</div>
+        <h3>Cache &amp; artifacts</h3>
+        <p>Dependency caches and build artifacts backed by S3, with per-project scoping and configurable retention.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">&#128272;</div>
+        <h3>Contexts &amp; secrets</h3>
+        <p>Encrypted environment contexts shared across projects, injected at runtime — with admin-gated secret rotation.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">&#128025;</div>
+        <h3>GitHub App integration</h3>
+        <p>Push webhooks trigger pipelines automatically, and commit statuses report build results back to your pull requests.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= HOW IT WORKS ================= -->
+<section id="how-it-works">
+  <div class="wrap">
+    <h2 class="section-title">How it works</h2>
+    <p class="section-sub">Three stages, from <code>git push</code> to green build.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Push</h3>
+        <p>Install the GitHub App on your repos. Every push fires a webhook; ForgeCI fetches <code>.forge-ci/config.yml</code> at that commit.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Compile</h3>
+        <p>The control plane compiles your CircleCI-style config into a pipeline of jobs, workflows, and dependencies — validated before anything runs.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Run</h3>
+        <p>Runners claim queued jobs, execute each step in Docker, and stream logs live to the dashboard while commit statuses update on GitHub.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= ARCHITECTURE ================= -->
+<section id="architecture">
+  <div class="wrap">
+    <h2 class="section-title">Simple architecture</h2>
+    <p class="section-sub">One control plane, as many runners as you need, boring dependable storage.</p>
+    <div class="arch">
+<pre>                    ┌─────────────────────┐
+                    │     <span class="hl">GitHub App</span>        │
+                    │  webhooks + statuses │
+                    └──────────┬──────────┘
+                               │ push
+                    ┌──────────▼──────────┐      ┌──────────────┐
+                    │   <span class="hl">Control plane</span>     │─────▶│   <span class="hl">Postgres</span>   │
+                    │      (Rails 8)      │      │  jobs + state│
+                    └──────────┬──────────┘      └──────────────┘
+                               │ claim / heartbeat / logs
+                    ┌──────────▼──────────┐      ┌──────────────┐
+                    │ <span class="hl">Runners</span> (Docker)    │─────▶│      <span class="hl">S3</span>      │
+                    │   zero-dep Ruby     │      │ logs/artifacts│
+                    └─────────────────────┘      └──────────────┘</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ================= QUICKSTART ================= -->
+<section id="quickstart">
+  <div class="wrap">
+    <h2 class="section-title">Quickstart</h2>
+    <p class="section-sub">The whole stack — Postgres, control plane, worker, runner — with one compose file.</p>
+    <div class="terminal">
+      <div class="terminal-bar">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="terminal-title">terminal</span>
+      </div>
+<pre class="terminal-body"><code><span class="p">$</span> cp .env.example .env   <span class="c"># fill in S3 credentials + bucket, pick a RUNNER_TOKEN secret</span>
+<span class="p">$</span> openssl rand -hex 32   <span class="c"># → paste into .env as RUNNER_TOKEN</span>
+<span class="p">$</span> docker compose up --build -d
+<span class="p">$</span> docker compose up -d runner
+<span class="p">$</span> <span class="c"># → open http://localhost:3000</span></code></pre>
+    </div>
+    <p class="qs-note">
+      Object storage is AWS S3 — create the bucket first
+      (<code>aws s3 mb s3://&lt;your-bucket&gt;</code>). The same
+      <code>RUNNER_TOKEN</code> value authenticates the runner against the control
+      plane, so there's no token to copy around. See
+      <a href="https://github.com/azmi2409/forge-ci/blob/main/DEPLOY.md">DEPLOY.md</a>
+      for production deploys.
+    </p>
+  </div>
+</section>

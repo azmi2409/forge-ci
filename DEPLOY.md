@@ -8,13 +8,14 @@ docker compose up --build -d
 ```
 
 This brings up Postgres, the control plane,
-and the Solid Queue worker (object storage is AWS S3 — see §2). Then create a runner token and start the runner
-(the token step is manual — see the header of `docker-compose.yml`):
+and the Solid Queue worker (object storage is AWS S3 — see §2).
+
+Pick a runner secret first (any strong random value) and set it as
+`RUNNER_TOKEN` — the server accepts the same value as its
+`FORGE_CI_RUNNER_TOKEN`, so the runner connects with no further setup:
 
 ```sh
-docker compose exec web bin/rails runner \
-  'puts RunnerToken.generate!(name: "compose-runner").last'
-# put the token in .env as RUNNER_TOKEN, then:
+openssl rand -hex 32   # put it in .env as RUNNER_TOKEN
 docker compose up -d runner
 ```
 
@@ -183,7 +184,7 @@ Type=simple
 User=root
 # (root, or a user in the docker group)
 Environment=CONTROL_PLANE_URL=https://ci.example.com
-Environment=RUNNER_TOKEN=<raw token from RunnerToken.generate!>
+Environment=RUNNER_TOKEN=<shared secret, same as the server's FORGE_CI_RUNNER_TOKEN>
 Environment=RESOURCE_CLASS=medium
 Environment=POLL_INTERVAL=5
 WorkingDirectory=/opt/forge-ci-runner

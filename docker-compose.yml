@@ -1,17 +1,14 @@
 # ForgeCI full stack — one command to run everything locally.
 #
-#   cp .env.example .env   # then fill in your AWS S3 credentials + bucket
+#   cp .env.example .env   # then fill in: secrets + AWS S3 bucket
 #   docker compose up --build -d
 #
-# Then create a runner token (the seeded demo token is also printed once in
-# `docker compose logs web` on first boot):
+# Pick a runner secret first (any strong random value):
 #
-#   docker compose exec web bin/rails runner \
-#     'puts RunnerToken.generate!(name: "compose-runner").last'
+#   openssl rand -hex 32   # put it in .env as RUNNER_TOKEN
 #
-# Put the token in .env as RUNNER_TOKEN and start the runner:
-#
-#   docker compose up -d runner
+# The server accepts the same value as FORGE_CI_RUNNER_TOKEN, so the runner
+# connects with no further setup — no tokens to copy out of logs.
 #
 # Web UI: http://localhost:3000 (admin / password from .env)
 #
@@ -35,6 +32,11 @@ x-web-env: &web-env
   ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: ${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT:?set in .env}
   FORGE_CI_UI_USER: ${FORGE_CI_UI_USER:-admin}
   FORGE_CI_UI_PASSWORD: ${FORGE_CI_UI_PASSWORD:-password}
+  # Shared runner secret (Drone-style): set RUNNER_TOKEN to any strong random
+  # value (e.g. `openssl rand -hex 32`). The server accepts it as the
+  # "static-runner" token; the runner presents it as RUNNER_TOKEN. No need
+  # to copy tokens out of logs.
+  FORGE_CI_RUNNER_TOKEN: ${RUNNER_TOKEN:-}
   ACTIVE_STORAGE_SERVICE: amazon
   AWS_S3_BUCKET: "${AWS_S3_BUCKET:?set AWS_S3_BUCKET in .env}"
   AWS_REGION: ${AWS_REGION:-us-east-1}

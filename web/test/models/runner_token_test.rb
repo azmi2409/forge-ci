@@ -30,4 +30,43 @@ class RunnerTokenTest < ActiveSupport::TestCase
     RunnerToken.generate!(name: "runner-1")
     assert_raises(ActiveRecord::RecordInvalid) { RunnerToken.generate!(name: "runner-1") }
   end
+
+  test "authenticate accepts the static FORGE_CI_RUNNER_TOKEN secret and provisions a record" do
+    secret = "s3cr3t-#{SecureRandom.hex(16)}"
+    original = ENV["FORGE_CI_RUNNER_TOKEN"]
+    ENV["FORGE_CI_RUNNER_TOKEN"] = secret
+    begin
+      record = RunnerToken.authenticate(secret)
+      assert record.persisted?
+      assert_equal "static-runner", record.name
+      assert_nil record.resource_class
+      # Second call returns the same record (no duplicates).
+      assert_equal record.id, RunnerToken.authenticate(secret).id
+      assert_equal 1, RunnerToken.where(name: "static-runner").count
+    ensure
+      ENV["FORGE_CI_RUNNER_TOKEN"] = original
+    end
+  end
+
+  test "authenticate ignores the static secret when it does not match" do
+    original = ENV["FORGE_CI_RUNNER_TOKEN"]
+    ENV["FORGE_CI_RUNNER_TOKEN"] = "the-real-secret"
+    begin
+      assert_nil RunnerToken.authenticate("wrong-secret")
+      assert_equal 0, RunnerToken.where(name: "static-runner").count
+    ensure
+      ENV["FORGE_CI_RUNNER_TOKEN"] = original
+    end
+  end
+
+  test "generated tokens still authenticate when a static secret is set" do
+    original = ENV["FORGE_CI_RUNNER_TOKEN"]
+    ENV["FORGE_CI_RUNNER_TOKEN"] = "the-real-secret"
+    begin
+      record, raw = RunnerToken.generate!(name: "runner-1")
+      assert_equal record, RunnerToken.authenticate(raw)
+    ensure
+      ENV["FORGE_CI_RUNNER_TOKEN"] = original
+    end
+  end
 end

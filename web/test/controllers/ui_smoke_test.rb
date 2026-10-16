@@ -15,12 +15,24 @@ class UiSmokeTest < ActionDispatch::IntegrationTest
   end
 
   test "UI requires basic auth" do
-    get "/"
+    get "/projects"
     assert_response :unauthorized
   end
 
+  test "landing page is public" do
+    get "/"
+    assert_response :ok
+    assert_match "ForgeCI", response.body
+    assert_match "CircleCI", response.body
+  end
+
+  test "dashboard redirects to projects" do
+    get "/dashboard"
+    assert_redirected_to "/projects"
+  end
+
   test "projects index renders" do
-    get "/", headers: ui_basic_auth_headers
+    get "/projects", headers: ui_basic_auth_headers
     assert_response :ok
     assert_match "demo", response.body
   end

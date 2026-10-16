@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
 Rails.application.routes.draw do
+  # --- Public landing page (no auth) -----------------------------------------
+  root "landing#show"
+  get "/dashboard", to: redirect("/projects")
+
   # --- Web UI (HTTP basic auth, see ApplicationController) -------------------
-  root "projects#index"
 
   resources :projects, only: %i[index] do
     resources :pipelines, only: %i[show]

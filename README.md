@@ -31,12 +31,9 @@ inbound ports on runners, no proprietary control plane.
 worker, runner; object storage is AWS S3):
 
 ```sh
-cp .env.example .env   # dev defaults work as-is
+cp .env.example .env   # then fill in: secrets + AWS S3 bucket
+openssl rand -hex 32   # → put it in .env as RUNNER_TOKEN (shared runner secret)
 docker compose up --build -d
-# create a runner token, put it in .env as RUNNER_TOKEN, then:
-docker compose exec web bin/rails runner \
-  'puts RunnerToken.generate!(name: "compose-runner").last'
-docker compose up -d runner
 # → http://localhost:3000 (admin / password from .env)
 ```
 
