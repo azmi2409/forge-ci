@@ -35,8 +35,19 @@ module ActiveSupport
       { "Authorization" => "Bearer #{raw_token}" }
     end
 
-    def ui_basic_auth_headers(user = "admin", password = "password")
-      { "Authorization" => "Basic #{Base64.strict_encode64("#{user}:#{password}")}" }
+    TEST_PASSWORD = "correct-horse-battery"
+
+    # Create (if needed) and sign in through the real login form.
+    def sign_in_as(username = "tester", role: :member, password: TEST_PASSWORD)
+      user = User.find_by(username: username) ||
+             User.create!(username: username, password: password, role: role)
+      post "/login", params: { username: username, password: password }
+      assert_response :redirect
+      user
+    end
+
+    def sign_in_as_admin
+      sign_in_as("admin", role: :admin)
     end
 
     def json_body

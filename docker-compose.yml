@@ -32,6 +32,7 @@ x-web-env: &web-env
   ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: ${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT:?set in .env}
   FORGE_CI_UI_USER: ${FORGE_CI_UI_USER:-admin}
   FORGE_CI_UI_PASSWORD: ${FORGE_CI_UI_PASSWORD:-password}
+  FORCE_SSL: ${FORCE_SSL:-false}
   # Shared runner secret (Drone-style): set RUNNER_TOKEN to any strong random
   # value (e.g. `openssl rand -hex 32`). The server accepts it as the
   # "static-runner" token; the runner presents it as RUNNER_TOKEN. No need

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_15_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_16_100000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.string "name", null: false
     t.string "record_type", null: false
@@ -169,6 +169,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_15_130000) do
     t.datetime "updated_at", null: false
     t.index ["job_run_id", "name"], name: "index_step_runs_on_job_run_id_and_name", unique: true
     t.index ["job_run_id"], name: "index_step_runs_on_job_run_id"
+  end
+
+  create_table "users", force: :cascade do |t|
+    t.string "username", null: false
+    t.string "password_digest", null: false
+    t.integer "role", default: 0, null: false
+    t.string "session_nonce", null: false
+    t.integer "failed_attempts", default: 0, null: false
+    t.datetime "locked_until"
+    t.datetime "last_login_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["username"], name: "index_users_on_username", unique: true
   end
 
   create_table "workflow_runs", force: :cascade do |t|

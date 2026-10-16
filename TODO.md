@@ -28,7 +28,7 @@ priority order. Check items off as they land.
 
 ## Hardening
 
-- [ ] Real UI auth (login, RBAC) — v1 is HTTP basic auth via env vars
+- [x] Real UI auth: users, session login/logout, roles (admin/member), lockout, password change, user admin — 2026-10-16
 - [x] Auth on the raw pipeline-intake endpoint (admin bearer token) — 2026-10-16
 - [x] Pipeline cancel (API, CLI `forge-ci cancel`, UI button; runners stop on heartbeat) — 2026-10-16
 - [x] Admin API for projects/contexts + `forge-ci trigger [--wait]` so CI can be

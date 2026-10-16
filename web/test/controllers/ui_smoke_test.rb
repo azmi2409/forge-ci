@@ -14,9 +14,9 @@ class UiSmokeTest < ActionDispatch::IntegrationTest
     @job_id = Pipeline.find(@pipeline_id).job_runs.find_by!(name: "build").id
   end
 
-  test "UI requires basic auth" do
+  test "UI requires login" do
     get "/projects"
-    assert_response :unauthorized
+    assert_redirected_to "/login"
   end
 
   test "landing page is public" do
@@ -32,13 +32,15 @@ class UiSmokeTest < ActionDispatch::IntegrationTest
   end
 
   test "projects index renders" do
-    get "/projects", headers: ui_basic_auth_headers
+    sign_in_as_admin
+    get "/projects"
     assert_response :ok
     assert_match "demo", response.body
   end
 
   test "pipeline show renders workflows, jobs and requires edges" do
-    get "/projects/#{@project_id}/pipelines/#{@pipeline_id}", headers: ui_basic_auth_headers
+    sign_in_as_admin
+    get "/projects/#{@project_id}/pipelines/#{@pipeline_id}"
     assert_response :ok
     assert_match "build-test-deploy", response.body
     assert_match "build", response.body
@@ -47,7 +49,8 @@ class UiSmokeTest < ActionDispatch::IntegrationTest
   end
 
   test "job show renders steps and log viewer" do
-    get "/job_runs/#{@job_id}", headers: ui_basic_auth_headers
+    sign_in_as_admin
+    get "/job_runs/#{@job_id}"
     assert_response :ok
     assert_match "Install dependencies", response.body
   end

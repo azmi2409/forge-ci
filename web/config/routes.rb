@@ -5,7 +5,16 @@ Rails.application.routes.draw do
   root "landing#show"
   get "/dashboard", to: redirect("/projects")
 
-  # --- Web UI (HTTP basic auth, see ApplicationController) -------------------
+  # --- Sessions / accounts -------------------------------------------------
+  get "/login", to: "sessions#new", as: :login
+  post "/login", to: "sessions#create"
+  delete "/logout", to: "sessions#destroy", as: :logout
+  resource :account, only: %i[show update] do
+    post :sign_out_everywhere
+  end
+  resources :users, except: %i[show]
+
+  # --- Web UI (cookie-session login, see ApplicationController) ------------
 
   resources :projects, only: %i[index] do
     resources :pipelines, only: %i[show] do

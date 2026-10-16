@@ -5,11 +5,10 @@ module Api
     # Log streaming (component 6).
     #
     # Chunk ingest and reads accept the owning runner's Bearer token. The
-    # SSE live-tail (`stream`) and the plain `logs` read additionally accept
-    # the UI's HTTP basic credentials, so the job page can tail logs without
-    # holding a runner token (browsers resend basic-auth on same-origin
-    # requests, but cannot set an Authorization: Bearer header on
-    # EventSource).
+    # SSE live-tail (`stream`) additionally accepts a signed-in UI session,
+    # so the job page can tail logs without holding a runner token (browsers
+    # send the session cookie on same-origin EventSource requests, but cannot
+    # set an Authorization: Bearer header).
     class JobsController < BaseController
       include ActionController::Live
 
@@ -20,13 +19,13 @@ module Api
         ENV.fetch("FORGE_CI_STREAM_TIMEOUT_SECONDS", "300").to_i.seconds
       end
 
-      before_action :find_job_or_404, only: %i[stream]
-      before_action :authenticate_stream!, only: %i[stream]
-      before_action :find_owned_job, except: %i[stream]
+      before_action :find_job_or_404, only: %i[stream logs]
+      before_action :authenticate_stream!, only: %i[stream logs]
+      before_action :find_owned_job, except: %i[stream logs]
 
-      # `stream` has its own dual auth (Bearer token OR UI basic auth);
+      # `stream` has its own dual auth (Bearer token OR UI session);
       # skip the base class's Bearer-only check for it.
-      skip_before_action :authenticate_runner!, only: %i[stream]
+      skip_before_action :authenticate_runner!, only: %i[stream logs]
 
       # POST /api/v1/jobs/:id/log_chunks { seq:, chunk: }
       # Idempotent on (job_run_id, seq); the blob is rebuilt in seq order.
@@ -104,11 +103,15 @@ module Api
         render json: { error: "job not found" }, status: :not_found
       end
 
-      # The stream is browser-facing: accept the owning runner token OR the
-      # UI's basic-auth credentials.
+      # The stream is browser-facing: accept the owning runner token OR a
+      # signed-in UI session.
       def authenticate_stream!
         return if performed?
-        return if runner_token_owns_job? || valid_ui_basic_auth?
+        return if runner_token_owns_job? || valid_ui_session?
+
+        if RunnerToken.authenticate(bearer_token)
+          return render json: { error: "forbidden: job is owned by another token" }, status: :forbidden
+        end
 
         render json: { error: "unauthorized" }, status: :unauthorized
       end
@@ -118,25 +121,9 @@ module Api
         token.present? && @job.claimed_by == token.name
       end
 
-      # Mirror of the UI's basic auth (see ApplicationController). Browsers
-      # resend these credentials on same-origin EventSource requests.
-      def valid_ui_basic_auth?
-        header = request.headers["Authorization"].to_s
-        scheme, _, credentials = header.partition(" ")
-        return false unless scheme.casecmp("basic").zero?
-
-        user, password = Base64.decode64(credentials.to_s).split(":", 2)
-        expected_user = ENV["FORGE_CI_UI_USER"]
-        expected_password = ENV["FORGE_CI_UI_PASSWORD"]
-        if expected_user.blank? || expected_password.blank?
-          return false if Rails.env.production?
-
-          expected_user, expected_password = "admin", "password"
-        end
-        ActiveSupport::SecurityUtils.secure_compare(user.to_s, expected_user) &
-          ActiveSupport::SecurityUtils.secure_compare(password.to_s, expected_password)
-      rescue ArgumentError
-        false
+      # The web UI's cookie session (same-origin EventSource/fetch send it).
+      def valid_ui_session?
+        SessionAuth.user_for(request.session).present?
       end
     end
   end
