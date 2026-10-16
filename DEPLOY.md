@@ -170,8 +170,17 @@ overridden to `./bin/jobs`.)
 ## 4. Runner hosts
 
 Each runner host needs Docker Engine and Ruby ≥ 3.0 (the runner is stdlib-only —
-no gems to install). Copy the `runner/` directory over, then install as a
-systemd service:
+no gems to install). Copy the `runner/` directory to `/opt/forge-ci-runner`,
+then install the bundled systemd unit:
+
+```sh
+sudo cp /opt/forge-ci-runner/forge-ci-runner.service /etc/systemd/system/
+# edit the CONTROL_PLANE_URL and RUNNER_TOKEN lines, then:
+sudo systemctl daemon-reload
+sudo systemctl enable --now forge-ci-runner
+```
+
+The unit file (`runner/forge-ci-runner.service`):
 
 ```ini
 # /etc/systemd/system/forge-ci-runner.service

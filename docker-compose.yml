@@ -102,6 +102,12 @@ services:
       - forge-ci
 
   runner:
+    # The containerized runner needs the host's Docker socket, which some
+    # platforms (e.g. Coolify) don't pass through. For those, run the
+    # runner directly on the host via systemd instead — see
+    # runner/forge-ci-runner.service. The profile keeps `docker compose up`
+    # from starting it by default; `docker compose up -d runner` still works.
+    profiles: ["runner"]
     build:
       context: ./runner
     restart: unless-stopped
