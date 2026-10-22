@@ -1,17 +1,33 @@
-<% if @user.errors.any? %><p class="flash-alert" role="alert"><%= @user.errors.full_messages.to_sentence %></p><% end %>
-<%= form_with url: url, method: method, class: "stack" do %>
-  <% if @user.new_record? %>
-    <label for="username">Username</label>
-    <%= text_field_tag :username, @user.username, id: "username", required: true, autocapitalize: "none", autocomplete: "off" %>
-  <% else %>
-    <p class="meta">Username: <span class="mono"><%= @user.username %></span></p>
+<% if @user.errors.any? %><div class="flash-error" role="alert"><%= @user.errors.full_messages.to_sentence %></div><% end %>
+<section class="card" style="max-width: 560px">
+  <%= form_with url: url, method: method do %>
+    <div class="card-body">
+      <div class="form-row">
+        <label class="field-label" for="username">Username</label>
+        <% if @user.new_record? %>
+          <%= text_field_tag :username, @user.username, id: "username", class: "field", required: true, autocapitalize: "none", autocomplete: "off", spellcheck: false %>
+        <% else %>
+          <input type="text" id="username" class="field" value="<%= @user.username %>" disabled>
+        <% end %>
+      </div>
+      <div class="form-row">
+        <label class="field-label" for="role">Role</label>
+        <%= select_tag :role, options_for_select(User.roles.keys.map { |r| [r.capitalize, r] }, @user.role), id: "role", class: "field" %>
+        <p class="field-hint">Admins can manage users.</p>
+      </div>
+      <div class="form-row">
+        <label class="field-label" for="password"><%= @user.new_record? ? "Password" : "New password" %></label>
+        <%= password_field_tag :password, nil, id: "password", class: "field", autocomplete: "new-password", required: @user.new_record? %>
+        <p class="field-hint">At least <%= User::MIN_PASSWORD_LENGTH %> characters.<%= " Leave blank to keep the current one." unless @user.new_record? %></p>
+      </div>
+      <div class="form-row">
+        <label class="field-label" for="password_confirmation">Confirm password</label>
+        <%= password_field_tag :password_confirmation, nil, id: "password_confirmation", class: "field", autocomplete: "new-password", required: @user.new_record? %>
+      </div>
+    </div>
+    <div class="card-footer">
+      <%= link_to "Cancel", users_path, class: "button-ghost button-sm" %>
+      <button type="submit" class="button-primary button-sm"><%= @user.new_record? ? "Create user" : "Save changes" %></button>
+    </div>
   <% end %>
-  <label for="role">Role</label>
-  <%= select_tag :role, options_for_select(User.roles.keys, @user.role), id: "role" %>
-  <label for="password"><%= @user.new_record? ? "Password" : "New password (leave blank to keep)" %> (min <%= User::MIN_PASSWORD_LENGTH %> characters)</label>
-  <%= password_field_tag :password, nil, id: "password", autocomplete: "new-password", required: @user.new_record? %>
-  <label for="password_confirmation">Confirm password</label>
-  <%= password_field_tag :password_confirmation, nil, id: "password_confirmation", autocomplete: "new-password", required: @user.new_record? %>
-  <button type="submit"><%= @user.new_record? ? "Create user" : "Save" %></button>
-<% end %>
-<p><%= link_to "← users", users_path %></p>
+</section>

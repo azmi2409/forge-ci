@@ -1,0 +1,32 @@
+<%# locals: (pipelines:, show_project: true) %>
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Pipeline</th>
+        <th>Status</th>
+        <% if show_project %><th>Project</th><% end %>
+        <th>Branch</th>
+        <th>Commit</th>
+        <th class="num">Duration</th>
+        <th class="num">Started</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% pipelines.each do |pipeline| %>
+        <tr>
+          <td class="nowrap">
+            <%= link_to "##{pipeline.pipeline_number || pipeline.id}", project_pipeline_path(pipeline.project, pipeline), class: "row-link tabular" %>
+            <% if pipeline.forked %><span class="chip" title="Pull request from a fork: contexts are not injected">fork</span><% end %>
+          </td>
+          <td><%= status_badge(pipeline.status) %></td>
+          <% if show_project %><td class="truncate" style="max-width: 220px"><%= link_to pipeline.project.name, project_path(pipeline.project), class: "text-link" %></td><% end %>
+          <td><span class="chip"><%= icon "branch" %><%= pipeline.branch %></span></td>
+          <td class="mono text-muted"><%= short_sha(pipeline.sha) %></td>
+          <td class="num mono nowrap"><%= duration_text(pipeline_duration(pipeline)) %></td>
+          <td class="num text-muted nowrap"><%= time_ago_tag(pipeline.created_at) %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</div>

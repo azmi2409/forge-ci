@@ -1,0 +1,34 @@
+<%# Appearance switch (light, dark, system) and the sidebar drawer below 1024px. %>
+<script>
+  (function() {
+    var root = document.documentElement;
+    var system = window.matchMedia("(prefers-color-scheme: dark)");
+    function apply(mode) {
+      root.dataset.themeMode = mode;
+      root.dataset.theme = mode === "dark" || (mode === "system" && system.matches) ? "dark" : "light";
+      document.querySelectorAll("[data-theme-value]").forEach(function(b) {
+        var on = b.dataset.themeValue === mode;
+        b.classList.toggle("is-active", on);
+        b.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+    }
+    document.querySelectorAll("[data-theme-value]").forEach(function(b) {
+      b.addEventListener("click", function() {
+        try { localStorage.setItem("forge-ci-theme", b.dataset.themeValue); } catch (_) {}
+        apply(b.dataset.themeValue);
+      });
+    });
+    system.addEventListener("change", function() { if (root.dataset.themeMode === "system") apply("system"); });
+    apply(root.dataset.themeMode || "system");
+
+    var shell = document.querySelector("[data-shell]");
+    if (!shell) return;
+    function setOpen(open) {
+      shell.classList.toggle("is-open", open);
+      document.querySelectorAll("[data-sidebar-open]").forEach(function(b) { b.setAttribute("aria-expanded", open ? "true" : "false"); });
+    }
+    document.querySelectorAll("[data-sidebar-open]").forEach(function(b) { b.addEventListener("click", function() { setOpen(true); }); });
+    document.querySelectorAll("[data-sidebar-close]").forEach(function(b) { b.addEventListener("click", function() { setOpen(false); }); });
+    document.addEventListener("keydown", function(e) { if (e.key === "Escape") setOpen(false); });
+  })();
+</script>

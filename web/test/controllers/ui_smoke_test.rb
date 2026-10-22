@@ -48,6 +48,41 @@ class UiSmokeTest < ActionDispatch::IntegrationTest
     assert_match "requires", response.body.downcase
   end
 
+  test "landing page names the real config path" do
+    get "/"
+    assert_match ".circleci/config.yml", response.body
+    assert_no_match ".forge-ci/config.yml", response.body
+  end
+
+  test "dashboard shows stats, project cards and recent pipelines" do
+    sign_in_as_admin
+    get "/projects"
+    assert_response :ok
+    assert_match "Running now", response.body
+    assert_match %(href="/projects/#{@project_id}"), response.body
+    assert_match %(href="/projects/#{@project_id}/pipelines/#{@pipeline_id}"), response.body
+  end
+
+  test "project show lists its pipelines" do
+    sign_in_as_admin
+    get "/projects/#{@project_id}"
+    assert_response :ok
+    assert_match "demo", response.body
+    assert_match %(href="/projects/#{@project_id}/pipelines/#{@pipeline_id}"), response.body
+  end
+
+  test "project show requires login" do
+    get "/projects/#{@project_id}"
+    assert_redirected_to "/login"
+  end
+
+  test "pipeline graph puts each job in the stage after what it requires" do
+    sign_in_as_admin
+    get "/projects/#{@project_id}/pipelines/#{@pipeline_id}"
+    stages = css_select(".stage").map { |st| css_select(st, ".jobnode-name").map { |n| n.text.strip } }
+    assert_equal [["build"], ["test"], ["deploy"]], stages
+  end
+
   test "job show renders steps and log viewer" do
     sign_in_as_admin
     get "/job_runs/#{@job_id}"

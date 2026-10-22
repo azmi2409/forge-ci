@@ -1,19 +1,38 @@
 <% content_for(:title, "Account — ForgeCI") %>
-<h1>Account</h1>
-<p class="meta">Signed in as <span class="mono"><%= current_user.username %></span> (<%= current_user.role %>)</p>
+<% content_for(:crumb, "Account") %>
+
+<div class="page-header">
+  <div>
+    <h1 class="page-heading">Account</h1>
+    <p>Signed in as <span class="mono"><%= current_user.username %></span>, <%= current_user.role %>.</p>
+  </div>
+</div>
 <%= render "shared/flash" %>
 
-<h2>Change password</h2>
-<%= form_with url: account_path, method: :patch, class: "stack" do %>
-  <label for="current_password">Current password</label>
-  <%= password_field_tag :current_password, nil, id: "current_password", autocomplete: "current-password", required: true %>
-  <label for="password">New password (min <%= User::MIN_PASSWORD_LENGTH %> characters)</label>
-  <%= password_field_tag :password, nil, id: "password", autocomplete: "new-password", required: true %>
-  <label for="password_confirmation">Confirm new password</label>
-  <%= password_field_tag :password_confirmation, nil, id: "password_confirmation", autocomplete: "new-password", required: true %>
-  <button type="submit">Change password</button>
-<% end %>
+<div class="stack" style="max-width: 640px">
+  <section class="card" aria-labelledby="password-title">
+    <div class="card-header"><div><h2 id="password-title" class="card-title">Change password</h2><p class="card-desc">Use at least <%= User::MIN_PASSWORD_LENGTH %> characters.</p></div></div>
+    <%= form_with url: account_path, method: :patch do %>
+      <div class="card-body">
+        <div class="form-row">
+          <label class="field-label" for="current_password">Current password</label>
+          <%= password_field_tag :current_password, nil, id: "current_password", class: "field", autocomplete: "current-password", required: true %>
+        </div>
+        <div class="form-row">
+          <label class="field-label" for="password">New password</label>
+          <%= password_field_tag :password, nil, id: "password", class: "field", autocomplete: "new-password", required: true %>
+        </div>
+        <div class="form-row">
+          <label class="field-label" for="password_confirmation">Confirm new password</label>
+          <%= password_field_tag :password_confirmation, nil, id: "password_confirmation", class: "field", autocomplete: "new-password", required: true %>
+        </div>
+      </div>
+      <div class="card-footer"><span>Other sessions stay signed in.</span><button type="submit" class="button-primary button-sm">Change password</button></div>
+    <% end %>
+  </section>
 
-<h2>Sessions</h2>
-<p class="meta">Sign out every other browser/device signed in as you.</p>
-<%= button_to "Sign out everywhere else", sign_out_everywhere_account_path, method: :post %>
+  <section class="card" aria-labelledby="sessions-title">
+    <div class="card-header"><div><h2 id="sessions-title" class="card-title">Sessions</h2><p class="card-desc">Sign out every other browser and device signed in as you. This one stays signed in.</p></div></div>
+    <div class="card-footer"><span></span><%= button_to "Sign out everywhere else", sign_out_everywhere_account_path, method: :post, class: "button-danger button-sm" %></div>
+  </section>
+</div>

@@ -1,107 +1,149 @@
-<% content_for(:title, "Job #{@job.display_name} — ForgeCI") %>
-
 <% pipeline = @job.pipeline %>
-<p class="meta">
-  <%= link_to "← projects", root_path %> /
-  <%= link_to "pipeline #{pipeline.sha[0, 10]}", project_pipeline_path(pipeline.project, pipeline) %> /
-  <%= @job.workflow_run.name %>
-</p>
+<% project = pipeline.project %>
+<% finished = %w[success failed canceled].include?(@job.status) %>
+<% number = "##{pipeline.pipeline_number || pipeline.id}" %>
+<% content_for(:title, "#{@job.display_name} · Pipeline #{number} — ForgeCI") %>
+<% content_for(:breadcrumbs) { breadcrumbs(["Overview", projects_path], [project.name, project_path(project)], ["Pipeline #{number}", project_pipeline_path(project, pipeline)], [@job.display_name]) } %>
+<% content_for(:head) do %>
+  <style>
+    .job-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+    .steps { margin: 0; padding: 0; list-style: none; }
+    .steps li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px 20px; font-size: 13px; }
+    .steps li + li { border-top: 1px solid var(--line); }
+    .steps .sname { font-family: var(--font-mono); }
+    .steps .s-pending .sname, .steps .s-canceled .sname { color: var(--muted); }
+    .steps .exit { font: 12px var(--font-mono); color: var(--danger); }
+    .steps .dur { min-width: 56px; text-align: right; font: 12px var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+    .log-tools { display: flex; align-items: center; gap: 8px; }
+    .log-tools label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+    pre.logs { margin: 0; border-radius: 0 0 11px 11px; max-height: 70vh; min-height: 120px; overflow: auto; border-top: 1px solid var(--line); background: var(--canvas); padding: 16px 20px; font: 12.5px/20px var(--font-mono); white-space: pre-wrap; word-break: break-word; }
+    pre.logs:empty::before { content: attr(data-empty); color: var(--subtle); }
+    dl.details { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; font-size: 13px; }
+    dl.details dt { color: var(--muted); }
+    dl.details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+    @media (min-width: 640px) { .steps li { padding: 12px 24px; } pre.logs { padding: 16px 24px; } }
+    @media (max-width: 960px) { .job-grid { grid-template-columns: 1fr; } }
+  </style>
+<% end %>
 
-<h1>Job <span class="mono"><%= @job.display_name %></span></h1>
-<p>
-  <%= status_badge(@job.status) %>
-  <span class="meta">
-    requires <span class="mono"><%= @job.requires_list.any? ? @job.requires_list.join(", ") : "—" %></span> ·
-    resource class <span class="mono"><%= @job.resource_class || "any" %></span> ·
-    claimed by <span class="mono"><%= @job.claimed_by || "—" %></span>
-  </span>
-</p>
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Job</p>
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+      <h1 class="page-heading"><%= @job.display_name %></h1>
+      <%= status_badge(@job.status) %>
+    </div>
+    <div class="page-meta">
+      <span><%= icon "branch" %><span class="mono"><%= pipeline.branch %></span></span>
+      <span><%= icon "commit" %><span class="mono"><%= short_sha(pipeline.sha) %></span></span>
+      <span class="tabular"><%= icon "clock" %><%= duration_text(job_duration(@job)) %></span>
+      <% if @job.requires_list.any? %><span>Requires <span class="mono"><%= @job.requires_list.join(", ") %></span></span><% end %>
+    </div>
+  </div>
+</div>
 
-<h2>Executor</h2>
-<table>
-  <tbody>
-    <tr><th>Type</th><td class="mono"><%= @job.executor_hash["type"] %></td></tr>
-    <tr><th>Image</th><td class="mono"><%= @job.executor_hash["image"] %></td></tr>
-    <tr><th>Working directory</th><td class="mono"><%= @job.working_directory %></td></tr>
-    <tr><th>Environment</th>
-      <td>
-        <% env_keys = (@job.executor_hash["environment"] || {}).keys %>
-        <% if env_keys.any? %>
-          <span class="mono"><%= env_keys.join(", ") %></span>
-          <span class="meta">(values hidden<% if @job.context_environment.present? %>, plus <%= @job.context_environment.size %> context variable(s)<% end %>)</span>
-        <% else %>
-          <span class="meta">—</span>
+<div class="job-grid">
+  <div class="stack">
+    <section class="card" aria-labelledby="steps-title">
+      <div class="card-header"><div><h2 id="steps-title" class="card-title">Steps</h2></div><span class="text-muted"><%= pluralize(@job.step_runs.size, "step") %></span></div>
+      <ol class="steps" style="margin-top: 16px; border-top: 1px solid var(--line)">
+        <% @job.step_runs.each do |step| %>
+          <li class="s-<%= step.status %>">
+            <span class="status-dot" data-state="<%= step.status %>" title="<%= step.status.humanize %>"></span>
+            <span class="sname truncate" title="<%= step.name %>"><%= step.name %></span>
+            <span class="exit"><%= "exit #{step.exit_code}" if step.exit_code.to_i.nonzero? %></span>
+            <span class="dur"><%= step.started_at && step.finished_at ? duration_text(step.finished_at - step.started_at) : (step.status == "canceled" ? "skipped" : "—") %></span>
+          </li>
         <% end %>
-      </td>
-    </tr>
-  </tbody>
-</table>
+      </ol>
+    </section>
 
-<h2>Steps</h2>
-<table>
-  <thead>
-    <tr><th>#</th><th>Name</th><th>Status</th><th>Exit code</th><th>Duration</th></tr>
-  </thead>
-  <tbody>
-    <% @job.step_runs.each_with_index do |step, i| %>
-      <tr>
-        <td class="mono"><%= i %></td>
-        <td class="mono"><%= step.name %></td>
-        <td><%= status_badge(step.status) %></td>
-        <td class="mono"><%= step.exit_code.nil? ? "—" : step.exit_code %></td>
-        <td class="mono">
-          <% if step.started_at && step.finished_at %>
-            <%= ((step.finished_at - step.started_at).round(1)) %>s
-          <% else %>
-            —
-          <% end %>
-        </td>
-      </tr>
-    <% end %>
-  </tbody>
-</table>
+    <section class="card" aria-labelledby="logs-title">
+      <div class="card-header" style="padding-bottom: 16px">
+        <div><h2 id="logs-title" class="card-title"><%= icon "logs" %>Logs</h2><p class="card-desc" id="log-status" role="status"><%= finished ? "Job finished. Showing the full log." : "Connecting to the live log…" %></p></div>
+        <div class="log-tools">
+          <label><input type="checkbox" id="follow-logs" checked> Follow</label>
+          <button type="button" class="icon-button" id="logs-bottom" aria-label="Jump to the end"><%= icon "arrow-down" %></button>
+        </div>
+      </div>
+      <pre class="logs" id="job-logs" data-empty="<%= finished ? "No log output was recorded for this job." : "Waiting for output…" %>"><%= @initial_log %></pre>
+    </section>
+  </div>
 
-<h2>Logs</h2>
-<pre class="logs" id="job-logs"><%= @initial_log %></pre>
-<p class="note" id="log-status">Connecting to live tail…</p>
+  <aside class="card" aria-labelledby="details-title">
+    <div class="card-header"><div><h2 id="details-title" class="card-title">Details</h2></div></div>
+    <div class="card-body">
+      <dl class="details">
+        <dt>Workflow</dt><dd><%= @job.workflow_run.name %></dd>
+        <% if @job.parallelism > 1 %><dt>Node</dt><dd class="tabular"><%= @job.node_index + 1 %> of <%= @job.parallelism %></dd><% end %>
+        <dt>Image</dt><dd class="mono"><%= @job.executor_hash["image"] || "—" %></dd>
+        <dt>Resource class</dt><dd class="mono"><%= @job.resource_class || "any" %></dd>
+        <dt>Runner</dt><dd class="mono"><%= @job.claimed_by || "—" %></dd>
+        <dt>Working dir</dt><dd class="mono"><%= @job.working_directory || "—" %></dd>
+        <dt>Environment</dt>
+        <dd>
+          <% env_keys = (@job.executor_hash["environment"] || {}).keys %>
+          <% if env_keys.any? %><span class="mono"><%= env_keys.join(", ") %></span><% else %><span class="text-muted">None</span><% end %>
+          <div class="text-muted" style="font-size: 12px; margin-top: 4px">Values are hidden<% if @job.context_environment.present? %>, plus <%= pluralize(@job.context_environment.size, "context variable") %><% end %>.</div>
+        </dd>
+        <dt>Claimed</dt><dd><%= time_ago_tag(@job.claimed_at) %></dd>
+      </dl>
+    </div>
+  </aside>
+</div>
+
 <script>
 (function() {
-  var el = document.getElementById('job-logs');
-  var status = document.getElementById('log-status');
+  var el = document.getElementById("job-logs");
+  var status = document.getElementById("log-status");
+  var follow = document.getElementById("follow-logs");
   var streamUrl = "<%= "/api/v1/jobs/#{@job.id}/logs/stream" %>";
   var pollUrl = "<%= "/api/v1/jobs/#{@job.id}/logs" %>";
-  var terminal = <%= %w[success failed canceled].include?(@job.status) %>;
+  var terminal = <%= finished %>;
   var lastText = el.textContent;
+  // Chunks keyed by seq: the stream re-sends every chunk from the start, so
+  // keying makes repeats harmless and the server-rendered log is replaced
+  // rather than appended to.
+  var chunks = {};
 
   function setStatus(t) { status.textContent = t; }
+  function stick() { if (follow.checked) el.scrollTop = el.scrollHeight; }
+  document.getElementById("logs-bottom").addEventListener("click", function() { el.scrollTop = el.scrollHeight; });
+  el.addEventListener("scroll", function() {
+    follow.checked = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  });
+  stick();
 
   function startPolling() {
-    setStatus("Live stream unavailable — polling every 5s.");
+    setStatus("The live log is unavailable. Refreshing every 5 seconds.");
     setInterval(function() {
       fetch(pollUrl, { credentials: "same-origin" }).then(function(r) {
         return r.ok ? r.json() : null;
       }).then(function(data) {
         if (!data) return;
         var text = data.chunks.map(function(c) { return c.chunk; }).join("");
-        if (text !== lastText) { el.textContent = text; lastText = text; }
+        if (text !== lastText) { el.textContent = text; lastText = text; stick(); }
       });
     }, 5000);
   }
 
-  if (terminal) { setStatus("Job finished — showing full log."); return; }
+  if (terminal) return;
   if (typeof EventSource === "undefined") { startPolling(); return; }
 
   try {
     var src = new EventSource(streamUrl);
     src.addEventListener("chunk", function(e) {
       var data = JSON.parse(e.data);
-      el.textContent += data.chunk;
+      chunks[data.seq] = data.chunk;
+      var seqs = Object.keys(chunks).map(Number).sort(function(a, b) { return a - b; });
+      el.textContent = seqs.map(function(s) { return chunks[s]; }).join("");
       lastText = el.textContent;
-      setStatus("Streaming live…");
+      setStatus("Streaming live.");
+      stick();
     });
     src.addEventListener("done", function(e) {
       var data = JSON.parse(e.data);
-      setStatus("Job finished with status: " + data.status + ".");
+      setStatus("Job finished: " + data.status + ". Reload to see the final step results.");
       src.close();
     });
     src.onerror = function() { src.close(); startPolling(); };
