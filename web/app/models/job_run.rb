@@ -246,6 +246,18 @@ class JobRun < ApplicationRecord
     end
   end
 
+  # Jobs of +resource_class+ waiting on earlier jobs (pending) that a runner
+  # of that class will get soon. Lets a warmed-up runner stay up for them and
+  # the autoscaler start one early (FORGE_CI_AUTOSCALE_WARM). Only recent
+  # jobs count, so a stuck old pipeline can't keep a runner up forever.
+  UPCOMING_WINDOW = 2.hours
+
+  def self.upcoming_count(resource_class)
+    scope = pending.where(created_at: UPCOMING_WINDOW.ago..)
+    scope = scope.where(resource_class: resource_class) unless resource_class.nil?
+    scope.count
+  end
+
   # --- completion ---------------------------------------------------------------
 
   # Record the runner's report, update step runs, unblock dependents whose

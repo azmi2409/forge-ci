@@ -31,6 +31,8 @@ module ForgeCIRunner
         break if @shutdown
 
         if payload.nil?
+          # Work is coming (e.g. a deploy waiting for its checks): not idle.
+          @idle_since = monotonic if @client.upcoming.to_i.positive?
           if idle_too_long?
             idle_shutdown
             break

@@ -26,12 +26,20 @@ module ForgeCIRunner
 
     # POST /api/v1/runner/jobs/claim — returns the job payload Hash,
     # or nil when the server answers 422 (nothing claimable).
+    # Jobs of this runner's class waiting on earlier jobs, from the last
+    # claim that found nothing (0 from older servers).
+    attr_reader :upcoming
+
     def claim_job(resource_class)
       body = {}
       body["resource_class"] = resource_class if resource_class
+      @upcoming = 0
       post("/api/v1/runner/jobs/claim", body)
     rescue HTTPError => e
-      return nil if e.code == "422"
+      if e.code == "422"
+        @upcoming = (JSON.parse(e.body.to_s)["upcoming"].to_i rescue 0)
+        return nil
+      end
 
       raise
     end

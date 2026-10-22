@@ -7,15 +7,20 @@ class RunnerLoopTest < Minitest::Test
   # Claim replies in order (nil = nothing claimable); then stops the runner.
   class ScriptedClient
     attr_reader :claims
+    attr_accessor :upcoming, :upcoming_polls
 
     def initialize(replies, on_empty)
       @replies = replies
       @on_empty = on_empty
       @claims = 0
+      @upcoming = 0
+      @upcoming_polls = 0
     end
 
     def claim_job(_resource_class)
       @claims += 1
+      # The first `upcoming_polls` empty claims report a job on the way.
+      @upcoming = @upcoming_polls.positive? ? (@upcoming_polls -= 1; 1) : 0
       return @on_empty.call if @replies.empty?
 
       @replies.shift
@@ -99,5 +104,17 @@ class RunnerLoopTest < Minitest::Test
     r.run
     assert_operator r.clock, :>, 600, "it kept polling well past any idle limit"
     assert_empty r.shell
+  end
+
+  def test_upcoming_jobs_keep_an_idle_runner_up_until_they_stop
+    r = runner([], on_empty: -> { nil }, idle_shutdown_after: 120.0, idle_shutdown_command: "terminate-me")
+    r.instance_variable_get(:@client).upcoming_polls = 20 # e.g. a deploy waiting for its checks
+    r.run
+    assert_equal ["terminate-me"], r.shell, "it still idles out once nothing is on the way"
+    # The idle clock restarts at each poll that reports a job on the way; the
+    # 20th is the last, after 19 pauses.
+    waited = r.pauses.first(19).sum
+    assert_operator waited, :>, 120.0, "it stayed up past the idle limit while jobs were on the way"
+    assert_operator r.clock, :>=, waited + 120.0, "the idle clock only started after the upcoming jobs went away"
   end
 end

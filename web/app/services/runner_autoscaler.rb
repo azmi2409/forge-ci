@@ -14,6 +14,12 @@
 # stops claiming and then removes its own instance, so nothing is ever
 # terminated in the middle of a job.
 #
+# FORGE_CI_AUTOSCALE_WARM="deploy" (comma-separated classes) also counts
+# that class's jobs still waiting on earlier jobs, so its runner boots while
+# the checks run instead of after them. The runner then stays up until the
+# job arrives (the claim response's `upcoming`), or idles out as usual if the
+# job is canceled because a check failed.
+#
 # AWS credentials come from the usual SDK chain (the same AWS_* variables as
 # S3); FORGE_CI_AUTOSCALE_REGION overrides AWS_REGION for the groups.
 class RunnerAutoscaler
@@ -30,6 +36,10 @@ class RunnerAutoscaler
       Group.new(resource_class: klass.strip, asg_name: name.strip,
                 max: Integer(max.presence || 1), jobs_per_instance: [Integer(per.presence || 1), 1].max)
     end
+  end
+
+  def self.warm_classes(spec = ENV["FORGE_CI_AUTOSCALE_WARM"])
+    spec.to_s.split(",").map(&:strip).reject(&:empty?)
   end
 
   def self.enabled?
@@ -73,7 +83,9 @@ class RunnerAutoscaler
   def wanted_capacity(group, include_classless: false)
     classes = [group.resource_class]
     classes << nil if include_classless
-    jobs = JobRun.where(resource_class: classes, status: %w[queued claimed running]).count
+    statuses = %w[queued claimed running]
+    jobs = JobRun.where(resource_class: classes, status: statuses).count
+    jobs += JobRun.upcoming_count(group.resource_class) if self.class.warm_classes.include?(group.resource_class)
     [(jobs.to_f / group.jobs_per_instance).ceil, group.max].min
   end
 

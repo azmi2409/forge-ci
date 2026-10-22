@@ -29,6 +29,7 @@ first boot and kept in `secrets.yml` in the data directory.
 | `FORGE_CI_STREAM_TIMEOUT_SECONDS` | `25` | How long one SSE log live-tail request stays open before the job page reconnects. Each open stream holds a web thread, so keep it short |
 | `FORGE_CI_AUTOSCALE` | — | Scale runner Auto Scaling Groups up when jobs queue: `class=asg-name[:max[:jobs_per_instance]],…` (see DEPLOY.md, "Scale runners to zero") |
 | `FORGE_CI_AUTOSCALE_REGION` | `AWS_REGION` | Region of those Auto Scaling Groups |
+| `FORGE_CI_AUTOSCALE_WARM` | — | Classes (comma-separated, e.g. `deploy`) whose runner starts as soon as a pipeline has a job of that class waiting on earlier jobs, instead of once it's queued. The runner stays up until the job arrives, and idles out as usual if the job is canceled |
 | `SOLID_QUEUE_IN_PUMA` | `1` in the image, `0` in docker-compose.yml | Run the background jobs inside the web process. `0` (or empty) turns it off; then run `bin/jobs` separately, as the compose `worker` service does |
 | `FORGE_CI_RUNNER_PATH` | `/forge-ci/runner` in the image, `../runner` otherwise | The runner files served as `/runner.tar.gz` |
 | `FORGE_CI_SEED_DEMO` | — | `1` loads the demo project and pipelines in production (`db:prepare` skips them otherwise) |
