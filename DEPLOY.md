@@ -1,5 +1,12 @@
 # Deploying forge-ci
 
+- [Fastest path: docker compose](#fastest-path-docker-compose)
+- [Requirements](#requirements)
+- [1. Postgres](#1-postgres) · [2. Object storage](#2-object-storage-aws-s3) · [3. Control plane](#3-control-plane)
+- [4. Runner hosts](#4-runner-hosts), including [scaling runners to zero](#scale-runners-to-zero-aws)
+- [5. GitHub App](#5-github-app), or [use it without the GitHub App](#use-it-without-the-github-app)
+- [6. Smoke test](#6-smoke-test) · [7. Operations](#7-operations)
+
 ## Fastest path: docker compose
 
 ```sh
@@ -233,6 +240,10 @@ puts raw  # save it — only the digest is stored
 Scale by adding hosts. A crashed runner simply stops heartbeating and its job
 is reclaimed after 120s.
 
+Steps are killed after `STEP_NO_OUTPUT_TIMEOUT` seconds without output
+(default 600; a step's own `no_output_timeout:` wins) and jobs after
+`JOB_TIMEOUT` (default 3600). Both are runner settings.
+
 ### Scale runners to zero (AWS)
 
 Runners can cost nothing while nobody is pushing. Each resource class gets an
@@ -299,6 +310,37 @@ With the control plane on its public HTTPS URL, follow the checklist in
 (webhook URL `https://<your-host>/api/v1/github/webhooks`), set the four
 `GITHUB_*` env vars, install it on the account. First push from a repo
 auto-creates its forge-ci project.
+
+Private repositories need nothing extra: each claim carries a short-lived
+installation token that the runner uses for `checkout`, sent as an HTTP header
+only for the fetch, so it never reaches `.git/config` or the job's steps.
+
+## Use it without the GitHub App
+
+Drive ForgeCI from any CI system or script with the admin API and the
+`forge-ci` CLI. Set `FORGE_CI_ADMIN_TOKEN` on the control plane
+(`openssl rand -hex 32`), then:
+
+```sh
+export FORGE_CI_URL=https://ci.example.com FORGE_CI_ADMIN_TOKEN=...
+
+# Once: a project and, optionally, a secrets context.
+curl -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"name":"myapp","repo_url":"https://github.com/me/myapp.git"}' $FORGE_CI_URL/api/v1/projects
+curl -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"name":"prod","payload":{"DEPLOY_KEY":"..."}}' $FORGE_CI_URL/api/v1/projects/1/contexts
+
+# Every run: compile .circleci/config.yml and start a pipeline for the current
+# branch and commit. --wait blocks and exits non-zero if it fails.
+forge-ci trigger .circleci/config.yml --project myapp --context prod --wait
+forge-ci cancel 42
+```
+
+For a private repository without the App, set `CHECKOUT_REPO_URL` on the
+runner with a token embedded
+(`https://x-access-token:TOKEN@github.com/org/repo.git`) and leave the
+project's `repo_url` empty, because a project `repo_url` takes precedence.
+The full API is in [docs/api.md](docs/api.md).
 
 ## 6. Smoke test
 
