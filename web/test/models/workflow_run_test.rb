@@ -29,4 +29,19 @@ class WorkflowRunTest < ActiveSupport::TestCase
     job("deploy", requires: %w[filtered-out])
     assert_equal [["deploy"]], @wf.reload.stages.map { |stage| stage.map { |nodes| nodes.first.name } }
   end
+
+  test "a failed node of a parallel job cancels its other nodes, not other jobs" do
+    nodes = 3.times.map { |i| job("test", parallelism: 3, node_index: i) }
+    lint = job("lint")
+    nodes.each(&:mark_queued!)
+    lint.mark_queued!
+    nodes[0].mark_claimed!(claimed_by: "r1")
+    nodes[0].mark_running!
+    nodes[1].mark_claimed!(claimed_by: "r2")
+    nodes[1].mark_running!
+
+    nodes[0].complete_with_results!(status: "failed")
+    assert_equal %w[failed canceled canceled], nodes.map { |n| n.reload.status }
+    assert lint.reload.queued?, "other jobs keep going"
+  end
 end

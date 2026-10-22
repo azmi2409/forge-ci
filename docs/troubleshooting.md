@@ -35,8 +35,8 @@ The secret must be byte-identical on both sides.
 
 The runner died without completing. `ReclaimStaleJobsJob` returns jobs with
 no heartbeat for 120s to `queued` — check that the Solid Queue worker is
-running (inside Puma in the Docker image: look for `SolidQueue` lines in
-`docker compose logs web`; `bin/jobs` in development). Then check the runner host: `journalctl -u
+running: `docker compose logs worker` should show `SolidQueue` lines (in
+development, run `bin/jobs`). Then check the runner host: `journalctl -u
 forge-ci-runner`, `docker ps`.
 
 ## Logs stop streaming / SSE disconnects

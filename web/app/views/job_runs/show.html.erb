@@ -130,23 +130,36 @@
   if (terminal) return;
   if (typeof EventSource === "undefined") { startPolling(); return; }
 
-  try {
+  // The server ends each stream after a short while (and at once for a job
+  // that hasn't started) so it doesn't tie up a request thread; reconnect.
+  var failures = 0, finished = false;
+  function connect() {
     var src = new EventSource(streamUrl);
+    var reconnect = function(delay) { src.close(); if (!finished) setTimeout(connect, delay); };
+    src.onopen = function() { failures = 0; };
+    src.addEventListener("waiting", function() { setStatus("Waiting for a runner to start this job."); reconnect(5000); });
     src.addEventListener("chunk", function(e) {
       var data = JSON.parse(e.data);
       chunks[data.seq] = data.chunk;
       var seqs = Object.keys(chunks).map(Number).sort(function(a, b) { return a - b; });
       el.textContent = seqs.map(function(s) { return chunks[s]; }).join("");
       lastText = el.textContent;
+      failures = 0;
       setStatus("Streaming live.");
       stick();
     });
     src.addEventListener("done", function(e) {
       var data = JSON.parse(e.data);
+      finished = true;
       setStatus("Job finished: " + data.status + ". Reload to see the final step results.");
       src.close();
     });
-    src.onerror = function() { src.close(); startPolling(); };
-  } catch (err) { startPolling(); }
+    // Also fires when the server ends a stream normally.
+    src.onerror = function() {
+      failures += 1;
+      if (failures > 5) { src.close(); startPolling(); } else { reconnect(1000 * failures); }
+    };
+  }
+  try { connect(); } catch (err) { startPolling(); }
 })();
 </script>

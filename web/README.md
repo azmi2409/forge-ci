@@ -199,8 +199,9 @@ tunable in one place (`app/models/job_run.rb`).
 
 - Solid Queue recurring task: `config/recurring.yml` runs
   `ReclaimStaleJobsJob` every `JobRun::RECLAIM_INTERVAL` (**60s**).
-  In production the worker runs inside Puma (`SOLID_QUEUE_IN_PUMA=1`, set in
-  the Docker image); in development run it with `bin/jobs`.
+  docker-compose.yml runs the worker as its own `worker` container
+  (`bin/jobs`); a lone `docker run` of the image runs it inside Puma
+  (`SOLID_QUEUE_IN_PUMA=1`, the image default). In development run `bin/jobs`.
 - Cron alternative: `bin/rails forge_ci:reclaim` every minute.
 
 ## The requires seam fix (component 1.1)

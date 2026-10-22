@@ -246,6 +246,7 @@ class JobRun < ApplicationRecord
       end
 
       transition_to!(status)
+      cancel_sibling_nodes! if status == "failed"
       status == "success" ? unblock_dependents! : cancel_unreachable_dependents!
       workflow_run.recompute_status!
       workflow_run.pipeline.recompute_status!
@@ -271,6 +272,16 @@ class JobRun < ApplicationRecord
   # A job that failed/was canceled can never satisfy its dependents' requires,
   # so cancel the pending jobs that (transitively) wait on it instead of
   # leaving them pending forever.
+  # One failed node fails a parallel job, so its other nodes can't change the
+  # outcome: cancel them instead of letting them hold runners. Running nodes
+  # stop at their runner's next heartbeat.
+  def cancel_sibling_nodes!
+    return if parallelism <= 1
+
+    workflow_run.job_runs.where(name: name).where.not(id: id)
+                .where.not(status: TERMINAL_STATUSES).find_each(&:cancel!)
+  end
+
   def cancel_unreachable_dependents!
     loop do
       dead = workflow_run.job_runs.where(status: %w[failed canceled]).pluck(:name).to_set
