@@ -132,7 +132,7 @@ class JobRun < ApplicationRecord
     if log_chunks.exists?
       log_chunks.order(:seq).map(&:chunk).join
     elsif log_blob.attached?
-      log_blob.download
+      stored_log_text
     else
       ""
     end
@@ -141,9 +141,16 @@ class JobRun < ApplicationRecord
   def log_chunk_list
     rows = log_chunks.order(:seq).map { |c| { seq: c.seq, chunk: c.chunk } }
     return rows if rows.any?
-    return [{ seq: 0, chunk: log_blob.download }] if log_blob.attached?
+    return [{ seq: 0, chunk: stored_log_text }] if log_blob.attached?
 
     []
+  end
+
+  # The finished log from storage. Downloads come back as binary
+  # (ASCII-8BIT); logs are UTF-8 text, with any invalid bytes replaced so
+  # odd job output can't break the page that shows it.
+  def stored_log_text
+    log_blob.download.force_encoding(Encoding::UTF_8).scrub
   end
 
   # Write the final blob and drop the ingestion rows. Called automatically
