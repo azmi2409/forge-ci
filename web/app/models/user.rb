@@ -140,6 +140,19 @@ class User < ApplicationRecord
     nil
   end
 
+  # Gives the first admin (or a new "admin" when there are none) a new random
+  # password and returns [user, password]. For when the first-boot password
+  # was missed: bin/rails forge_ci:reset_admin.
+  def self.reset_admin_password!
+    user = admin.order(:id).first || new(username: "admin", role: :admin)
+    password = SecureRandom.alphanumeric(20)
+    user.password = password
+    user.skip_password_policy = true
+    user.save!
+    forget_initial_password!
+    [user, password]
+  end
+
   def self.initial_password_path
     File.join(ForgeCISecrets.data_dir, INITIAL_PASSWORD_FILE)
   end

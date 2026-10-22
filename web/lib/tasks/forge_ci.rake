@@ -35,3 +35,13 @@ namespace :forge_ci do
     end
   end
 end
+
+namespace :forge_ci do
+  desc "Give the first admin a new random password and print it (creates 'admin' if there is none)"
+  task reset_admin: :environment do
+    user, password = User.reset_admin_password!
+    puts "forge-ci: admin user '#{user.username}'"
+    puts "forge-ci:   password: #{password}"
+    puts "forge-ci:   change it under Account after signing in"
+  end
+end

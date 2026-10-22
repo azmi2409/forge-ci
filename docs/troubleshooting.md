@@ -78,3 +78,11 @@ otherwise). Set `DOCKER_BIN` if the CLI isn't on `PATH`.
 
 `git` preserves the mode, but some copy flows don't. `chmod +x exe/forge-ci`
 (and `web/bin/*`, `runner/bin/forge-ci-runner`).
+
+## Can't sign in / lost the admin password
+
+Run `bin/rails forge_ci:reset_admin` in the control-plane container
+(`docker compose exec web bin/rails forge_ci:reset_admin`, or the Terminal tab
+on Coolify). It gives the first admin a new password and prints it, creating
+an `admin` user if there are none. To set a password of your own, use
+`FORGE_USERNAME=admin FORGE_PASSWORD=... bin/rails forge_ci:create_user`.
