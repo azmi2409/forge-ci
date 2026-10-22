@@ -194,6 +194,56 @@ class ExecutorTest < Minitest::Test
     assert_equal "https://github.com/o/r.git", ex.send(:strip_userinfo, "https://github.com/o/r.git")
   end
 
+  def test_builtin_circleci_environment
+    ex = executor("repository" => { "url" => "https://github.com/KilatHost/web.git", "sha" => "abc123" },
+                  "workflow_run_id" => 7)
+    env = ex.builtin_environment
+    assert_equal "true", env["CI"]
+    assert_equal "true", env["CIRCLECI"]
+    assert_equal "main", env["CIRCLE_BRANCH"]
+    assert_equal "abc123", env["CIRCLE_SHA1"]
+    assert_equal "build", env["CIRCLE_JOB"]
+    assert_equal "11", env["CIRCLE_BUILD_NUM"]
+    assert_equal "7", env["CIRCLE_WORKFLOW_ID"]
+    assert_equal "/root/project", env["CIRCLE_WORKING_DIRECTORY"]
+    assert_equal "KilatHost", env["CIRCLE_PROJECT_USERNAME"]
+    assert_equal "web", env["CIRCLE_PROJECT_REPONAME"]
+    assert_equal "/tmp/forge-ci-bash-env", env["BASH_ENV"]
+    args = ex.primary_run_args
+    assert_includes args, "CIRCLE_SHA1=abc123"
+  end
+
+  def test_job_environment_wins_over_builtins
+    ex = executor("environment" => { "CI" => "custom" })
+    assert_equal "custom", ex.job_environment["CI"]
+  end
+
+  def test_builtins_are_not_redacted
+    ex = executor("pipeline" => { "sha" => "0123456789abcdef", "branch" => "feature-long-name" })
+    redactor = ex.instance_variable_get(:@redactor)
+    assert_equal "feature-long-name 0123456789abcdef", redactor.redact("feature-long-name 0123456789abcdef")
+  end
+
+  def test_default_shell_is_bash_when_image_has_it
+    ex = executor("steps" => [{ "type" => "run", "name" => "x", "command" => "true" }])
+    ex.execute
+    argv = ex.commands.find { |c| c[0] == :stream_exec }[1]
+    assert_equal ["/bin/bash", "-eo", "pipefail", "-c", "true"], argv.last(5)
+    assert(ex.commands.any? { |c| c[0] == :run_docker && c[1].last.include?("touch /tmp/forge-ci-bash-env") })
+  end
+
+  def test_default_shell_falls_back_to_sh
+    ex = RecordingExecutor.new(test_config, NullClient.new,
+                               test_payload("steps" => [{ "type" => "run", "name" => "x", "command" => "true" }]))
+    def ex.run_docker(*args)
+      @commands << [:run_docker, args]
+      ["", args.last.to_s.include?("test -x /bin/bash") ? 1 : 0]
+    end
+    ex.execute
+    argv = ex.commands.find { |c| c[0] == :stream_exec }[1]
+    assert_equal ["/bin/sh", "-c", "true"], argv.last(3)
+  end
+
   def test_shutdown_flag_cancels_remaining_steps
     ex = executor(
       "steps" => [

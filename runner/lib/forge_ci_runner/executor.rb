@@ -33,6 +33,13 @@ module ForgeCIRunner
     # persist_to_workspace uploads one tarball per root; attach_workspace
     # reads the manifest and extracts every root tarball at `at`.
     WORKSPACE_KEY_PREFIX = "forge-ci-workspace"
+
+    # CircleCI's default for `run` steps when the image has bash.
+    BASH_SHELL = "/bin/bash -eo pipefail"
+    POSIX_SHELL = "/bin/sh"
+    # Created empty at job start; bash sources it before every step, so
+    # `echo 'export X=1' >> "$BASH_ENV"` carries values to later steps.
+    BASH_ENV_PATH = "/tmp/forge-ci-bash-env"
     WORKSPACE_MANIFEST_NAME = "manifest.json"
 
     Result = Struct.new(:name, :exit_code, :started_at, :finished_at, :note,
@@ -65,6 +72,7 @@ module ForgeCIRunner
       @workflow_run_id = payload["workflow_run_id"]
       @cache_store = @project_id ? CacheStore.new(@client, @project_id) : nil
       @artifact_store = ArtifactStore.new(@client, @job_id)
+      @default_shell = POSIX_SHELL
     end
 
     def self.docker_available?(docker_bin = "docker")
@@ -133,6 +141,34 @@ module ForgeCIRunner
       env.flat_map { |k, v| ["-e", "#{k}=#{v}"] }
     end
 
+    # CircleCI-compatible built-in variables. Kept out of @environment so
+    # the redactor doesn't mask branch names and SHAs; the job's own
+    # environment wins on a name clash.
+    def builtin_environment
+      repo = @payload["repository"].is_a?(Hash) ? @payload["repository"] : {}
+      repo_url = strip_userinfo(repo["url"]) unless repo["url"].to_s.empty?
+      owner, name = repo_url&.match(%r{github\.com[/:]([^/]+)/([^/]+?)(?:\.git)?\z})&.captures
+      {
+        "CI" => "true",
+        "CIRCLECI" => "true",
+        "FORGE_CI" => "true",
+        "BASH_ENV" => BASH_ENV_PATH,
+        "CIRCLE_BRANCH" => @payload.dig("pipeline", "branch"),
+        "CIRCLE_SHA1" => @payload.dig("pipeline", "sha"),
+        "CIRCLE_JOB" => @payload["name"],
+        "CIRCLE_BUILD_NUM" => @job_id,
+        "CIRCLE_WORKFLOW_ID" => @workflow_run_id,
+        "CIRCLE_WORKING_DIRECTORY" => expand_workdir(@payload["working_directory"]),
+        "CIRCLE_REPOSITORY_URL" => repo_url,
+        "CIRCLE_PROJECT_USERNAME" => owner,
+        "CIRCLE_PROJECT_REPONAME" => name
+      }.reject { |_k, v| v.nil? || v.to_s.empty? }.transform_values(&:to_s)
+    end
+
+    def job_environment
+      builtin_environment.merge(@environment)
+    end
+
     def primary_run_args
       ex = @payload["executor"] || {}
       image = ex["image"]
@@ -143,7 +179,7 @@ module ForgeCIRunner
               "--network", @network]
       wd = expand_workdir(@payload["working_directory"])
       args += ["-w", wd] if wd
-      args += env_args(@environment)
+      args += env_args(job_environment)
       args += ["--entrypoint", ex["entrypoint"]] if ex["entrypoint"]
       args << image
       # Long-lived container: steps run via `docker exec`.
@@ -167,11 +203,11 @@ module ForgeCIRunner
 
     # argv for `docker exec` running a step's shell command.
     def exec_argv(step, detached: false)
-      shell = Shellwords.split(step["shell"] || "/bin/sh")
+      shell = Shellwords.split(step["shell"] || @default_shell)
       args = [@config.docker_bin, "exec"]
       args << "-d" if detached
       args += ["-w", @workdir] if @workdir
-      args += env_args(@environment)
+      args += env_args(job_environment)
       args += env_args(step["environment"]) if step["environment"].is_a?(Hash)
       args << @container
       args + shell + ["-c", step["command"].to_s]
@@ -300,6 +336,16 @@ module ForgeCIRunner
       log_line("[forge-ci] starting primary container #{@container} (#{ex["image"]})")
       _out, code = run_docker(*primary_run_args)
       raise "primary container failed to start (exit #{code})" unless code.zero?
+
+      prepare_shell
+    end
+
+    # Pick the default `run` shell (bash when the image has it, like
+    # CircleCI) and create the empty $BASH_ENV file.
+    def prepare_shell
+      _out, code = run_docker(@config.docker_bin, "exec", @container, "/bin/sh", "-c",
+                              "touch #{BASH_ENV_PATH} && test -x /bin/bash")
+      @default_shell = code.zero? ? BASH_SHELL : POSIX_SHELL
     end
 
     def cleanup_containers

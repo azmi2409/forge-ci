@@ -27,8 +27,16 @@ Per claimed job the runner:
 4. Executes steps in order:
    - `checkout` — clones `repository.url` from the claim payload (falls back
      to `CHECKOUT_REPO_URL`, then skips loudly) at the pipeline SHA.
-   - `run` — `docker exec` with the step's `shell` (default `/bin/sh -c`),
-     environment, and working directory; stdout/stderr streamed as
+   - `run` — `docker exec` with the step's `shell` (default, like CircleCI:
+     `/bin/bash -eo pipefail` when the image has bash, else `/bin/sh`),
+     environment, and working directory. `$BASH_ENV` points at a file
+     created empty at job start that bash sources before each step, so
+     `echo 'export X=1' >> "$BASH_ENV"` passes values to later steps.
+     CircleCI-style built-ins are set (`CI`, `CIRCLECI`, `CIRCLE_BRANCH`,
+     `CIRCLE_SHA1`, `CIRCLE_JOB`, `CIRCLE_BUILD_NUM`, `CIRCLE_WORKFLOW_ID`,
+     `CIRCLE_WORKING_DIRECTORY`, `CIRCLE_REPOSITORY_URL`,
+     `CIRCLE_PROJECT_USERNAME`/`REPONAME`); the job's own environment wins
+     on a clash. stdout/stderr streamed as
      seq-numbered log chunks. `when: on_success/on_fail/always` is
      evaluated at runtime: a non-zero exit skips remaining `on_success`
      steps, `on_fail`/`always` steps still run, the job is marked `failed`.
