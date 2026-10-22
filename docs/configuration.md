@@ -26,13 +26,13 @@ first boot and kept in `secrets.yml` in the data directory.
 | `AWS_S3_ENDPOINT` / `AWS_S3_FORCE_PATH_STYLE` | — / `false` | For S3-compatible stores such as MinIO |
 | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_WEBHOOK_SECRET` | the App from Settings → Connect GitHub | An App you registered yourself; these take precedence over the stored one. The webhook endpoint rejects everything while no secret is set |
 | `ARTIFACT_RETENTION_DAYS` | `30` | Artifact retention (`PurgeOldArtifactsJob` runs daily at 03:00) |
-| `FORGE_CI_STREAM_TIMEOUT_SECONDS` | `300` | How long the SSE log live-tail waits for output |
+| `FORGE_CI_STREAM_TIMEOUT_SECONDS` | `25` | How long one SSE log live-tail request stays open before the job page reconnects. Each open stream holds a web thread, so keep it short |
 | `FORGE_CI_AUTOSCALE` | — | Scale runner Auto Scaling Groups up when jobs queue: `class=asg-name[:max[:jobs_per_instance]],…` (see DEPLOY.md, "Scale runners to zero") |
 | `FORGE_CI_AUTOSCALE_REGION` | `AWS_REGION` | Region of those Auto Scaling Groups |
 | `SOLID_QUEUE_IN_PUMA` | `1` in the image | Run the background jobs inside the web process. Unset it to run `bin/jobs` separately |
 | `FORGE_CI_RUNNER_PATH` | `/forge-ci/runner` in the image, `../runner` otherwise | The runner files served as `/runner.tar.gz` |
 | `FORGE_CI_SEED_DEMO` | — | `1` loads the demo project and pipelines in production (`db:prepare` skips them otherwise) |
-| `RAILS_MAX_THREADS` | `5` | Database pool size |
+| `RAILS_MAX_THREADS` | `16` in the image (`3` otherwise) | Web request threads, and the database pool size |
 
 ## Runner (`runner/`)
 

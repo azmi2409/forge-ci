@@ -12,11 +12,12 @@ module Api
     class JobsController < BaseController
       include ActionController::Live
 
-      # How long a live-tail stream stays open waiting for new output.
-      # Env-overridable (seconds) so proxies with their own idle timeouts
-      # (e.g. 55s on Heroku) and the test suite can shorten it.
+      # How long a live-tail stream stays open waiting for new output. Each
+      # open stream holds one of Puma's threads, so this stays short and the
+      # job page reconnects (it re-sends from the start; the page dedupes by
+      # seq). Env-overridable (seconds).
       def stream_timeout
-        ENV.fetch("FORGE_CI_STREAM_TIMEOUT_SECONDS", "300").to_i.seconds
+        ENV.fetch("FORGE_CI_STREAM_TIMEOUT_SECONDS", "25").to_i.seconds
       end
 
       before_action :find_job_or_404, only: %i[stream logs]
@@ -65,22 +66,25 @@ module Api
           last_seq = c[:seq]
         end
 
+        # A job that hasn't started has no output coming; end now rather than
+        # hold a thread, and let the page ask again shortly.
+        return sse.write({ status: @job.status }.to_json, event: "waiting") if @job.pending? || @job.queued?
+
         deadline = stream_timeout.from_now
-        ActiveRecord::Base.connection_pool.with_connection do
-          loop do
+        loop do
+          # Check a connection out per poll, not for the whole stream.
+          done = ActiveRecord::Base.connection_pool.with_connection do
             job = JobRun.find(@job.id)
             job.log_chunks.where("seq > ?", last_seq).order(:seq).each do |c|
               sse.write({ seq: c.seq, chunk: c.chunk }.to_json, event: "chunk")
               last_seq = c.seq
             end
-            if job.terminal?
-              sse.write({ status: job.status }.to_json, event: "done")
-              break
-            end
-            break if Time.current >= deadline
-
-            sleep 2
+            sse.write({ status: job.status }.to_json, event: "done") if job.terminal?
+            job.terminal?
           end
+          break if done || Time.current >= deadline
+
+          sleep 2
         end
       rescue IOError, ActionController::Live::ClientDisconnected
         # Client disconnected; nothing to clean up.

@@ -116,4 +116,29 @@ class Api::V1::JobsControllerTest < ActionDispatch::IntegrationTest
     get "/api/v1/jobs/#{@job_id}/logs/stream"
     assert_response :unauthorized
   end
+
+  test "log stream for a job that hasn't started ends at once with a waiting event" do
+    pending_job = @pipeline.job_runs.find_by!(name: "test")
+    assert pending_job.pending?
+    sign_in_as_admin
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    get "/api/v1/jobs/#{pending_job.id}/logs/stream"
+    assert_response :ok
+    assert_includes response.body, "event: waiting"
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 1.5
+  end
+
+  test "log stream for a running job stops after the stream timeout instead of holding a thread" do
+    old = ENV["FORGE_CI_STREAM_TIMEOUT_SECONDS"]
+    ENV["FORGE_CI_STREAM_TIMEOUT_SECONDS"] = "1"
+    post "/api/v1/jobs/#{@job_id}/log_chunks", params: { seq: 0, chunk: "still going\n" }, headers: auth, as: :json
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    get "/api/v1/jobs/#{@job_id}/logs/stream", headers: auth
+    assert_response :ok
+    assert_includes response.body, "still going"
+    assert_not_includes response.body, "event: done"
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 5
+  ensure
+    old.nil? ? ENV.delete("FORGE_CI_STREAM_TIMEOUT_SECONDS") : ENV["FORGE_CI_STREAM_TIMEOUT_SECONDS"] = old
+  end
 end

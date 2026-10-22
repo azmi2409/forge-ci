@@ -23,7 +23,8 @@ ENV RAILS_ENV="production" \
     LD_PRELOAD="/usr/local/lib/libjemalloc.so" \
     FORGE_CI_GEM_PATH="/forge-ci" \
     FORGE_CI_RUNNER_PATH="/forge-ci/runner" \
-    SOLID_QUEUE_IN_PUMA="1"
+    SOLID_QUEUE_IN_PUMA="1" \
+    RAILS_MAX_THREADS="16"
 # SOLID_QUEUE_IN_PUMA runs the background worker inside the web server, so one
 # container is the whole control plane. Set it to "" and run ./bin/jobs in a
 # second container to scale the worker separately.
