@@ -1,100 +1,102 @@
-<% content_for(:title, "Pipeline ##{@pipeline.pipeline_number || @pipeline.id} · #{@project.name} — ForgeCI") %>
+<% number = "##{@pipeline.pipeline_number || @pipeline.id}" %>
+<% content_for(:title, "Pipeline #{number} · #{@project.name} — ForgeCI") %>
+<% content_for(:breadcrumbs) { breadcrumbs(["Overview", projects_path], [@project.name, project_path(@project)], ["Pipeline #{number}"]) } %>
 <% content_for(:head) do %>
   <% unless @pipeline.terminal? %><meta http-equiv="refresh" content="5"><% end %>
   <style>
-    .wf { margin-top: 20px; }
-    .graph { display: flex; gap: 0; overflow-x: auto; padding: 20px 18px 22px; align-items: flex-start; }
-    .stage { display: flex; flex-direction: column; gap: 10px; min-width: 230px; position: relative; }
-    .stage + .stage { margin-left: 44px; }
-    .stage + .stage::before { content: ""; position: absolute; left: -36px; top: 58px; width: 28px; border-top: 2px dashed var(--border-strong); }
-    .stage-label { font-size: 11.5px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 2px; }
-    .jobnode { display: block; background: var(--bg-raised); border: 1px solid var(--border); border-left: 3px solid var(--gray); border-radius: var(--radius-sm); padding: 10px 12px; color: var(--text); }
-    .jobnode:hover { border-color: var(--border-strong); text-decoration: none; }
-    .jobnode.s-success { border-left-color: var(--green); } .jobnode.s-failed { border-left-color: var(--red); }
-    .jobnode.s-running, .jobnode.s-claimed { border-left-color: var(--amber); } .jobnode.s-queued { border-left-color: var(--blue); }
-    .jobnode-top { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
-    .jobnode-name { font-weight: 650; font-size: 14px; }
-    .jobnode-meta { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; margin-top: 6px; }
-    .jobnode-meta span { display: inline-flex; gap: 5px; align-items: center; }
+    .graph { display: flex; overflow-x: auto; padding: 16px 20px 24px; align-items: flex-start; }
+    .stage { position: relative; display: flex; min-width: 232px; flex-direction: column; gap: 8px; }
+    .stage + .stage { margin-left: 40px; }
+    .stage + .stage::before { content: ""; position: absolute; left: -32px; top: 52px; width: 24px; border-top: 1px solid var(--line-strong); }
+    .stage-label { margin-bottom: 4px; font: 11px/1.5 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .jobnode { display: block; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); padding: 12px; transition: border-color .15s var(--ease-out); }
+    .jobnode:hover { border-color: var(--line-strong); }
+    .jobnode-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .jobnode-name { min-width: 0; font-weight: 500; }
+    .jobnode-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; line-height: 16px; color: var(--muted); }
+    .jobnode-meta span { display: inline-flex; align-items: center; gap: 4px; }
     .jobnode-meta .icon { width: 13px; height: 13px; }
-    .nodes { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px; }
-    .nodes a { font: 600 11px var(--mono); padding: 2px 7px; border-radius: 4px; color: var(--text-2); background: var(--gray-bg); border: 1px solid transparent; }
-    .nodes a:hover { text-decoration: none; border-color: var(--border-strong); }
-    .nodes a.s-success { color: var(--green); background: var(--green-bg); } .nodes a.s-failed { color: var(--red); background: var(--red-bg); }
-    .nodes a.s-running, .nodes a.s-claimed { color: var(--amber); background: var(--amber-bg); } .nodes a.s-queued { color: var(--blue); background: var(--blue-bg); }
+    .nodes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .nodes a { display: inline-flex; height: 22px; align-items: center; gap: 5px; border-radius: 9999px; border: 1px solid var(--line); background: var(--surface); padding: 0 8px; font: 11px var(--font-mono); color: var(--muted); transition: border-color .15s, color .15s; }
+    .nodes a:hover { border-color: var(--line-strong); color: var(--ink); }
+    .nodes .status-dot { width: 6px; height: 6px; box-shadow: none; }
   </style>
-<% end %>
-<% content_for(:breadcrumbs) do %>
-  <%= link_to "Dashboard", projects_path %><%= icon "chevron-right" %>
-  <%= link_to @project.name, project_path(@project) %><%= icon "chevron-right" %>
-  <span>Pipeline #<%= @pipeline.pipeline_number || @pipeline.id %></span>
 <% end %>
 
 <%= render "shared/flash" %>
 
-<div class="page-head">
+<div class="page-header">
   <div>
-    <h1>Pipeline #<%= @pipeline.pipeline_number || @pipeline.id %> <%= status_badge(@pipeline.status) %></h1>
-    <p class="sub">
+    <p class="eyebrow">Pipeline</p>
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+      <h1 class="page-heading tabular"><%= number %></h1>
+      <%= status_badge(@pipeline.status) %>
+    </div>
+    <div class="page-meta">
       <span><%= icon "branch" %><span class="mono"><%= @pipeline.branch %></span></span>
       <span><%= icon "commit" %>
         <% if (url = commit_url(@pipeline)) %>
-          <a class="mono" href="<%= url %>" title="<%= @pipeline.sha %>"><%= short_sha(@pipeline.sha) %></a>
+          <a class="mono text-link" href="<%= url %>" title="<%= @pipeline.sha %>"><%= short_sha(@pipeline.sha) %></a>
         <% else %>
           <span class="mono" title="<%= @pipeline.sha %>"><%= short_sha(@pipeline.sha) %></span>
         <% end %>
       </span>
-      <span><%= icon "clock" %> started <%= time_ago_tag(@pipeline.created_at) %></span>
-      <span><%= icon "activity" %> <%= duration_text(pipeline_duration(@pipeline)) %></span>
-      <% if @pipeline.forked %><span class="pill" title="Pull request from a fork: contexts are not injected">fork</span><% end %>
-    </p>
+      <span><%= icon "clock" %>Started <%= time_ago_tag(@pipeline.created_at) %></span>
+      <span class="tabular">Took <%= duration_text(pipeline_duration(@pipeline)) %></span>
+      <% if @pipeline.forked %><span class="chip" title="Pull request from a fork: contexts are not injected">fork</span><% end %>
+    </div>
   </div>
-  <div class="page-actions">
-    <% unless @pipeline.terminal? %>
-      <%= button_to cancel_project_pipeline_path(@project, @pipeline), method: :post, class: "btn btn-danger",
-                    data: { turbo_confirm: "Cancel this pipeline?" }, form: { onsubmit: "return confirm('Cancel this pipeline?')" } do %>
-        <%= icon "stop" %> Cancel pipeline
+  <% unless @pipeline.terminal? %>
+    <div class="page-actions">
+      <%= button_to cancel_project_pipeline_path(@project, @pipeline), method: :post, class: "button-danger",
+                    form: { onsubmit: "return confirm('Cancel this pipeline?')" } do %>
+        <%= icon "stop" %>Cancel pipeline
       <% end %>
-    <% end %>
-  </div>
+    </div>
+  <% end %>
 </div>
 
-<% @workflows.each do |wf| %>
-  <section class="card wf" aria-label="Workflow <%= wf.name %>">
-    <div class="card-head">
-      <h2><%= icon "layers" %> <%= wf.name %></h2>
-      <%= status_badge(wf.status) %>
-    </div>
-    <div class="graph">
-      <% wf.stages.each_with_index do |stage, i| %>
-        <div class="stage">
-          <div class="stage-label">Stage <%= i + 1 %></div>
-          <% stage.each do |nodes| %>
-            <% job = nodes.first %>
-            <% status = group_status(nodes) %>
-            <div>
-            <%= link_to job_run_path(job), class: "jobnode s-#{status}" do %>
-              <div class="jobnode-top">
-                <span class="jobnode-name truncate"><%= job.name %></span>
-                <%= status_badge(status) %>
-              </div>
-              <div class="jobnode-meta">
-                <% if job.requires_list.any? %><span title="requires">requires <%= job.requires_list.join(", ") %></span><% end %>
-                <span><%= icon "cpu" %><%= job.resource_class || "any runner" %></span>
-                <% if nodes.size > 1 %><span><%= icon "layers" %><%= nodes.size %>× parallel</span><% end %>
-              </div>
-            <% end %>
-            <% if nodes.size > 1 %>
-              <div class="nodes" aria-label="Parallel nodes of <%= job.name %>">
-                <% nodes.each do |node| %>
-                  <%= link_to node.node_index + 1, job_run_path(node), class: "s-#{node.status}", title: "#{node.display_name}: #{node.status}" %>
+<div class="stack">
+  <% @workflows.each do |wf| %>
+    <section class="card" aria-label="Workflow <%= wf.name %>">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title"><%= icon "layers" %><%= wf.name %></h2>
+          <p class="card-desc">Jobs run left to right; each stage starts when the jobs it requires pass.</p>
+        </div>
+        <%= status_badge(wf.status) %>
+      </div>
+      <div class="graph">
+        <% wf.stages.each_with_index do |stage, i| %>
+          <div class="stage">
+            <div class="stage-label">Stage <%= i + 1 %></div>
+            <% stage.each do |nodes| %>
+              <% job = nodes.first %>
+              <% status = group_status(nodes) %>
+              <div>
+                <%= link_to job_run_path(job), class: "jobnode" do %>
+                  <div class="jobnode-top">
+                    <span class="jobnode-name truncate"><%= job.name %></span>
+                    <%= status_badge(status) %>
+                  </div>
+                  <div class="jobnode-meta">
+                    <% if job.requires_list.any? %><span>requires <%= job.requires_list.join(", ") %></span><% end %>
+                    <span><%= icon "cpu" %><%= job.resource_class || "any runner" %></span>
+                    <% if nodes.size > 1 %><span><%= icon "layers" %><%= nodes.size %> parallel</span><% end %>
+                  </div>
+                <% end %>
+                <% if nodes.size > 1 %>
+                  <div class="nodes" aria-label="Parallel nodes of <%= job.name %>">
+                    <% nodes.each do |node| %>
+                      <%= link_to job_run_path(node), title: "#{node.display_name}: #{node.status.humanize}" do %><span class="status-dot" data-state="<%= node.status %>"></span><%= node.node_index + 1 %><% end %>
+                    <% end %>
+                  </div>
                 <% end %>
               </div>
             <% end %>
-            </div>
-          <% end %>
-        </div>
-      <% end %>
-    </div>
-  </section>
-<% end %>
+          </div>
+        <% end %>
+      </div>
+    </section>
+  <% end %>
+</div>

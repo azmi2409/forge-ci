@@ -1,28 +1,28 @@
 <% content_for(:title, "#{@project.name} — ForgeCI") %>
-<% content_for(:breadcrumbs) do %>
-  <%= link_to "Dashboard", projects_path %><%= icon "chevron-right" %><span><%= @project.name %></span>
-<% end %>
+<% content_for(:breadcrumbs) { breadcrumbs(["Overview", projects_path], [@project.name]) } %>
 
-<div class="page-head">
+<div class="page-header">
   <div>
-    <h1><%= @project.name %></h1>
-    <p class="sub">
+    <p class="eyebrow">Project</p>
+    <h1 class="page-heading"><%= @project.name %></h1>
+    <div class="page-meta">
       <% if @project.repo_url.present? %><span><%= icon "repo" %><span class="mono"><%= @project.repo_url %></span></span><% end %>
-      <span><%= icon "branch" %> default <span class="mono"><%= @project.default_branch %></span></span>
-      <span><%= icon "cpu" %> up to <%= pluralize(@project.max_concurrency, "job") %> at once</span>
-      <span><%= icon "layers" %> <%= pluralize(@total, "pipeline") %></span>
-    </p>
+      <span><%= icon "branch" %>Default branch <span class="mono"><%= @project.default_branch %></span></span>
+      <span><%= icon "cpu" %>Up to <%= pluralize(@project.max_concurrency, "job") %> at once</span>
+    </div>
   </div>
 </div>
 
-<div class="card">
-  <div class="card-head">
-    <h2>Pipelines</h2>
-    <% if @total > @pipelines.size %><span class="muted">latest <%= @pipelines.size %> of <%= @total %></span><% end %>
+<section class="card" aria-labelledby="pipelines-title">
+  <div class="card-header">
+    <div>
+      <h2 id="pipelines-title" class="card-title">Pipelines</h2>
+      <p class="card-desc"><%= @total > @pipelines.size ? "The latest #{@pipelines.size} of #{@total}, newest first." : "#{pluralize(@total, 'pipeline')}, newest first." %></p>
+    </div>
   </div>
   <% if @pipelines.any? %>
     <%= render "pipelines/table", pipelines: @pipelines, show_project: false %>
   <% else %>
-    <div class="empty"><%= icon "layers" %><h3>No pipelines yet</h3><p>Push to the repo, or run <code>forge-ci trigger .circleci/config.yml --project <%= @project.name %></code>.</p></div>
+    <div class="card-body"><div class="empty-state"><h3>No pipelines yet</h3><p>Push to the repo, or run <code>forge-ci trigger .circleci/config.yml --project <%= @project.name %></code>.</p></div></div>
   <% end %>
-</div>
+</section>

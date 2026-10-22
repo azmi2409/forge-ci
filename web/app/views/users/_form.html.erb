@@ -1,33 +1,33 @@
-<% if @user.errors.any? %><div class="flash flash-alert" role="alert"><%= icon "x" %><span><%= @user.errors.full_messages.to_sentence %></span></div><% end %>
-<section class="card" style="max-width: 520px">
-  <div class="card-body">
-    <%= form_with url: url, method: method do %>
-      <div class="field">
-        <label for="username">Username</label>
+<% if @user.errors.any? %><div class="flash-error" role="alert"><%= @user.errors.full_messages.to_sentence %></div><% end %>
+<section class="card" style="max-width: 560px">
+  <%= form_with url: url, method: method do %>
+    <div class="card-body">
+      <div class="form-row">
+        <label class="field-label" for="username">Username</label>
         <% if @user.new_record? %>
-          <%= text_field_tag :username, @user.username, id: "username", required: true, autocapitalize: "none", autocomplete: "off", spellcheck: false %>
+          <%= text_field_tag :username, @user.username, id: "username", class: "field", required: true, autocapitalize: "none", autocomplete: "off", spellcheck: false %>
         <% else %>
-          <input type="text" id="username" value="<%= @user.username %>" disabled>
+          <input type="text" id="username" class="field" value="<%= @user.username %>" disabled>
         <% end %>
       </div>
-      <div class="field">
-        <label for="role">Role</label>
-        <%= select_tag :role, options_for_select(User.roles.keys, @user.role), id: "role" %>
-        <div class="hint">Admins can manage users.</div>
+      <div class="form-row">
+        <label class="field-label" for="role">Role</label>
+        <%= select_tag :role, options_for_select(User.roles.keys.map { |r| [r.capitalize, r] }, @user.role), id: "role", class: "field" %>
+        <p class="field-hint">Admins can manage users.</p>
       </div>
-      <div class="field">
-        <label for="password"><%= @user.new_record? ? "Password" : "New password" %></label>
-        <%= password_field_tag :password, nil, id: "password", autocomplete: "new-password", required: @user.new_record? %>
-        <div class="hint">At least <%= User::MIN_PASSWORD_LENGTH %> characters.<%= " Leave blank to keep the current one." unless @user.new_record? %></div>
+      <div class="form-row">
+        <label class="field-label" for="password"><%= @user.new_record? ? "Password" : "New password" %></label>
+        <%= password_field_tag :password, nil, id: "password", class: "field", autocomplete: "new-password", required: @user.new_record? %>
+        <p class="field-hint">At least <%= User::MIN_PASSWORD_LENGTH %> characters.<%= " Leave blank to keep the current one." unless @user.new_record? %></p>
       </div>
-      <div class="field">
-        <label for="password_confirmation">Confirm password</label>
-        <%= password_field_tag :password_confirmation, nil, id: "password_confirmation", autocomplete: "new-password", required: @user.new_record? %>
+      <div class="form-row">
+        <label class="field-label" for="password_confirmation">Confirm password</label>
+        <%= password_field_tag :password_confirmation, nil, id: "password_confirmation", class: "field", autocomplete: "new-password", required: @user.new_record? %>
       </div>
-      <div class="form-actions">
-        <button type="submit" class="btn-primary"><%= @user.new_record? ? "Create user" : "Save changes" %></button>
-        <%= link_to "Cancel", users_path, class: "btn btn-ghost" %>
-      </div>
-    <% end %>
-  </div>
+    </div>
+    <div class="card-footer">
+      <%= link_to "Cancel", users_path, class: "button-ghost button-sm" %>
+      <button type="submit" class="button-primary button-sm"><%= @user.new_record? ? "Create user" : "Save changes" %></button>
+    </div>
+  <% end %>
 </section>

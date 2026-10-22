@@ -1,42 +1,38 @@
 <% content_for(:title, "Account — ForgeCI") %>
-<% content_for(:breadcrumbs) do %><%= link_to "Dashboard", projects_path %><%= icon "chevron-right" %><span>Account</span><% end %>
+<% content_for(:crumb, "Account") %>
 
-<div class="page-head">
+<div class="page-header">
   <div>
-    <h1>Account</h1>
-    <p class="sub"><span><%= icon "user" %> <span class="mono"><%= current_user.username %></span></span><span class="pill"><%= current_user.role %></span></p>
+    <h1 class="page-heading">Account</h1>
+    <p>Signed in as <span class="mono"><%= current_user.username %></span>, <%= current_user.role %>.</p>
   </div>
 </div>
 <%= render "shared/flash" %>
 
-<div style="display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-items: start">
-  <section class="card">
-    <div class="card-head"><h2>Change password</h2></div>
-    <div class="card-body">
-      <%= form_with url: account_path, method: :patch do %>
-        <div class="field">
-          <label for="current_password">Current password</label>
-          <%= password_field_tag :current_password, nil, id: "current_password", autocomplete: "current-password", required: true %>
+<div class="stack" style="max-width: 640px">
+  <section class="card" aria-labelledby="password-title">
+    <div class="card-header"><div><h2 id="password-title" class="card-title">Change password</h2><p class="card-desc">Use at least <%= User::MIN_PASSWORD_LENGTH %> characters.</p></div></div>
+    <%= form_with url: account_path, method: :patch do %>
+      <div class="card-body">
+        <div class="form-row">
+          <label class="field-label" for="current_password">Current password</label>
+          <%= password_field_tag :current_password, nil, id: "current_password", class: "field", autocomplete: "current-password", required: true %>
         </div>
-        <div class="field">
-          <label for="password">New password</label>
-          <%= password_field_tag :password, nil, id: "password", autocomplete: "new-password", required: true %>
-          <div class="hint">At least <%= User::MIN_PASSWORD_LENGTH %> characters.</div>
+        <div class="form-row">
+          <label class="field-label" for="password">New password</label>
+          <%= password_field_tag :password, nil, id: "password", class: "field", autocomplete: "new-password", required: true %>
         </div>
-        <div class="field">
-          <label for="password_confirmation">Confirm new password</label>
-          <%= password_field_tag :password_confirmation, nil, id: "password_confirmation", autocomplete: "new-password", required: true %>
+        <div class="form-row">
+          <label class="field-label" for="password_confirmation">Confirm new password</label>
+          <%= password_field_tag :password_confirmation, nil, id: "password_confirmation", class: "field", autocomplete: "new-password", required: true %>
         </div>
-        <div class="form-actions"><button type="submit" class="btn-primary">Change password</button></div>
-      <% end %>
-    </div>
+      </div>
+      <div class="card-footer"><span>Other sessions stay signed in.</span><button type="submit" class="button-primary button-sm">Change password</button></div>
+    <% end %>
   </section>
 
-  <section class="card">
-    <div class="card-head"><h2>Sessions</h2></div>
-    <div class="card-body">
-      <p class="muted">Sign out every other browser and device signed in as you. This one stays signed in.</p>
-      <%= button_to "Sign out everywhere else", sign_out_everywhere_account_path, method: :post, class: "btn btn-danger" %>
-    </div>
+  <section class="card" aria-labelledby="sessions-title">
+    <div class="card-header"><div><h2 id="sessions-title" class="card-title">Sessions</h2><p class="card-desc">Sign out every other browser and device signed in as you. This one stays signed in.</p></div></div>
+    <div class="card-footer"><span></span><%= button_to "Sign out everywhere else", sign_out_everywhere_account_path, method: :post, class: "button-danger button-sm" %></div>
   </section>
 </div>

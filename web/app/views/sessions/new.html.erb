@@ -1,20 +1,20 @@
-<div class="auth">
-  <a class="brand" href="/"><%= render "shared/logo" %>ForgeCI</a>
+<main class="auth">
+  <%= render "shared/brand" %>
   <div class="card">
-    <div class="card-body">
-      <h1>Sign in</h1>
-      <p class="lead">to the ForgeCI control plane</p>
+    <div class="card-body" style="padding: 28px">
+      <h1>Sign in to ForgeCI</h1>
+      <p class="lead">Use the account your administrator gave you.</p>
       <%= render "shared/flash" %>
       <%= form_with url: login_path, method: :post do %>
-        <div class="field">
-          <label for="username">Username</label>
-          <%= text_field_tag :username, params[:username], id: "username", autocomplete: "username", autofocus: true, required: true, autocapitalize: "none", spellcheck: false %>
+        <div class="form-row">
+          <label class="field-label" for="username">Username</label>
+          <%= text_field_tag :username, params[:username], id: "username", class: "field", autocomplete: "username", autofocus: true, required: true, autocapitalize: "none", spellcheck: false %>
         </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <%= password_field_tag :password, nil, id: "password", autocomplete: "current-password", required: true %>
+        <div class="form-row">
+          <label class="field-label" for="password">Password</label>
+          <%= password_field_tag :password, nil, id: "password", class: "field", autocomplete: "current-password", required: true %>
         </div>
-        <button type="submit" class="btn-primary">Sign in</button>
+        <div class="form-actions"><button type="submit" class="button-primary button-block">Sign in</button></div>
       <% end %>
       <% if @no_users %>
         <p class="hint">No users exist yet. Set <code>FORGE_CI_UI_USER</code> and <code>FORGE_CI_UI_PASSWORD</code> and reload to create the first admin, or run <code>bin/rails forge_ci:create_user</code>.</p>
@@ -22,4 +22,4 @@
     </div>
   </div>
   <p class="back"><a href="/">&larr; Back to the ForgeCI site</a></p>
-</div>
+</main>

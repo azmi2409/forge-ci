@@ -1,35 +1,41 @@
 <% content_for(:title, "Users — ForgeCI") %>
-<% content_for(:breadcrumbs) do %><%= link_to "Dashboard", projects_path %><%= icon "chevron-right" %><span>Users</span><% end %>
+<% content_for(:crumb, "Users") %>
 
-<div class="page-head">
+<div class="page-header">
   <div>
-    <h1>Users</h1>
-    <p class="sub">Admins manage users; members can view and cancel pipelines.</p>
+    <h1 class="page-heading">Users</h1>
+    <p>Admins manage users. Members can view and cancel pipelines.</p>
   </div>
-  <div class="page-actions"><%= link_to new_user_path, class: "btn btn-primary" do %><%= icon "plus" %> New user<% end %></div>
+  <div class="page-actions"><%= link_to new_user_path, class: "button-primary" do %><%= icon "plus" %>New user<% end %></div>
 </div>
 <%= render "shared/flash" %>
 
-<div class="card">
+<section class="card" aria-label="Users">
   <div class="table-wrap">
-    <table class="table">
+    <table class="data-table">
       <thead><tr><th>User</th><th>Role</th><th>Last sign-in</th><th>Status</th><th class="num">Actions</th></tr></thead>
       <tbody>
         <% @users.each do |user| %>
           <tr>
             <td>
               <span style="display: inline-flex; align-items: center; gap: 10px">
-                <span class="avatar"><%= user.username.first %></span>
-                <span class="mono"><%= user.username %></span><% if user == current_user %><span class="pill">you</span><% end %>
+                <span class="user-avatar" style="width: 24px; height: 24px; font-size: 11px" aria-hidden="true"><%= user.username.first %></span>
+                <span class="mono"><%= user.username %></span><% if user == current_user %><span class="chip">you</span><% end %>
               </span>
             </td>
-            <td><span class="pill"><%= user.role %></span></td>
-            <td class="muted"><%= user.last_login_at ? time_ago_tag(user.last_login_at) : "never" %></td>
-            <td><%= user.locked? ? tag.span("locked until #{user.locked_until.strftime('%H:%M')}", class: "badge st-failed") : tag.span("active", class: "badge st-success") %></td>
+            <td><%= user.role.capitalize %></td>
+            <td class="text-muted"><%= user.last_login_at ? time_ago_tag(user.last_login_at) : "Never" %></td>
+            <td>
+              <% if user.locked? %>
+                <span class="status-badge"><span class="status-dot" data-state="failed"></span>Locked until <%= user.locked_until.strftime("%H:%M") %></span>
+              <% else %>
+                <span class="status-badge"><span class="status-dot" data-state="success"></span>Active</span>
+              <% end %>
+            </td>
             <td class="num nowrap">
-              <%= link_to "Edit", edit_user_path(user), class: "btn btn-sm" %>
+              <%= link_to "Edit", edit_user_path(user), class: "button-secondary button-sm" %>
               <% unless user == current_user %>
-                <%= button_to "Delete", user_path(user), method: :delete, class: "btn btn-sm btn-danger",
+                <%= button_to "Delete", user_path(user), method: :delete, class: "button-danger button-sm",
                               form: { class: "inline", onsubmit: "return confirm('Delete #{j user.username}?')" } %>
               <% end %>
             </td>
@@ -38,4 +44,4 @@
       </tbody>
     </table>
   </div>
-</div>
+</section>

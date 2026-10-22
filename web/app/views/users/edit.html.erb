@@ -1,4 +1,4 @@
 <% content_for(:title, "Edit user — ForgeCI") %>
-<% content_for(:breadcrumbs) do %><%= link_to "Dashboard", projects_path %><%= icon "chevron-right" %><%= link_to "Users", users_path %><%= icon "chevron-right" %><span>Edit user</span><% end %>
-<div class="page-head"><div><h1>Edit user</h1></div></div>
+<% content_for(:breadcrumbs) { breadcrumbs(["Users", users_path], ["Edit user"]) } %>
+<div class="page-header"><div><h1 class="page-heading">Edit user</h1></div></div>
 <%= render "form", url: user_path(@user), method: :patch %>

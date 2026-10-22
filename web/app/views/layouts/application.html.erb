@@ -6,84 +6,138 @@
     <meta name="robots" content="noindex">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <%= csrf_meta_tags %>
-    <%= yield :head %>
     <%= render "layouts/design" %>
     <style>
-      .topbar { position: sticky; top: 0; z-index: 40; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--border); }
-      .topbar-inner { max-width: 1200px; margin: 0 auto; padding: 0 24px; height: 58px; display: flex; align-items: center; gap: 28px; }
-      .nav { display: flex; gap: 4px; flex: 1; }
-      .nav-item { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: var(--radius-sm); color: var(--text-2); font-weight: 550; font-size: 14px; }
-      .nav-item:hover { background: var(--gray-bg); color: var(--text); text-decoration: none; }
-      .nav-item.active { color: var(--text); background: var(--gray-bg); }
-      .user-menu { position: relative; }
-      .user-menu summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 5px 8px 5px 5px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); font-size: 14px; font-weight: 550; }
-      .user-menu summary::-webkit-details-marker { display: none; }
-      .user-menu summary:hover { border-color: var(--border-strong); color: var(--text); }
-      .menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 220px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0,0,0,.35); padding: 6px; }
-      .menu .menu-head { padding: 8px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 6px; font-size: 13px; color: var(--muted); }
-      .menu .menu-head strong { display: block; color: var(--text); font-size: 14px; }
-      .menu a, .menu button { display: flex; width: 100%; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-sm); color: var(--text-2); font: 500 14px var(--sans); background: none; border: 0; justify-content: flex-start; }
-      .menu a:hover, .menu button:hover { background: var(--gray-bg); color: var(--text); text-decoration: none; }
-      .menu form { display: block; }
-      main.page { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
-      .crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13.5px; color: var(--muted); margin-bottom: 14px; }
-      .crumbs a { color: var(--muted); } .crumbs a:hover { color: var(--text); }
-      .crumbs .icon { width: 14px; height: 14px; opacity: .6; }
-      .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
-      .page-head h1 { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-      .page-head > div { min-width: 0; }
-      .page-head .sub { color: var(--muted); margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 14px; }
-      .page-head .sub > span { display: inline-flex; align-items: center; gap: 6px; }
-      .page-actions { display: flex; gap: 8px; align-items: center; }
-      .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 32px 0 12px; }
-      .site-foot { max-width: 1200px; margin: 0 auto; padding: 20px 24px 36px; color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--border); }
-      .site-foot a { color: var(--muted); } .site-foot a:hover { color: var(--text); }
-      @media (max-width: 720px) {
-        .topbar-inner { gap: 12px; padding: 0 14px; }
-        .brand .tag, .nav-item span, .user-menu .uname { display: none; }
-        main.page { padding: 20px 14px 48px; }
+      /* Signed-in shell: 240px sticky sidebar from 1024px (a 272px drawer below it), 56px sticky topbar. */
+      .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 60; display: flex; width: min(272px, 85vw); flex-direction: column; border-right: 1px solid var(--line); background: var(--canvas); transform: translateX(-100%); visibility: hidden; transition: transform .28s var(--ease-out), visibility 0s .28s; }
+      .shell.is-open .sidebar { transform: none; visibility: visible; transition: transform .28s var(--ease-out); box-shadow: 0 24px 64px -16px rgb(0 0 0 / 30%); }
+      .shell-overlay { position: fixed; inset: 0; z-index: 55; background: rgb(0 0 0 / 45%); opacity: 0; pointer-events: none; transition: opacity .28s var(--ease-out); border: 0; }
+      .shell.is-open .shell-overlay { opacity: 1; pointer-events: auto; }
+      .sidebar-head { display: flex; height: 56px; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 0 16px; }
+      .sidebar-head .brand { font-size: 15px; }
+      .sidebar-head .brand-logo-shell { width: 28px; height: 28px; border-radius: 6px; }
+      .sidebar-head .brand-logo { width: 20px; height: 20px; }
+      .sidebar-nav { flex: 1; overflow-y: auto; padding: 8px; scrollbar-width: thin; }
+      .sidebar-nav ul { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+      .sidebar-label { padding: 20px 10px 6px; font-size: 11px; line-height: 1.5; font-weight: 500; color: var(--subtle); }
+      .sidebar-link { display: flex; height: 32px; align-items: center; gap: 10px; border-radius: 6px; padding: 0 10px; font-size: 13px; color: var(--muted); transition: background-color .15s, color .15s; }
+      .sidebar-link:hover { background: var(--accent-soft); color: var(--ink); }
+      .sidebar-link .icon { width: 16px; height: 16px; opacity: .8; }
+      .sidebar-link.is-active { background: var(--accent-soft); font-weight: 500; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+      .sidebar-link.is-active .icon { opacity: 1; }
+      .sidebar-foot { display: flex; flex-shrink: 0; flex-direction: column; gap: 4px; border-top: 1px solid var(--line); padding: 8px; }
+      .sidebar-user { display: flex; width: 100%; min-width: 0; align-items: center; gap: 10px; border-radius: 6px; padding: 6px 8px; font-size: 13px; color: var(--muted); transition: background-color .15s, color .15s; }
+      .sidebar-user:hover { background: var(--accent-soft); color: var(--ink); }
+      .sidebar-user .user-avatar { width: 24px; height: 24px; font-size: 11px; }
+      .sidebar-user-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .sidebar-user > .icon { width: 16px; height: 16px; color: var(--subtle); }
+      .sidebar-foot .user-menu-panel { bottom: calc(100% + 6px); left: 0; right: 0; width: auto; }
+      .sidebar-close { margin-left: auto; }
+      .shell-main { display: flex; min-height: 100vh; min-width: 0; flex-direction: column; }
+      .shell-main > main { flex: 1; width: 100%; }
+      .shell-topbar { position: sticky; top: 0; z-index: 40; display: flex; height: 56px; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); padding: 0 12px; background: color-mix(in srgb, var(--canvas) 80%, transparent); backdrop-filter: saturate(180%) blur(14px); -webkit-backdrop-filter: saturate(180%) blur(14px); }
+      .crumbs { display: flex; min-width: 0; align-items: center; gap: 4px; font-size: 14px; }
+      .crumbs a, .crumbs span.crumb { display: flex; min-width: 0; align-items: center; gap: 8px; border-radius: 6px; padding: 6px 8px; font-weight: 500; white-space: nowrap; transition: background-color .15s; }
+      .crumbs a { color: var(--muted); }
+      .crumbs a:hover { background: var(--accent-soft); color: var(--ink); }
+      .crumbs .crumb:last-child { color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+      .crumb-sep { flex-shrink: 0; color: var(--line-strong); }
+      @media (max-width: 639px) { .crumbs > :not(:last-child) { display: none; } }
+      .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+      .page-content { margin: 0 auto; width: 100%; max-width: 1200px; padding: 32px 16px; }
+      .app-footer { margin: 0 auto; width: 100%; max-width: 1200px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); padding: 24px 16px; font-size: 12px; color: var(--muted); }
+      .app-footer nav { display: flex; gap: 16px; }
+      .app-footer a:hover { color: var(--ink); }
+      @media (min-width: 640px) {
+        .shell-topbar { padding: 0 24px; }
+        .page-content { padding: 32px 24px; }
+        .app-footer { padding: 24px; }
+      }
+      @media (min-width: 1024px) {
+        .shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); }
+        .sidebar { position: sticky; top: 0; height: 100vh; width: auto; transform: none; visibility: visible; transition: none; }
+        .sidebar-close, [data-sidebar-open], .shell-overlay { display: none !important; }
+        .page-content { padding-top: 48px; padding-bottom: 48px; }
       }
     </style>
+    <%= yield :head %>
   </head>
   <body>
-    <header class="topbar">
-      <div class="topbar-inner">
-        <a class="brand" href="/projects"><%= render "shared/logo" %>ForgeCI <span class="tag">control plane</span></a>
-        <% if signed_in? %>
-          <nav class="nav" aria-label="Main">
-            <%= nav_link "Dashboard", projects_path, "activity", active: controller_name.in?(%w[projects pipelines job_runs]) %>
-            <% if current_user.admin? %>
-              <%= nav_link "Users", users_path, "users", active: controller_name == "users" %>
+    <% if signed_in? %>
+      <div class="shell" data-shell>
+        <aside id="app-sidebar" class="sidebar" aria-label="Sidebar">
+          <div class="sidebar-head">
+            <%= render "shared/brand", href: projects_path, label: "ForgeCI dashboard" %>
+            <button type="button" class="icon-button sidebar-close" data-sidebar-close aria-label="Close navigation"><%= icon "close" %></button>
+          </div>
+          <nav class="sidebar-nav" aria-label="Main">
+            <ul>
+              <li><%= sidebar_link "Overview", projects_path, "grid", active: controller_name == "projects" && action_name == "index" %></li>
+            </ul>
+            <% projects = Project.order(:name).limit(12) %>
+            <% if projects.any? %>
+              <p class="sidebar-label">Projects</p>
+              <ul>
+                <% projects.each do |project| %>
+                  <% current = (@project && @project.id == project.id) || (@job && @job.pipeline.project_id == project.id) %>
+                  <li><%= sidebar_link project.name, project_path(project), "repo", active: current %></li>
+                <% end %>
+              </ul>
             <% end %>
+            <p class="sidebar-label">Account</p>
+            <ul>
+              <li><%= sidebar_link "Account", account_path, "user", active: controller_name == "accounts" %></li>
+              <% if current_user.admin? %><li><%= sidebar_link "Users", users_path, "users", active: controller_name == "users" %></li><% end %>
+              <li><%= sidebar_link "Documentation", "https://github.com/azmi2409/forge-ci#readme", "info", active: false %></li>
+            </ul>
           </nav>
-          <details class="user-menu">
-            <summary aria-label="Account menu">
-              <span class="avatar"><%= current_user.username.first %></span>
-              <span class="uname"><%= current_user.username %></span>
-              <%= icon "chevron-down" %>
-            </summary>
-            <div class="menu">
-              <div class="menu-head">Signed in as<strong><%= current_user.username %></strong><%= current_user.role %></div>
-              <%= link_to account_path do %><%= icon "user" %> Account<% end %>
-              <% if current_user.admin? %>
-                <%= link_to users_path do %><%= icon "users" %> Manage users<% end %>
-              <% end %>
-              <a href="/"><%= icon "external" %> Public site</a>
-              <%= button_to logout_path, method: :delete do %><%= icon "logout" %> Sign out<% end %>
-            </div>
-          </details>
-        <% end %>
+          <div class="sidebar-foot">
+            <details class="user-menu">
+              <summary class="sidebar-user" aria-label="Account menu">
+                <span class="user-avatar" aria-hidden="true"><%= current_user.username.first %></span>
+                <span class="sidebar-user-name"><%= current_user.username %></span>
+                <%= icon "selector" %>
+              </summary>
+              <div class="user-menu-panel">
+                <div class="user-menu-head"><strong><%= current_user.username %></strong><span><%= current_user.role.capitalize %></span></div>
+                <div class="menu-list">
+                  <%= link_to account_path do %>Account settings<%= icon "settings" %><% end %>
+                  <a href="/">Public site<%= icon "external" %></a>
+                </div>
+                <hr>
+                <div class="user-menu-theme">
+                  <span>Theme</span>
+                  <span class="appearance-options" role="group" aria-label="Theme">
+                    <button type="button" data-theme-value="light" aria-label="Light"><%= icon "sun" %></button>
+                    <button type="button" data-theme-value="dark" aria-label="Dark"><%= icon "moon" %></button>
+                    <button type="button" data-theme-value="system" aria-label="System"><%= icon "monitor" %></button>
+                  </span>
+                </div>
+                <hr>
+                <%= button_to logout_path, method: :delete, class: "menu-item", form: { class: "menu-form" } do %>Sign out<%= icon "logout" %><% end %>
+              </div>
+            </details>
+          </div>
+        </aside>
+        <button type="button" class="shell-overlay" data-sidebar-close aria-label="Close navigation" tabindex="-1"></button>
+        <div class="shell-main">
+          <header class="shell-topbar">
+            <button type="button" class="icon-button" data-sidebar-open aria-controls="app-sidebar" aria-expanded="false" aria-label="Open navigation"><%= icon "menu" %></button>
+            <nav class="crumbs" aria-label="Breadcrumb">
+              <% if content_for?(:breadcrumbs) %><%= yield :breadcrumbs %><% else %><span class="crumb"><%= content_for(:crumb) || "Overview" %></span><% end %>
+            </nav>
+            <% if content_for?(:topbar_actions) %><div class="topbar-actions"><%= yield :topbar_actions %></div><% end %>
+          </header>
+          <main id="main-content" class="page-content"><%= yield %></main>
+          <footer class="app-footer">
+            <span>ForgeCI · CircleCI-compatible CI/CD you run yourself</span>
+            <nav aria-label="Project links"><a href="https://github.com/azmi2409/forge-ci">GitHub</a><a href="https://github.com/azmi2409/forge-ci/blob/main/DEPLOY.md">Deploy guide</a><a href="https://github.com/azmi2409/forge-ci/blob/main/CONTRIBUTING.md">Contributing</a></nav>
+          </footer>
+        </div>
       </div>
-    </header>
-    <main class="page">
-      <% if content_for?(:breadcrumbs) %>
-        <nav class="crumbs" aria-label="Breadcrumb"><%= yield :breadcrumbs %></nav>
-      <% end %>
-      <%= yield %>
-    </main>
-    <footer class="site-foot">
-      <span>ForgeCI · MIT licensed · CircleCI 2.1-compatible</span>
-      <span><a href="https://github.com/azmi2409/forge-ci"><%= icon "github" %> azmi2409/forge-ci</a></span>
-    </footer>
+    <% else %>
+      <main id="main-content" class="page-content"><%= yield %></main>
+    <% end %>
+    <%= render "shared/shell_script" %>
   </body>
 </html>

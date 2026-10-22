@@ -1,187 +1,160 @@
 <% content_for(:title, "ForgeCI — CircleCI-compatible CI/CD you run yourself") %>
 
-<section class="hero">
-  <div class="wrap">
-    <div>
-      <span class="eyebrow"><b>Open source</b> · MIT licensed · self-hosted</span>
-      <h1>CircleCI configs.<br><span class="grad">Your runners.</span></h1>
-      <p class="lead">
-        ForgeCI runs your existing <code>.circleci/config.yml</code> on infrastructure you control.
-        Push to GitHub and Docker runners pick up the work, stream logs live and report back to your pull requests.
-      </p>
-      <div class="cta">
-        <a class="btn btn-primary btn-lg" href="#quickstart"><%= icon "terminal" %> Get started</a>
-        <a class="btn btn-lg" href="https://github.com/azmi2409/forge-ci"><%= icon "github" %> View on GitHub</a>
+<section class="lp-hero">
+  <div class="lp-hero-grid" aria-hidden="true"></div>
+  <div class="lp-wrap">
+    <div class="lp-hero-layout">
+      <div>
+        <a class="lp-tag" href="https://github.com/azmi2409/forge-ci"><b>MIT</b>Open source and self-hosted</a>
+        <h1 class="lp-display">Your CircleCI config. <span class="dim">Your runners.</span></h1>
+        <p class="lp-lede">
+          ForgeCI runs your existing <strong>.circleci/config.yml</strong> on machines you control. Push to GitHub and
+          Docker runners pick up the jobs, stream the logs live and report back to the pull request.
+        </p>
+        <div class="lp-hero-actions">
+          <a class="lp-btn" href="#quickstart">Get started<span class="lp-btn-icon"><%= icon "arrow-right" %></span></a>
+          <a class="lp-btn-ghost" href="https://github.com/azmi2409/forge-ci"><%= icon "github" %>View on GitHub</a>
+        </div>
       </div>
-      <div class="proof">
-        <span><%= icon "check" %> CircleCI 2.1 configs</span>
-        <span><%= icon "check" %> Outbound-only runners</span>
-        <span><%= icon "check" %> No per-minute bill</span>
-      </div>
-    </div>
-    <div class="terminal" aria-label="Example config">
-      <div class="terminal-bar"><span class="dots"><i></i><i></i><i></i></span>.circleci/config.yml</div>
-<pre><code><span class="c"># Your existing config. No rewrite.</span>
-<span class="k">version</span>: <span class="s">2.1</span>
+      <div class="lp-stage" aria-label="Example config">
+        <div class="lp-stage-head"><span class="lp-mono">.circleci/config.yml</span><span class="lp-mono">v2.1</span></div>
+<pre class="code-block"><code><span class="c"># The config you already have.</span>
+<span class="k">version</span>: 2.1
 
 <span class="k">jobs</span>:
   <span class="k">test</span>:
     <span class="k">docker</span>:
-      - <span class="k">image</span>: <span class="s">cimg/ruby:3.3</span>
-    <span class="k">resource_class</span>: <span class="s">spot</span>
-    <span class="k">parallelism</span>: <span class="s">4</span>
+      - <span class="k">image</span>: cimg/ruby:3.3
+    <span class="k">resource_class</span>: spot
+    <span class="k">parallelism</span>: 4
     <span class="k">steps</span>:
-      - <span class="k">checkout</span>
-      - <span class="k">run</span>: <span class="s">bundle install</span>
+      - checkout
+      - <span class="k">run</span>: bundle install
       - <span class="k">run</span>: |
-          <span class="s">circleci tests glob "test/**/*_test.rb" |</span>
-            <span class="s">circleci tests run --split-by=filesize \</span>
-              <span class="s">--command="xargs bin/rails test"</span>
+          circleci tests glob "test/**/*_test.rb" |
+            circleci tests run --split-by=filesize \
+              --command="xargs bin/rails test"
 
 <span class="k">workflows</span>:
   <span class="k">ci</span>:
-    <span class="k">jobs</span>: [<span class="s">test</span>]</code></pre>
+    <span class="k">jobs</span>: [test]</code></pre>
+      </div>
+    </div>
+    <dl class="lp-facts">
+      <div><dt>Config</dt><dd>CircleCI 2.1</dd></div>
+      <div><dt>Runners</dt><dd>Outbound only</dd></div>
+      <div><dt>Built with</dt><dd>Ruby + Rails</dd></div>
+      <div><dt>Per-minute fees</dt><dd>None</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="lp-section" id="features">
+  <div class="lp-wrap">
+    <div class="lp-head">
+      <p class="lp-mono">Features</p>
+      <h2>What you use in CircleCI. <span class="dim">On your hardware.</span></h2>
+      <p>A Rails control plane, a pure-Ruby config compiler and zero-dependency Docker runners.</p>
+    </div>
+    <div class="lp-bento">
+      <article class="lp-card">
+        <p class="lp-card-label">Config</p>
+        <h3>Bring the config you have.</h3>
+        <p>Executors, commands, parameters, workflows, <code>requires</code>, <code>matrix</code>, branch filters and contexts. The compiler follows CircleCI's own compile rules.</p>
+      </article>
+      <article class="lp-card">
+        <p class="lp-card-label">Runners</p>
+        <h3>Run jobs anywhere.</h3>
+        <p>Runners poll over outbound HTTPS, so they work behind NAT. Route jobs with <code>resource_class</code>: checks on Spot instances, deploys on an on-demand host.</p>
+      </article>
+      <article class="lp-card">
+        <p class="lp-card-label">Tests</p>
+        <h3>Split the suite.</h3>
+        <p><code>parallelism: 4</code> and <code>circleci tests run</code> give each runner a share of the files, balanced by size.</p>
+      </article>
+      <article class="lp-card">
+        <p class="lp-card-label">Logs</p>
+        <h3>Watch it live.</h3>
+        <p>Step output streams to the dashboard as it runs, with secrets masked before they leave the runner.</p>
+      </article>
+      <article class="lp-card">
+        <p class="lp-card-label">GitHub</p>
+        <h3>Report to the pull request.</h3>
+        <p>A GitHub App starts pipelines on push and pull request, clones private repos with short-lived tokens and posts commit statuses.</p>
+      </article>
     </div>
   </div>
 </section>
 
-<section class="block" id="features">
-  <div class="wrap">
-    <div class="kicker">Features</div>
-    <h2 class="h2">Everything you use in CircleCI, on your own hardware</h2>
-    <p class="sub">A Rails control plane, a pure-Ruby config compiler and zero-dependency Docker runners. Boring technology you can operate.</p>
-    <div class="grid3">
-      <div class="card feature">
-        <div class="fi"><%= icon "layers" %></div>
-        <h3>CircleCI 2.1 compatible</h3>
-        <p>Executors, commands, parameters, workflows, <code>requires</code>, branch filters and <code>matrix</code>. The compiler mirrors CircleCI's own compile semantics.</p>
-      </div>
-      <div class="card feature">
-        <div class="fi"><%= icon "cpu" %></div>
-        <h3>Runners anywhere</h3>
-        <p>Runners poll for work over outbound HTTPS, so they run behind NAT. Route jobs by <code>resource_class</code>, e.g. checks on Spot, deploys on on-demand.</p>
-      </div>
-      <div class="card feature">
-        <div class="fi"><%= icon "activity" %></div>
-        <h3>Parallel test splitting</h3>
-        <p><code>parallelism: N</code> plus <code>circleci tests glob | split | run</code>. Split your suite by name or file size across as many runners as you have.</p>
-      </div>
-      <div class="card feature">
-        <div class="fi"><%= icon "terminal" %></div>
-        <h3>Live logs</h3>
-        <p>Every step's output streams to the dashboard as it happens, with secrets masked before they leave the runner.</p>
-      </div>
-      <div class="card feature">
-        <div class="fi"><%= icon "folder" %></div>
-        <h3>Caches, workspaces, artifacts</h3>
-        <p><code>save_cache</code>/<code>restore_cache</code> with checksum keys, workspaces between jobs and downloadable artifacts, stored in S3.</p>
-      </div>
-      <div class="card feature">
-        <div class="fi"><%= icon "github" %></div>
-        <h3>GitHub native</h3>
-        <p>A GitHub App starts pipelines on push and pull request, clones private repos with short-lived tokens and posts commit statuses back.</p>
-      </div>
+<section class="lp-section" id="how-it-works">
+  <div class="lp-wrap">
+    <div class="lp-head">
+      <p class="lp-mono">How it works</p>
+      <h2>From push to a green check. <span class="dim">Three steps.</span></h2>
+      <p>No inbound ports on your runners and no hosted control plane.</p>
     </div>
+    <ol class="lp-steps">
+      <li><span class="lp-mono">01</span><h3>Push</h3><p>The GitHub App gets the webhook and reads <code>.circleci/config.yml</code> at that commit. Without the App, start a run from any script with <code>forge-ci trigger</code>.</p></li>
+      <li><span class="lp-mono">02</span><h3>Compile</h3><p>The config is validated and compiled into workflows and jobs. A config with errors fails fast, with the error on the commit.</p></li>
+      <li><span class="lp-mono">03</span><h3>Run</h3><p>Runners claim queued jobs, run each step in Docker and stream logs back. A job starts as soon as the jobs it requires pass.</p></li>
+    </ol>
   </div>
 </section>
 
-<section class="block" id="how-it-works">
-  <div class="wrap">
-    <div class="kicker">How it works</div>
-    <h2 class="h2">From <code>git push</code> to a green check</h2>
-    <p class="sub">No inbound ports on your runners and no proprietary control plane.</p>
-    <div class="steps3">
-      <div class="card step">
-        <h3>Push</h3>
-        <p>The GitHub App receives the webhook and fetches <code>.circleci/config.yml</code> at that commit. Or start a run from any CI with <code>forge-ci trigger</code>.</p>
-      </div>
-      <div class="card step">
-        <h3>Compile</h3>
-        <p>The config is validated and compiled into workflows and jobs, with a dependency graph. Bad configs fail fast with a clear error on the commit.</p>
-      </div>
-      <div class="card step">
-        <h3>Run</h3>
-        <p>Runners claim queued jobs, run each step in Docker and stream logs back. Jobs that depend on others start as soon as those pass.</p>
-      </div>
+<section class="lp-section" id="compatibility">
+  <div class="lp-wrap">
+    <div class="lp-head">
+      <p class="lp-mono">Compatibility</p>
+      <h2>What works today. <span class="dim">What doesn't yet.</span></h2>
+      <p>An unsupported feature fails with a clear error instead of running differently.</p>
     </div>
-  </div>
-</section>
-
-<section class="block" id="compatibility">
-  <div class="wrap">
-    <div class="kicker">Compatibility</div>
-    <h2 class="h2">Honest about what's supported</h2>
-    <p class="sub">The CircleCI 2.1 features most pipelines use work today. The rest fail with a clear error instead of misbehaving.</p>
     <div class="compat">
-      <div class="card">
-        <div class="card-head"><h3>Supported</h3></div>
+      <div>
+        <p class="lp-card-label" style="margin-bottom: 13px">Supported</p>
         <ul>
-          <li class="yes"><%= icon "check" %><span>Docker executors, service containers, <code>executors:</code>, <code>commands:</code>, parameters</span></li>
+          <li class="yes"><%= icon "check" %><span>Docker executors and service containers, <code>executors</code>, <code>commands</code>, parameters</span></li>
           <li class="yes"><%= icon "check" %><span>Workflows, <code>requires</code>, <code>matrix</code>, branch filters, contexts</span></li>
-          <li class="yes"><%= icon "check" %><span>Caches, workspaces, artifacts, <code>when:</code> conditions, timeouts</span></li>
-          <li class="yes"><%= icon "check" %><span><code>parallelism</code> and <code>circleci tests</code> splitting</span></li>
-          <li class="yes"><%= icon "check" %><span>Bash steps, <code>$BASH_ENV</code>, <code>CIRCLE_*</code> variables</span></li>
+          <li class="yes"><%= icon "check" %><span>Caches, workspaces, artifacts, <code>when</code> conditions, timeouts</span></li>
+          <li class="yes"><%= icon "check" %><span><code>parallelism</code> with <code>circleci tests glob</code>, <code>split</code> and <code>run</code></span></li>
+          <li class="yes"><%= icon "check" %><span>Bash steps, <code>$BASH_ENV</code> and <code>CIRCLE_*</code> variables</span></li>
         </ul>
       </div>
-      <div class="card">
-        <div class="card-head"><h3>Not yet</h3></div>
+      <div>
+        <p class="lp-card-label" style="margin-bottom: 13px">Not yet</p>
         <ul>
-          <li class="no"><%= icon "x" %><span>Orbs (no registry yet)</span></li>
-          <li class="no"><%= icon "x" %><span><code>machine</code>, <code>macos</code> and <code>windows</code> executors</span></li>
-          <li class="no"><%= icon "x" %><span>Approval jobs, dynamic config, scheduled pipelines</span></li>
-          <li class="no"><%= icon "x" %><span>Timing-based splitting, <code>setup_remote_docker</code></span></li>
-          <li class="no"><%= icon "x" %><span>Docker layer caching, SSH re-runs</span></li>
+          <li class="no"><%= icon "close" %><span>Orbs, because there is no orb registry yet</span></li>
+          <li class="no"><%= icon "close" %><span><code>machine</code>, <code>macos</code> and <code>windows</code> executors</span></li>
+          <li class="no"><%= icon "close" %><span>Approval jobs, dynamic config and scheduled pipelines</span></li>
+          <li class="no"><%= icon "close" %><span>Splitting by timings and <code>setup_remote_docker</code></span></li>
+          <li class="no"><%= icon "close" %><span>Docker layer caching and SSH re-runs</span></li>
         </ul>
       </div>
     </div>
   </div>
 </section>
 
-<section class="block" id="architecture">
-  <div class="wrap">
-    <div class="kicker">Architecture</div>
-    <h2 class="h2">One control plane, as many runners as you need</h2>
-    <p class="sub">Postgres for state, S3 for logs and artifacts. Runners hold nothing, so you scale by adding hosts.</p>
-    <div class="card arch">
-<pre>  <span class="hl">GitHub</span> ── push / PR webhook ──▶ ┌─────────────────────┐ ◀── claim · heartbeat · logs ── <span class="hl">Runner</span> (Docker)
-          ◀── commit statuses ─── │   <span class="hl">Control plane</span>     │ ◀── claim · heartbeat · logs ── <span class="hl">Runner</span> (Docker)
-                                  │   Rails 8 · web UI  │ ◀── claim · heartbeat · logs ── <span class="hl">Runner</span> (Docker)
-                                  └──────┬───────┬──────┘
-                                         │       │
-                                   <span class="hl">Postgres</span>     <span class="hl">S3</span>
-                                 jobs, state   logs, caches, artifacts</pre>
+<section class="lp-section" id="quickstart">
+  <div class="lp-wrap">
+    <div class="lp-head">
+      <p class="lp-mono">Quickstart</p>
+      <h2>Running in five minutes. <span class="dim">One compose file.</span></h2>
+      <p>Postgres, the control plane, the worker and a runner.</p>
     </div>
-  </div>
-</section>
+<pre class="code-block"><code><span class="p">$ </span>git clone https://github.com/azmi2409/forge-ci &amp;&amp; cd forge-ci
+<span class="p">$ </span>cp .env.example .env          <span class="c"># S3 bucket and credentials, secrets</span>
+<span class="p">$ </span>openssl rand -hex 32          <span class="c"># paste into .env as RUNNER_TOKEN</span>
+<span class="p">$ </span>docker compose up --build -d
+<span class="p">$ </span>docker compose up -d runner
+<span class="c"># then open http://localhost:3000 and sign in</span></code></pre>
+    <p class="note">Create the S3 bucket first with <code>aws s3 mb s3://&lt;bucket&gt;</code>. For production, with HTTPS, the GitHub App and runners on their own hosts, follow the <a class="text-link" href="https://github.com/azmi2409/forge-ci/blob/main/DEPLOY.md">deploy guide</a>.</p>
 
-<section class="block" id="quickstart">
-  <div class="wrap">
-    <div class="kicker">Quickstart</div>
-    <h2 class="h2">Up in five minutes</h2>
-    <p class="sub">Postgres, the control plane, the worker and a runner from one compose file.</p>
-    <div class="terminal">
-      <div class="terminal-bar"><span class="dots"><i></i><i></i><i></i></span>terminal</div>
-<pre><code><span class="p">$</span> git clone https://github.com/azmi2409/forge-ci && cd forge-ci
-<span class="p">$</span> cp .env.example .env          <span class="c"># S3 bucket + credentials, secrets</span>
-<span class="p">$</span> openssl rand -hex 32          <span class="c"># paste into .env as RUNNER_TOKEN</span>
-<span class="p">$</span> docker compose up --build -d
-<span class="p">$</span> docker compose up -d runner
-<span class="c">  → open http://localhost:3000 and sign in</span></code></pre>
-    </div>
-    <p class="note">
-      Create the S3 bucket first (<code>aws s3 mb s3://&lt;bucket&gt;</code>). For production (HTTPS, the GitHub App, runners on
-      their own hosts) follow <a href="https://github.com/azmi2409/forge-ci/blob/main/DEPLOY.md">DEPLOY.md</a>.
-    </p>
-  </div>
-</section>
-
-<section class="block final">
-  <div class="wrap">
-    <h2 class="h2">Stop paying per minute for your own tests</h2>
-    <p class="sub">Point ForgeCI at the config you already have and run it on hardware you already own.</p>
-    <div class="cta">
-      <a class="btn btn-primary btn-lg" href="#quickstart">Get started</a>
-      <a class="btn btn-lg" href="/projects">Open the dashboard</a>
+    <div class="lp-cta">
+      <div class="lp-cta-grid" aria-hidden="true"></div>
+      <svg class="lp-cta-mark" viewBox="6 5 20 21" fill="currentColor" aria-hidden="true"><path d="M8 18.5h13.5c0 2.2-1.8 4-4 4H15l1 2.5h-6l1-2.5c-1.7 0-3-1.3-3-3v-1z"/><path d="M18.6 6.5l-3.1 6.2h3l-2 4.3 5.6-6.4h-3.1l2.3-4.1z"/></svg>
+      <p class="lp-mono">Open source</p>
+      <h2>Stop paying per minute.</h2>
+      <p>Point ForgeCI at the config you have and run it on hardware you already own.</p>
+      <a class="lp-btn" href="https://github.com/azmi2409/forge-ci">Get ForgeCI on GitHub<span class="lp-btn-icon"><%= icon "arrow-right" %></span></a>
     </div>
   </div>
 </section>

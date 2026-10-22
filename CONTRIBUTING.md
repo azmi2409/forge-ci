@@ -106,17 +106,38 @@ its existing tests) as well as unit tests.
 ## Working on the web UI
 
 The UI is server-rendered ERB with no asset pipeline and no JavaScript
-framework.
+framework. It follows the **Kilat.host design conventions**: monochrome ink on
+canvas, 1px hairlines for structure, colour only for state.
 
-- **Design system:** `web/app/views/layouts/_design.html.erb` holds the
-  colour tokens (dark and light themes, chosen by `prefers-color-scheme`) and
-  the shared components: buttons, cards, badges, tables, forms, flash
-  messages, empty states and the terminal. Use those classes and tokens
-  rather than new colours or one-off styles.
+- **Design system:** `web/app/views/layouts/_design.html.erb` holds the tokens
+  (`--canvas`, `--surface`, `--ink`, `--muted`, `--subtle`, `--line`,
+  `--line-strong`, `--accent-soft`, the `danger`/`warn`/`ok` text colours and
+  the three status colours) and the shared components: `button-primary`,
+  `button-secondary`, `button-ghost`, `button-danger`, `card` with
+  `card-header`/`card-body`/`card-footer`, `data-table`, `stat-strip`,
+  `status-badge`, `chip`, `field`, `flash-success`/`flash-error`,
+  `empty-state` and `code-block`. Use those classes and tokens; never put a
+  hex colour in a view.
+- **Colour rules:** there is no brand hue. The primary button, focus ring and
+  selection are `--ink`. Hover on a bordered element is `--line-strong`, not a
+  shadow; shadows are only for floating layers such as menus. Status is a dot
+  before a word (`status_badge`), never colour alone.
+- **Themes:** light is the default; dark is `[data-theme="dark"]` on `<html>`,
+  set from the viewer's choice (light, dark or system) by the script in the
+  design partial. Style through the tokens and both themes work.
+- **Type:** Geist for text and Geist Mono for code, eyebrows, captions and
+  numbers that line up, from Google Fonts. Dashboard headings are sentence
+  case without a period (`page-heading`, `card-title`); landing-page headings
+  end with a period and dim their second clause.
+- **Layout:** signed-in pages use the shell in `layouts/application.html.erb`
+  (240px sidebar from 1024px, a drawer below it, a 56px topbar with
+  breadcrumbs). Set breadcrumbs with
+  `content_for(:breadcrumbs) { breadcrumbs(["Overview", projects_path], ["acme/web"]) }`.
 - **Page styles:** styles used by one page go in a `content_for(:head)`
   block at the top of that view, not inline `style=` attributes.
 - **Icons:** `icon("name")` in `web/app/helpers/ui_helper.rb` renders an
-  inline SVG. Add new icons there.
+  inline SVG on a 24px grid with a 1.7px stroke. Add new icons there in the
+  same style.
 - **Helpers:** time and duration formatting (`time_ago_tag`,
   `duration_text`), status badges (`status_badge`, `group_status`) and
   commit links live in the helpers. Reuse them so every page reads the same.
@@ -126,7 +147,8 @@ framework.
 - **README screenshots** in `docs/images/` use sample data with neutral names
   (`acme/*`). Never use real projects or private repositories.
 - **Accessibility:** use real buttons and links, label icon-only controls,
-  and keep text contrast readable in both themes.
+  keep body text at 4.5:1 contrast in both themes (`--subtle` is for
+  placeholders and labels only), and respect `prefers-reduced-motion`.
 
 ## Database changes
 
