@@ -292,4 +292,45 @@ class ExecutorTest < Minitest::Test
     assert status.success?, out
     assert_match(/Hello from Docker!/, out)
   end
+
+  # --- setup_remote_docker --------------------------------------------------
+
+  def remote_docker_executor(allow:, trusted: true, socket: __FILE__)
+    payload = test_payload("steps" => [{ "type" => "setup_remote_docker" }, { "type" => "run", "command" => "docker info" }],
+                           "trusted" => trusted)
+    ForgeCIRunner::Executor.new(test_config(allow_docker_socket: allow, docker_socket_path: socket),
+                                NullClient.new, payload)
+  end
+
+  def test_remote_docker_mounts_the_socket_with_its_group
+    ex = remote_docker_executor(allow: true)
+    args = ex.primary_run_args
+    assert_includes args, "#{__FILE__}:/var/run/docker.sock"
+    assert_equal File.stat(__FILE__).gid.to_s, args[args.index("--group-add") + 1]
+    ex.send(:check_remote_docker!) # allowed and trusted: no error
+  end
+
+  def test_jobs_without_the_step_get_no_socket
+    args = executor.primary_run_args
+    refute(args.any? { |a| a.include?("docker.sock") })
+    refute_includes args, "--group-add"
+  end
+
+  def test_remote_docker_is_refused_unless_the_runner_allows_it
+    err = assert_raises(RuntimeError) { remote_docker_executor(allow: false).send(:check_remote_docker!) }
+    assert_match "ALLOW_DOCKER_SOCKET=1", err.message
+  end
+
+  def test_remote_docker_is_refused_for_fork_pull_requests
+    err = assert_raises(RuntimeError) { remote_docker_executor(allow: true, trusted: false).send(:check_remote_docker!) }
+    assert_match "forks", err.message
+  end
+
+  def test_allow_docker_socket_comes_from_the_environment
+    on = ForgeCIRunner::Config.from_env("CONTROL_PLANE_URL" => "http://x", "RUNNER_TOKEN" => "t", "ALLOW_DOCKER_SOCKET" => "1")
+    off = ForgeCIRunner::Config.from_env("CONTROL_PLANE_URL" => "http://x", "RUNNER_TOKEN" => "t")
+    assert on.allow_docker_socket
+    refute off.allow_docker_socket
+    assert_equal "/var/run/docker.sock", off.docker_socket_path
+  end
 end

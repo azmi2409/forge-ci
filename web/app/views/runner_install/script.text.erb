@@ -10,6 +10,8 @@
 #   --idle-shutdown SEC  stop after SEC seconds without a job (default: never)
 #   --asg                with --idle-shutdown: remove this EC2 instance from its
 #                        Auto Scaling Group when idle (installs the AWS CLI)
+#   --allow-docker       let jobs with setup_remote_docker use this machine's
+#                        Docker (they then control it: deploy runners only)
 #
 # Supports Debian/Ubuntu (apt) and Amazon Linux/Fedora/RHEL (dnf or yum).
 set -eu
@@ -19,6 +21,7 @@ TOKEN=""
 RESOURCE_CLASS=""
 IDLE_SHUTDOWN_AFTER=0
 ASG=0
+ALLOW_DOCKER=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -26,6 +29,7 @@ while [ $# -gt 0 ]; do
     --class) RESOURCE_CLASS="${2:?--class needs a value}"; shift 2 ;;
     --idle-shutdown) IDLE_SHUTDOWN_AFTER="${2:?--idle-shutdown needs seconds}"; shift 2 ;;
     --asg) ASG=1; shift ;;
+    --allow-docker) ALLOW_DOCKER=1; shift ;;
     *) echo "forge-ci: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -70,6 +74,7 @@ umask 077
   [ -n "$RESOURCE_CLASS" ] && echo "RESOURCE_CLASS=$RESOURCE_CLASS"
   [ "$IDLE_SHUTDOWN_AFTER" != "0" ] && echo "IDLE_SHUTDOWN_AFTER=$IDLE_SHUTDOWN_AFTER"
   [ "$ASG" -eq 1 ] && echo "IDLE_SHUTDOWN_COMMAND=/opt/forge-ci-runner/bin/forge-ci-asg-terminate-self"
+  [ "$ALLOW_DOCKER" -eq 1 ] && echo "ALLOW_DOCKER_SOCKET=1"
   true
 } > /etc/forge-ci-runner.env
 umask 022

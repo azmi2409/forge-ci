@@ -107,6 +107,8 @@ if `docker info` fails.
 | `DOCKER_BIN` | no | `docker` | Path to the docker CLI |
 | `IDLE_SHUTDOWN_AFTER` | no | `0` (never) | Seconds without a job after which the runner stops claiming, runs `IDLE_SHUTDOWN_COMMAND` and exits (scale to zero) |
 | `IDLE_SHUTDOWN_COMMAND` | no | — | Shell command run once on idle shutdown; `bin/forge-ci-asg-terminate-self` removes this EC2 instance from its Auto Scaling Group |
+| `ALLOW_DOCKER_SOCKET` | no | off | `1` lets jobs with `setup_remote_docker` use this machine's Docker socket. Such a job controls the machine, so set it only on runners trusted with that (the deploy runner); fork pull requests are always refused. The install command's `--allow-docker` sets it |
+| `DOCKER_SOCKET_PATH` | no | `/var/run/docker.sock` | The socket mounted for `setup_remote_docker` |
 
 ## Control-plane contract
 

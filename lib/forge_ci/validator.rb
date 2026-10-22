@@ -15,6 +15,7 @@ module ForgeCI
       checkout run save_cache restore_cache
       persist_to_workspace attach_workspace
       store_artifacts store_test_results add_ssh_keys
+      setup_remote_docker
     ].freeze
 
     # Conditional wrappers evaluated at compile time.
@@ -311,6 +312,10 @@ module ForgeCI
 
       errors.add(path, "\"store_test_results:\" needs a \"path:\" to the JUnit XML results directory")
     end
+
+    # `version:` and `docker_layer_caching:` are accepted and ignored: the
+    # runner's own Docker daemon is used.
+    def validate_setup_remote_docker(_cfg, _path, _errors); end
 
     def validate_add_ssh_keys(cfg, path, errors)
       return unless cfg.key?("fingerprints") && !cfg["fingerprints"].is_a?(Array)
