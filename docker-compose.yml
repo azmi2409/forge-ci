@@ -1,7 +1,7 @@
 # ForgeCI: the control plane (web + worker) and its Postgres, plus optional local runners.
 #
 #   docker compose up -d                        # http://localhost:3000
-#   docker compose logs web | grep -A2 "first admin"   # the admin's password
+#   docker compose exec web bin/rails forge_ci:reset_admin   # the admin's password
 #
 # To run jobs on this machine too, set RUNNERS=1 (or more) in .env and run
 # `docker compose up -d` again. RUNNERS=0, the default, starts no runner.

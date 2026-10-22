@@ -31,6 +31,7 @@ Rails.application.routes.draw do
         post :rerun
       end
     end
+    resources :variables, only: %i[create destroy], controller: "project_variables"
   end
   resources :job_runs, only: %i[show]
 

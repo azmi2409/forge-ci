@@ -89,6 +89,13 @@ commands have root on it. Use this for repositories you trust, and give the
 host enough CPU and memory for your jobs. You can still add separate runner
 machines alongside it.
 
+### Secrets for your jobs
+
+Open a project (it appears after its first push) and add them under
+**Environment variables**. Every job in the project gets them, except jobs
+from fork pull requests. Values are encrypted, masked in logs, and can't be
+read back from the dashboard. A job's own `environment:` in the config wins on a clash.
+
 That's it. Push a commit to an installed repository and watch it on the
 Projects page.
 
