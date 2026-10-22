@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
-# Bearer-token auth for the admin API (FORGE_CI_ADMIN_TOKEN). Deliberately
-# separate from runner tokens: runners must never be able to start pipelines
-# or read/rewrite secrets. Fails closed — when the token is not configured the
-# endpoints answer 503 instead of being open.
+# Bearer-token auth for the admin API (FORGE_CI_ADMIN_TOKEN, or in production
+# the token generated on first boot and shown on the Settings page).
+# Deliberately separate from runner tokens: runners must never be able to
+# start pipelines or read/rewrite secrets. Fails closed — when no token is
+# configured the endpoints answer 503 instead of being open.
 module AdminAuthentication
   extend ActiveSupport::Concern
 
@@ -14,7 +15,7 @@ module AdminAuthentication
   private
 
   def authenticate_admin!
-    expected = ENV["FORGE_CI_ADMIN_TOKEN"].to_s
+    expected = ForgeCISecrets.fetch("admin_token").to_s
     if expected.blank?
       return render json: { error: "admin API not configured (set FORGE_CI_ADMIN_TOKEN)" },
                     status: :service_unavailable

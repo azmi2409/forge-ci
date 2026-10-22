@@ -1,8 +1,9 @@
 #!/bin/bash -e
 
-# If running the rails server then create or migrate existing database
+# If running the rails server: create or migrate the databases, then create
+# the first admin on a fresh install (its generated password is printed here).
 if [ "${@: -2:1}" == "./bin/rails" ] && [ "${@: -1:1}" == "server" ]; then
-  ./bin/rails db:prepare
+  ./bin/rails db:prepare forge_ci:bootstrap
 fi
 
 exec "${@}"

@@ -3,12 +3,11 @@
 # Authentication credential for Docker runners. Only the SHA256 hex digest is
 # stored — the raw token is shown once at generation time and never again.
 #
-# For single-secret deployments (docker compose / Coolify), set
-# FORGE_CI_RUNNER_TOKEN to an operator-chosen secret instead of generating
-# tokens: any runner presenting it authenticates as the "static-runner"
-# token, auto-provisioned on first use. This is the Drone-style shared-secret
-# model — pick a strong random value, e.g. `openssl rand -hex 32`, and set
-# the same value as the runner's RUNNER_TOKEN.
+# Most deployments use one shared secret instead (Drone-style): any runner
+# presenting it authenticates as the "static-runner" token, auto-provisioned
+# on first use. It is FORGE_CI_RUNNER_TOKEN when set, otherwise (production)
+# the token generated on first boot, which the Runners page shows in the
+# install command.
 class RunnerToken < ApplicationRecord
   STATIC_TOKEN_NAME = "static-runner"
 
@@ -37,7 +36,7 @@ class RunnerToken < ApplicationRecord
     # Operator-provisioned static secret (compose/Coolify). Auto-provisions a
     # real record on first use so job ownership (claimed_by) works uniformly.
     # resource_class is nil, so the token may claim jobs of any class.
-    static_secret = ENV["FORGE_CI_RUNNER_TOKEN"].to_s.strip
+    static_secret = ForgeCISecrets.fetch("runner_token").to_s
     if static_secret.present? &&
        ActiveSupport::SecurityUtils.secure_compare(presented, static_secret)
       return static_token_record!(static_secret)

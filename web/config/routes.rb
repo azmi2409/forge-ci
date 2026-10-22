@@ -5,6 +5,10 @@ Rails.application.routes.draw do
   root "landing#show"
   get "/dashboard", to: redirect("/projects")
 
+  # --- Runner install (public: the token comes from the admin's command) ------
+  get "/install-runner", to: "runner_install#script", as: :install_runner
+  get "/runner.tar.gz", to: "runner_install#tarball", as: :runner_tarball, format: false
+
   # --- Sessions / accounts -------------------------------------------------
   get "/login", to: "sessions#new", as: :login
   post "/login", to: "sessions#create"
@@ -13,6 +17,10 @@ Rails.application.routes.draw do
     post :sign_out_everywhere
   end
   resources :users, except: %i[show]
+  resource :settings, only: %i[show] do
+    post :github
+    get "github/callback", action: :github_callback, as: :github_callback
+  end
 
   # --- Web UI (cookie-session login, see ApplicationController) ------------
 

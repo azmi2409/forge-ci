@@ -73,9 +73,15 @@ the job after 120s.
 
 ## Setup
 
+The easy way is the install command under **Settings → Runners** on the
+control plane: `curl -fsSL https://ci.example.com/install-runner | sudo sh -s -- --token …`.
+It installs Docker and Ruby, downloads this directory from the control plane
+(`/runner.tar.gz`) to `/opt/forge-ci-runner` and starts the
+`forge-ci-runner` systemd service. To run it by hand:
+
 ```sh
 CONTROL_PLANE_URL="https://ci.example.com" \
-RUNNER_TOKEN="<raw token from RunnerToken.generate!>" \
+RUNNER_TOKEN="<token from Settings → Runners>" \
 RESOURCE_CLASS="medium" \
   bin/forge-ci-runner
 ```
@@ -88,8 +94,9 @@ if `docker info` fails.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `CONTROL_PLANE_URL` | yes | — | Base URL of the control plane |
-| `RUNNER_TOKEN` | yes | — | Raw runner token (Bearer auth) |
-| `RESOURCE_CLASS` | no | token's class | Passed to the claim endpoint |
+| `RUNNER_TOKEN` | yes, or `RUNNER_TOKEN_FILE` | — | Raw runner token (Bearer auth) |
+| `RUNNER_TOKEN_FILE` | no | — | File holding the token, read when `RUNNER_TOKEN` is unset |
+| `RESOURCE_CLASS` | no | token's class, else any | Passed to the claim endpoint |
 | `POLL_INTERVAL` | no | `5` | Idle poll interval, seconds (backoff base) |
 | `MAX_IDLE_INTERVAL` | no | `60` | Idle backoff cap, seconds |
 | `HEARTBEAT_INTERVAL` | no | `15` | Heartbeat interval while running, seconds (server reclaims after 120s) |

@@ -2,27 +2,40 @@
 
 # Namespace for the GitHub App integration (component 3).
 #
-# Configuration comes from the environment (see README "GitHub App setup"):
+# The App is normally created with "Connect GitHub" on the Settings page
+# (GithubAppCredential). These environment variables take precedence:
 #   GITHUB_APP_ID            numeric App ID
 #   GITHUB_APP_PRIVATE_KEY   the App's private key, PEM text
 #   GITHUB_WEBHOOK_SECRET    webhook HMAC secret (fail-closed: required)
 #   APP_HOST                 public base URL, e.g. https://ci.example.com
 module Github
   CONFIG_MISSING_MESSAGE =
-    "GitHub App not configured — set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY"
+    "GitHub App not configured — use Connect GitHub on the Settings page, or set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY"
 
   def self.app_id
-    ENV["GITHUB_APP_ID"].presence
+    ENV["GITHUB_APP_ID"].presence || stored&.app_id
   end
 
   def self.private_key_pem
     # .env files / PaaS dashboards often store the PEM on one line with
     # literal "\n" sequences — restore the real newlines.
-    ENV["GITHUB_APP_PRIVATE_KEY"].presence&.gsub("\\n", "\n")
+    ENV["GITHUB_APP_PRIVATE_KEY"].presence&.gsub("\\n", "\n") || stored&.private_key
   end
 
   def self.webhook_secret
-    ENV["GITHUB_WEBHOOK_SECRET"].presence
+    ENV["GITHUB_WEBHOOK_SECRET"].presence || stored&.webhook_secret
+  end
+
+  # The App created from the Settings page, if any.
+  def self.stored
+    GithubAppCredential.current
+  rescue ActiveRecord::ActiveRecordError
+    nil
+  end
+
+  # True when the App comes from the environment rather than the Settings page.
+  def self.from_env?
+    ENV["GITHUB_APP_ID"].present?
   end
 
   def self.app_host

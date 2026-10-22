@@ -34,8 +34,9 @@ The secret must be byte-identical on both sides.
 ## Job stuck in `claimed` / `running` forever
 
 The runner died without completing. `ReclaimStaleJobsJob` returns jobs with
-no heartbeat for 120s to `queued` — check that the Solid Queue worker
-(`bin/jobs`) is running. Then check the runner host: `journalctl -u
+no heartbeat for 120s to `queued` — check that the Solid Queue worker is
+running (inside Puma in the Docker image: look for `SolidQueue` lines in
+`docker compose logs web`; `bin/jobs` in development). Then check the runner host: `journalctl -u
 forge-ci-runner`, `docker ps`.
 
 ## Logs stop streaming / SSE disconnects

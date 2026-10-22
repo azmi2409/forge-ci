@@ -54,25 +54,22 @@ control plane.
 
 ## Quickstart
 
-Run everything (Postgres, control plane, worker and a runner) with Docker
-Compose. Create an S3 bucket first: `aws s3 mb s3://<bucket>`.
-
 ```sh
 git clone https://github.com/azmi2409/forge-ci && cd forge-ci
-cp .env.example .env     # S3 bucket + credentials, secrets
-openssl rand -hex 32     # put it in .env as RUNNER_TOKEN
-docker compose up --build -d
-docker compose up -d runner
-# → http://localhost:3000, sign in with FORGE_CI_UI_USER / FORGE_CI_UI_PASSWORD
+docker compose up -d
+docker compose logs web | grep -A2 "first admin"   # the admin password
+# → http://localhost:3000
 ```
 
-For production (HTTPS, the GitHub App, runners on their own hosts, scaling to
-zero) follow **[DEPLOY.md](DEPLOY.md)**.
+Nothing to configure: secrets are generated on first boot. Then, in the web
+UI, **Settings → Connect GitHub** and paste the runner command from
+**Settings → Runners** on a machine with Docker. For a real server (HTTPS,
+Coolify, S3, scaling to zero) see **[DEPLOY.md](DEPLOY.md)**.
 
 ## Use it with your repo
 
-- **With the GitHub App:** install it and push. The first push creates the
-  project.
+- **With the GitHub App:** connect it under Settings, install it and push.
+  The first push creates the project.
 - **From any script, without the App:** `forge-ci trigger .circleci/config.yml --project myapp --wait`
   ([setup](DEPLOY.md#use-it-without-the-github-app)).
 
@@ -122,7 +119,7 @@ covered in [docs/agent-skills.md](docs/agent-skills.md).
 
 | Doc | What |
 |---|---|
-| [DEPLOY.md](DEPLOY.md) | Production deployment: control plane, runners, GitHub App, scaling to zero |
+| [DEPLOY.md](DEPLOY.md) | Deploying in three steps, plus Postgres, S3 and scaling to zero |
 | [docs/compiler.md](docs/compiler.md) | The compiler gem and CLI, IR shape, compatibility with CircleCI |
 | [docs/agent-skills.md](docs/agent-skills.md) | Installing the skill for Claude Code and other agents |
 | [docs/configuration.md](docs/configuration.md) | Every environment variable |
