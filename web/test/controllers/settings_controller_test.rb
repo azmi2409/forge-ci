@@ -44,6 +44,36 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     assert_equal false, manifest["public"]
   end
 
+  test "Connect GitHub for a personal account or a named organization" do
+    sign_in_as_admin
+    post "/settings/github", params: { account: "personal", org: "ignored" }
+    assert_match %r{\Ahttps://github.com/settings/apps/new\?state=}, css_select("form#manifest-form").first["action"]
+
+    post "/settings/github", params: { account: "org", org: " @KilatHost " }
+    assert_match %r{\Ahttps://github.com/organizations/KilatHost/settings/apps/new\?state=}, css_select("form#manifest-form").first["action"]
+  end
+
+  test "Connect GitHub for an organization needs a valid name" do
+    sign_in_as_admin
+    post "/settings/github", params: { account: "org", org: "" }
+    assert_redirected_to "/settings"
+    assert_match "Enter the name of the organization", flash[:alert]
+
+    post "/settings/github", params: { account: "org", org: "not/an org" }
+    assert_redirected_to "/settings"
+    assert_match "isn't a GitHub organization name", flash[:alert]
+  end
+
+  test "once connected, shows who can install it and offers another account" do
+    GithubAppCredential.create!(app_id: "1", slug: "forgeci-x", name: "ForgeCI x", owner_login: "azmi",
+                                webhook_secret: "w", private_key: "k")
+    sign_in_as_admin
+    get "/settings"
+    assert_match "can only be installed on repositories owned by", response.body
+    assert_select "details.other-account form[data-github-connect] input[name=account][value=org]"
+    assert_select "a[href='https://github.com/apps/forgeci-x/installations/new']"
+  end
+
   test "the callback stores the new App and sends the user to install it" do
     sign_in_as_admin
     post "/settings/github"
