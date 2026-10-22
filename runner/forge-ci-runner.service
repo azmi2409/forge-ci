@@ -11,9 +11,14 @@ Environment=CONTROL_PLANE_URL=https://ci.example.com
 Environment=RUNNER_TOKEN=<shared secret, same as the server's FORGE_CI_RUNNER_TOKEN>
 Environment=RESOURCE_CLASS=medium
 Environment=POLL_INTERVAL=5
+# Scale to zero: stop after 10 idle minutes and remove this instance from its
+# Auto Scaling Group (see DEPLOY.md, "Scale runners to zero").
+#Environment=IDLE_SHUTDOWN_AFTER=600
+#Environment=IDLE_SHUTDOWN_COMMAND=/opt/forge-ci-runner/bin/forge-ci-asg-terminate-self
 WorkingDirectory=/opt/forge-ci-runner
 ExecStart=/usr/bin/ruby /opt/forge-ci-runner/bin/forge-ci-runner
-Restart=always
+# on-failure, not always: an idle shutdown exits 0 and must stay stopped.
+Restart=on-failure
 RestartSec=10
 
 [Install]

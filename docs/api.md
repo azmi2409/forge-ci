@@ -46,6 +46,7 @@ HMAC-verified webhook instead. The easiest client is the CLI:
 | `POST /api/v1/projects/:id/contexts` `{ name, payload: { KEY: "value" } }` | create a context, or replace the payload of the same-named one. Responds with key names only |
 | `POST /api/v1/contexts/:id/rotate` `{ payload: {...} }` | replace a context's secrets |
 | `GET /api/v1/pipelines/:id` | pipeline + workflow + job statuses (same shape as the intake response) |
+| `GET /api/v1/queue` | queued and in-flight (claimed + running) job counts per resource class, for runner autoscalers: `{ resource_classes: { spot: { queued, running }, any: {...} } }` (`any` = jobs without a class) |
 | `POST /api/v1/pipelines/:id/cancel` | cancel every unfinished job. Running jobs are stopped by their runner on its next heartbeat (`status: "canceled"` in the heartbeat reply). Idempotent |
 
 When a job fails, jobs that (transitively) `require` it are canceled instead

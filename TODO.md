@@ -40,6 +40,8 @@ priority order. Check items off as they land.
 - [x] Runner: no-output step timeout + job timeout, per-step `environment:` — 2026-10-16
 - [x] Runner: bash default shell, `$BASH_ENV`, `CIRCLE_*` built-in env vars — 2026-10-22
 - [ ] Runner: `setup_remote_docker` (Docker access for jobs, e.g. deploys)
+- [x] Scale runners to zero: idle self-shutdown, Auto Scaling Group scale-up, `GET /api/v1/queue` — 2026-10-22
+- [x] Agent skill (`skills/forge-ci/SKILL.md`, `forge-ci skill install`) — 2026-10-22
 - [ ] Runner: container CPU/memory limits
 - [ ] Runner: `store_test_results` (JUnit → timing DB) and `add_ssh_keys`
 - [ ] Publish the `forge-ci` gem to RubyGems (then `web/` can depend on the

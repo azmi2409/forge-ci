@@ -38,6 +38,9 @@ Rails.application.routes.draw do
         end
       end
 
+      # Queue depth per resource class, for runner autoscalers (admin-token authed).
+      get "queue", to: "queue#show"
+
       # Pipeline status / cancel (admin-token authed).
       resources :pipelines, only: %i[show] do
         member { post :cancel }

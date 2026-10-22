@@ -30,6 +30,8 @@ production.
 | `FORGE_CI_ADMIN_TOKEN` | for rotation | — | Bearer token for context rotation — **fail-closed** (503 when blank) |
 | `FORGE_CI_STREAM_TIMEOUT_SECONDS` | no | `300` | How long the SSE log live-tail waits for output |
 | `RAILS_MAX_THREADS` | no | `5` | DB pool size |
+| `FORGE_CI_AUTOSCALE` | no | — | Scale runner Auto Scaling Groups up when jobs queue: `class=asg-name[:max[:jobs_per_instance]],…` (see DEPLOY.md, "Scale runners to zero") |
+| `FORGE_CI_AUTOSCALE_REGION` | no | `AWS_REGION` | Region of those Auto Scaling Groups |
 
 Generate encryption keys with `bin/rails db:encryption:init`.
 
@@ -48,6 +50,8 @@ Generate encryption keys with `bin/rails db:encryption:init`.
 | `CHECKOUT_REPO_URL` | no | — | Fallback git URL for `checkout` (the claim payload's `repository.url` is preferred) |
 | `REDACT_MIN_LENGTH` | no | `8` | Env values shorter than this are not redacted from logs |
 | `DOCKER_BIN` | no | `docker` | Path to the docker CLI |
+| `IDLE_SHUTDOWN_AFTER` | no | `0` (never) | Seconds without a job after which the runner stops claiming, runs `IDLE_SHUTDOWN_COMMAND` and exits |
+| `IDLE_SHUTDOWN_COMMAND` | no | — | Shell command run once on idle shutdown, e.g. `bin/forge-ci-asg-terminate-self` |
 
 ## Compiler gem / CLI
 
