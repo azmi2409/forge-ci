@@ -1,4 +1,4 @@
-# ForgeCI: the control plane and its Postgres, plus an optional local runner.
+# ForgeCI: the control plane (web + worker) and its Postgres, plus optional local runners.
 #
 #   docker compose up -d                        # http://localhost:3000
 #   docker compose logs web | grep -A2 "first admin"   # the admin's password
@@ -31,9 +31,9 @@ services:
     networks:
       - forge-ci
 
-  # Web UI, API and background jobs in one container (SOLID_QUEUE_IN_PUMA).
-  # The queue and cache databases are derived from DATABASE_URL
-  # (forge_ci_queue, forge_ci_cache) and created on first boot.
+  # Web UI and API. Background jobs run in `worker` below, so they never
+  # compete with web requests. The queue and cache databases are derived from
+  # DATABASE_URL (forge_ci_queue, forge_ci_cache) and created on first boot.
   web:
     build:
       context: .
@@ -47,9 +47,10 @@ services:
     env_file:
       - path: .env
         required: false
-    environment:
+    environment: &forge-ci-env
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/forge_ci
       APP_HOST: ${APP_HOST:-http://localhost:3000}
+      SOLID_QUEUE_IN_PUMA: "0"
     volumes:
       - forge-ci-data:/rails/storage
     healthcheck:
@@ -58,6 +59,27 @@ services:
       timeout: 5s
       retries: 5
       start_period: 180s # first boot creates the databases and loads their schemas
+    networks:
+      - forge-ci
+
+  # Background jobs: reclaiming stale jobs, scaling runners, purging
+  # artifacts, GitHub pipeline sync. Same image and settings as web; it starts
+  # once web has prepared the databases and secrets.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ./bin/jobs
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment: *forge-ci-env
+    volumes:
+      - forge-ci-data:/rails/storage
     networks:
       - forge-ci
 

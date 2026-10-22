@@ -25,9 +25,9 @@ ENV RAILS_ENV="production" \
     FORGE_CI_RUNNER_PATH="/forge-ci/runner" \
     SOLID_QUEUE_IN_PUMA="1" \
     RAILS_MAX_THREADS="16"
-# SOLID_QUEUE_IN_PUMA runs the background worker inside the web server, so one
-# container is the whole control plane. Set it to "" and run ./bin/jobs in a
-# second container to scale the worker separately.
+# SOLID_QUEUE_IN_PUMA runs the background worker inside the web server, so a
+# lone container is the whole control plane. docker-compose.yml sets it to "0"
+# and runs ./bin/jobs in its own `worker` container instead.
 # The Gemfile references the forge-ci compiler as a path gem. Locally (and in
 # CI) that path is `..` (monorepo root) — which is what the committed
 # Gemfile.lock records — but here the gem source is copied to /forge-ci.

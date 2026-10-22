@@ -22,8 +22,8 @@ docker compose up -d --wait   # waits until ForgeCI is ready (first boot: a minu
 docker compose exec web bin/rails forge_ci:reset_admin   # prints the admin password
 ```
 
-This starts Postgres and one ForgeCI container on port 3000 (`WEB_PORT`
-changes it). Put your HTTPS proxy (Caddy, nginx, Cloudflare Tunnel) in front.
+This starts Postgres, the ForgeCI web container on port 3000 (`WEB_PORT`
+changes it) and its background `worker` container. Put your HTTPS proxy (Caddy, nginx, Cloudflare Tunnel) in front.
 
 **Coolify:** create a Docker Compose resource from this repository, set
 `APP_HOST` (and `FORCE_SSL=true`) in its environment, and give the `web`
