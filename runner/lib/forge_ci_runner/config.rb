@@ -38,7 +38,7 @@ module ForgeCIRunner
 
     attr_reader :control_plane_url, :runner_token, :resource_class,
                 :poll_interval, :max_idle_interval, :heartbeat_interval,
-                :log_chunk_size, :checkout_repo_url, :redact_min_length,
+                :log_chunk_size, :log_flush_interval, :checkout_repo_url, :redact_min_length,
                 :docker_bin, :step_no_output_timeout, :job_timeout,
                 :idle_shutdown_after, :idle_shutdown_command
 
@@ -51,6 +51,7 @@ module ForgeCIRunner
         max_idle_interval: (env["MAX_IDLE_INTERVAL"] || 60).to_f,
         heartbeat_interval: (env["HEARTBEAT_INTERVAL"] || 15).to_f,
         log_chunk_size: (env["LOG_CHUNK_SIZE"] || 65_536).to_i,
+        log_flush_interval: (env["LOG_FLUSH_INTERVAL"] || 1).to_f,
         checkout_repo_url: env["CHECKOUT_REPO_URL"],
         redact_min_length: (env["REDACT_MIN_LENGTH"] || 8).to_i,
         docker_bin: env["DOCKER_BIN"] || "docker",
@@ -80,7 +81,7 @@ module ForgeCIRunner
 
     def initialize(control_plane_url:, runner_token:, resource_class: nil,
                    poll_interval: 5.0, max_idle_interval: 60.0,
-                   heartbeat_interval: 15.0, log_chunk_size: 65_536,
+                   heartbeat_interval: 15.0, log_chunk_size: 65_536, log_flush_interval: 1.0,
                    checkout_repo_url: nil, redact_min_length: 8,
                    docker_bin: "docker", step_no_output_timeout: 600.0,
                    job_timeout: 3600.0, idle_shutdown_after: 0.0,
@@ -98,6 +99,7 @@ module ForgeCIRunner
       @max_idle_interval = max_idle_interval
       @heartbeat_interval = heartbeat_interval
       @log_chunk_size = log_chunk_size
+      @log_flush_interval = log_flush_interval
       @checkout_repo_url = checkout_repo_url
       @redact_min_length = redact_min_length
       @docker_bin = docker_bin

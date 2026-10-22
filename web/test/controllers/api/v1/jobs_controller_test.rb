@@ -3,6 +3,7 @@
 require "test_helper"
 
 class Api::V1::JobsControllerTest < ActionDispatch::IntegrationTest
+  include ActionCable::TestHelper
   setup do
     @project = Project.create!(name: "demo", max_concurrency: 4)
     @token_record, @raw = RunnerToken.generate!(name: "runner-1", resource_class: "medium")
@@ -66,13 +67,42 @@ class Api::V1::JobsControllerTest < ActionDispatch::IntegrationTest
 
   # --- blob-backed logs (component 6) -----------------------------------------
 
-  test "chunk posts attach an ordered blob on the job" do
+  test "chunk posts are kept as rows; the blob is written once the job finishes" do
     post "/api/v1/jobs/#{@job_id}/log_chunks", params: { seq: 1, chunk: "second\n" }, headers: auth, as: :json
     post "/api/v1/jobs/#{@job_id}/log_chunks", params: { seq: 0, chunk: "first\n" }, headers: auth, as: :json
 
     job = JobRun.find(@job_id)
-    assert job.log_blob.attached?, "expected a log blob after chunk posts"
-    assert_equal "first\nsecond\n", job.log_blob.download
+    assert_not job.log_blob.attached?, "no blob rewrite per chunk"
+    assert_equal "first\nsecond\n", job.log_text
+
+    post "/api/v1/runner/jobs/#{@job_id}/complete", params: { status: "success", step_results: [] }, headers: auth, as: :json
+    assert_equal "first\nsecond\n", job.reload.log_blob.download
+  end
+
+  test "logs?after returns only newer chunks, then the whole log once complete" do
+    3.times { |i| post "/api/v1/jobs/#{@job_id}/log_chunks", params: { seq: i, chunk: "line #{i}\n" }, headers: auth, as: :json }
+    get "/api/v1/jobs/#{@job_id}/logs", params: { after: 0 }, headers: auth
+    assert_equal [1, 2], json_body["chunks"].map { |c| c["seq"] }
+    assert_equal false, json_body["complete"]
+
+    get "/api/v1/jobs/#{@job_id}/logs", params: { after: 2 }, headers: auth
+    assert_equal [], json_body["chunks"]
+
+    post "/api/v1/runner/jobs/#{@job_id}/complete", params: { status: "failed", step_results: [] }, headers: auth, as: :json
+    get "/api/v1/jobs/#{@job_id}/logs", params: { after: 2 }, headers: auth
+    assert_equal true, json_body["complete"]
+    assert_equal "failed", json_body["status"]
+    assert_equal "line 0\nline 1\nline 2\n", json_body["chunks"].map { |c| c["chunk"] }.join
+  end
+
+  test "new chunks and the job's end are announced on its JobLogChannel stream" do
+    stream = JobLogChannel.stream_name(@job_id)
+    assert_broadcast_on(stream, { "event" => "chunk", "seq" => 0 }) do
+      post "/api/v1/jobs/#{@job_id}/log_chunks", params: { seq: 0, chunk: "hi\n" }, headers: auth, as: :json
+    end
+    assert_broadcast_on(stream, { "event" => "done", "status" => "success" }) do
+      post "/api/v1/runner/jobs/#{@job_id}/complete", params: { status: "success", step_results: [] }, headers: auth, as: :json
+    end
   end
 
   test "terminal jobs purge rows and serve logs from the blob" do

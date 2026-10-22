@@ -118,10 +118,16 @@ flight → `success`) and rolls up to the pipeline.
 
 - `POST /api/v1/jobs/:id/log_chunks` — `{ "seq": 3, "chunk": "…log text…" }`.
   Upsert on `(job_run_id, seq)` — safe to retry; `200 { job_id, seq }`. Only
-  the owning token (`403` otherwise). Chunks are appended to an ActiveStorage
-  blob **in seq order**; the `LogChunk` rows are a write-ahead ingestion
-  buffer, purged once the job reaches a terminal state.
-- `GET /api/v1/jobs/:id/logs` → `200 { job_id, chunks: [{ seq, chunk }] }`
+  the owning token (`403` otherwise). The `LogChunk` rows hold the log while
+  the job runs; when it finishes they're written to an ActiveStorage blob
+  **in seq order** and purged.
+- `GET /api/v1/jobs/:id/logs[?after=SEQ]` → `200 { job_id, status, complete, chunks: [{ seq, chunk }] }`.
+  `after` returns only newer chunks. `complete: true` means the job finished
+  and `chunks` is the whole log as one chunk.
+- **Action Cable** `JobLogChannel` (`/cable`, signed-in UI session,
+  `{ job_id }`): notices `{ event: "chunk", seq }` and
+  `{ event: "done", status }`, with no log text. The job page fetches the new
+  chunks with `?after=` on each one.
   ordered by `seq`. Served from buffered rows while the job is live, from the
   blob once terminal.
 - `GET /api/v1/jobs/:id/logs/stream` — `text/event-stream` live tail. Sends

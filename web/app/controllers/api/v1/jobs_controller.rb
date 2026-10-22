@@ -45,8 +45,12 @@ module Api
       # Reads from the blob once the job is terminal (rows purged by then);
       # otherwise from the buffered rows. Simple polling is the fallback
       # live-tail story.
+      # ?after=SEQ returns only newer chunks (the job page's live view);
+      # complete: true means the job finished and `chunks` is the whole log.
       def logs
-        render json: { job_id: @job.id, chunks: @job.log_chunk_list }, status: :ok
+        after = params[:after].presence&.to_i
+        chunks = @job.log_chunk_list(after: after)
+        render json: { job_id: @job.id, status: @job.status, complete: @job.log_complete?, chunks: chunks }, status: :ok
       end
 
       # GET /api/v1/jobs/:id/logs/stream — text/event-stream live tail.

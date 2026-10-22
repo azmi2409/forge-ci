@@ -101,6 +101,7 @@ if `docker info` fails.
 | `MAX_IDLE_INTERVAL` | no | `60` | Idle backoff cap, seconds |
 | `HEARTBEAT_INTERVAL` | no | `15` | Heartbeat interval while running, seconds (server reclaims after 120s) |
 | `LOG_CHUNK_SIZE` | no | `65536` | Bytes per log chunk |
+| `LOG_FLUSH_INTERVAL` | no | `1` | Send buffered output at least this often (seconds), so the job page shows it live |
 | `CHECKOUT_REPO_URL` | no | — | Git URL for `checkout`; may embed a token: `https://x-access-token:TOKEN@github.com/org/repo.git` |
 | `REDACT_MIN_LENGTH` | no | `8` | Env values shorter than this are not redacted |
 | `DOCKER_BIN` | no | `docker` | Path to the docker CLI |

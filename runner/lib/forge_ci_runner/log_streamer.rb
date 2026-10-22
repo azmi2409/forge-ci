@@ -5,14 +5,48 @@ module ForgeCIRunner
   # the control plane. The server upserts on (job_id, seq), so retries are
   # safe. Thread-safe: stdout/stderr reader threads share one instance.
   class LogStreamer
-    def initialize(client, job_id, redactor, chunk_size: 65_536)
+    # flush_interval: send buffered output at least this often (seconds), so
+    # the job page shows it live instead of when chunk_size fills up.
+    def initialize(client, job_id, redactor, chunk_size: 65_536, flush_interval: nil)
       @client = client
       @job_id = job_id
       @redactor = redactor
       @chunk_size = chunk_size
+      @flush_interval = flush_interval
       @seq = 0
       @buffer = +""
       @mutex = Mutex.new
+      @post_mutex = Mutex.new
+      @flusher = nil
+    end
+
+    # Starts the background thread that sends partial chunks every
+    # flush_interval. No-op without one. Stop it with #close.
+    def start
+      return self if @flusher || @flush_interval.to_f <= 0
+
+      @stopping = false
+      @flusher = Thread.new do
+        loop do
+          sleep @flush_interval
+          break if @stopping
+
+          flush
+        end
+      end
+      self
+    end
+
+    # Stops the flusher (letting a POST in flight finish) and sends whatever
+    # is left.
+    def close
+      if @flusher
+        @stopping = true
+        @flusher.wakeup if @flusher.alive? && @flusher.status == "sleep"
+        @flusher.join
+        @flusher = nil
+      end
+      flush
     end
 
     attr_reader :seq
@@ -53,13 +87,13 @@ module ForgeCIRunner
       chunks
     end
 
+    # One POST at a time, so chunks reach the server in seq order (the
+    # flusher thread and the output readers both post).
     def post_chunk(chunk)
-      seq = nil
-      @mutex.synchronize do
-        seq = @seq
-        @seq += 1
+      @post_mutex.synchronize do
+        seq = @mutex.synchronize { (@seq += 1) - 1 }
+        with_retries { @client.post_log_chunk(@job_id, seq, chunk) }
       end
-      with_retries { @client.post_log_chunk(@job_id, seq, chunk) }
     end
 
     def with_retries(tries: 3)
