@@ -36,6 +36,8 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "abc123", body["pipeline"]["sha"]
     assert_equal "main", body["pipeline"]["branch"]
     assert_equal @pipeline.workflow_runs.sole.id, body["workflow_run_id"]
+    assert_equal 0, body["node_index"]
+    assert_equal 1, body["parallelism"]
 
     # environment: executor env merged with context payloads, contexts win
     assert_equal "test", body["environment"]["RAILS_ENV"]

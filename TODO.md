@@ -52,7 +52,8 @@ priority order. Check items off as they land.
 - [ ] GPU resource classes
 - [ ] Orb registry (local orbs first, then a registry)
 - [ ] Dynamic config (`setup:` workflows + `pipeline.continue`)
-- [ ] `parallelism` + timing-based test splitting
+- [x] `parallelism` + `circleci tests glob|split|run` (name/filesize) — 2026-10-22
+- [ ] Timing-based test splitting (needs `store_test_results` → timing DB)
 - [ ] Scheduled (cron) pipelines
 - [ ] SSH re-run / rerun-from-failed
 - [ ] Approval jobs (`type: approval`)

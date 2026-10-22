@@ -40,6 +40,9 @@ module ForgeCIRunner
     # Created empty at job start; bash sources it before every step, so
     # `echo 'export X=1' >> "$BASH_ENV"` carries values to later steps.
     BASH_ENV_PATH = "/tmp/forge-ci-bash-env"
+    # `circleci tests glob|split|run` for test splitting (parallelism).
+    CIRCLECI_CLI_SOURCE = File.expand_path("circleci_cli.sh", __dir__)
+    CIRCLECI_CLI_PATH = "/usr/local/bin/circleci"
     WORKSPACE_MANIFEST_NAME = "manifest.json"
 
     Result = Struct.new(:name, :exit_code, :started_at, :finished_at, :note,
@@ -157,6 +160,8 @@ module ForgeCIRunner
         "CIRCLE_SHA1" => @payload.dig("pipeline", "sha"),
         "CIRCLE_JOB" => @payload["name"],
         "CIRCLE_BUILD_NUM" => @job_id,
+        "CIRCLE_NODE_INDEX" => @payload["node_index"] || 0,
+        "CIRCLE_NODE_TOTAL" => @payload["parallelism"] || 1,
         "CIRCLE_WORKFLOW_ID" => @workflow_run_id,
         "CIRCLE_WORKING_DIRECTORY" => expand_workdir(@payload["working_directory"]),
         "CIRCLE_REPOSITORY_URL" => repo_url,
@@ -338,6 +343,17 @@ module ForgeCIRunner
       raise "primary container failed to start (exit #{code})" unless code.zero?
 
       prepare_shell
+      install_circleci_cli
+    end
+
+    # Copies the `circleci tests` helper into the job container (docker cp
+    # writes as root, so this works for non-root images too). A failure only
+    # costs test splitting, so it warns instead of failing the job.
+    def install_circleci_cli
+      _out, code = run_docker(@config.docker_bin, "cp", CIRCLECI_CLI_SOURCE, "#{@container}:#{CIRCLECI_CLI_PATH}")
+      return if code.zero?
+
+      log_line("[forge-ci] WARNING: could not install #{CIRCLECI_CLI_PATH}; `circleci tests` won't be available")
     end
 
     # Pick the default `run` shell (bash when the image has it, like

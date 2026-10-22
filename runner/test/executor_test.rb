@@ -213,6 +213,27 @@ class ExecutorTest < Minitest::Test
     assert_includes args, "CIRCLE_SHA1=abc123"
   end
 
+  def test_node_variables_default_to_a_single_node
+    env = executor.builtin_environment
+    assert_equal "0", env["CIRCLE_NODE_INDEX"]
+    assert_equal "1", env["CIRCLE_NODE_TOTAL"]
+  end
+
+  def test_node_variables_for_a_parallel_job
+    env = executor("node_index" => 2, "parallelism" => 4).builtin_environment
+    assert_equal "2", env["CIRCLE_NODE_INDEX"]
+    assert_equal "4", env["CIRCLE_NODE_TOTAL"]
+  end
+
+  def test_installs_the_circleci_helper_into_the_container
+    ex = executor("steps" => [{ "type" => "run", "name" => "x", "command" => "true" }])
+    ex.execute
+    cp = ex.commands.find { |c| c[0] == :run_docker && c[1][1] == "cp" }
+    refute_nil cp, "expected a docker cp of the circleci helper"
+    assert File.executable?(cp[1][2]), "the helper must be executable"
+    assert_match(%r{\Aforge-ci-job-11-\h+:/usr/local/bin/circleci\z}, cp[1][3])
+  end
+
   def test_job_environment_wins_over_builtins
     ex = executor("environment" => { "CI" => "custom" })
     assert_equal "custom", ex.job_environment["CI"]

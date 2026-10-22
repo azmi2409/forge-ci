@@ -27,9 +27,9 @@
       </tr>
     </thead>
     <tbody>
-      <% wf.job_runs.each do |job| %>
+      <% wf.job_runs.order(:id).each do |job| %>
         <tr>
-          <td><%= link_to job.name, job_run_path(job), class: "mono" %></td>
+          <td><%= link_to job.display_name, job_run_path(job), class: "mono" %></td>
           <td><%= status_badge(job.status) %></td>
           <td class="requires mono"><%= job.requires_list.any? ? job.requires_list.join(", ") : "—" %></td>
           <td class="mono"><%= job.resource_class || "any" %></td>

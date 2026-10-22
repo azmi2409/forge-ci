@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_16_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_22_120000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.string "name", null: false
     t.string "record_type", null: false
@@ -107,9 +107,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_100000) do
     t.datetime "heartbeat_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "parallelism", default: 1, null: false
+    t.integer "node_index", default: 0, null: false
     t.index ["resource_class"], name: "index_job_runs_on_resource_class"
     t.index ["status"], name: "index_job_runs_on_status"
-    t.index ["workflow_run_id", "name"], name: "index_job_runs_on_workflow_run_id_and_name", unique: true
+    t.index ["workflow_run_id", "name", "node_index"], name: "index_job_runs_on_workflow_run_id_and_name_and_node_index", unique: true
     t.index ["workflow_run_id"], name: "index_job_runs_on_workflow_run_id"
   end
 

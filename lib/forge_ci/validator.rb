@@ -21,6 +21,8 @@ module ForgeCI
     CONDITIONAL_TYPES = %w[when unless].freeze
 
     RUN_WHEN_VALUES = %w[on_success on_fail always].freeze
+    # Copies of one job a config may ask for via `parallelism:`.
+    MAX_PARALLELISM = 64
     PARAMETER_TYPES = %w[string boolean integer enum].freeze
     WORKFLOW_JOB_KEYS = %w[requires filters matrix context name].freeze
 
@@ -172,9 +174,21 @@ module ForgeCI
       end
       steps.each_with_index { |step, i| step(step, path + ["steps", i], errors) }
 
+      if job.key?("parallelism") && !valid_parallelism?(job["parallelism"])
+        errors.add(path + ["parallelism"],
+                   "\"parallelism:\" must be a whole number from 1 to #{MAX_PARALLELISM}")
+      end
+
       return unless job.key?("environment") && !job["environment"].is_a?(Hash)
 
       errors.add(path + ["environment"], "\"environment:\" must be a mapping of variable names to values")
+    end
+
+    def valid_parallelism?(value)
+      n = Integer(value.to_s, 10)
+      n.between?(1, MAX_PARALLELISM)
+    rescue ArgumentError
+      false
     end
 
     def docker_image(img, path, errors)

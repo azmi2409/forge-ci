@@ -35,8 +35,13 @@ Per claimed job the runner:
      CircleCI-style built-ins are set (`CI`, `CIRCLECI`, `CIRCLE_BRANCH`,
      `CIRCLE_SHA1`, `CIRCLE_JOB`, `CIRCLE_BUILD_NUM`, `CIRCLE_WORKFLOW_ID`,
      `CIRCLE_WORKING_DIRECTORY`, `CIRCLE_REPOSITORY_URL`,
-     `CIRCLE_PROJECT_USERNAME`/`REPONAME`); the job's own environment wins
-     on a clash. stdout/stderr streamed as
+     `CIRCLE_PROJECT_USERNAME`/`REPONAME`, `CIRCLE_NODE_INDEX`/`TOTAL`);
+     the job's own environment wins on a clash. A `circleci` helper
+     (`lib/forge_ci_runner/circleci_cli.sh`) is copied to
+     `/usr/local/bin/circleci` in every job container for test splitting:
+     `circleci tests glob`, `tests split --split-by=name|filesize|timings`
+     (timings falls back to filesize) and `tests run --command=…`, which
+     skips the command when a node's share is empty. stdout/stderr streamed as
      seq-numbered log chunks. `when: on_success/on_fail/always` is
      evaluated at runtime: a non-zero exit skips remaining `on_success`
      steps, `on_fail`/`always` steps still run, the job is marked `failed`.

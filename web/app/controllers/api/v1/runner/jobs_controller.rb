@@ -76,6 +76,8 @@ module Api
           {
             id: job.id,
             name: job.name,
+            node_index: job.node_index,
+            parallelism: job.parallelism,
             working_directory: job.working_directory,
             executor: job.executor_hash,
             steps: job.steps || [],

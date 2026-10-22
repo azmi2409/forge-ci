@@ -31,6 +31,8 @@ module ForgeCI
         requires: Array(requires).map(&:to_s),
         executor: executor(job_def),
         working_directory: job_def["working_directory"],
+        # Copies of this job to run side by side (CIRCLE_NODE_INDEX 0..n-1).
+        parallelism: Integer((job_def["parallelism"] || 1).to_s, 10),
         steps: Array(job_def["steps"]).map { |s| step(s) }
       }
     end
