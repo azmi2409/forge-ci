@@ -56,8 +56,8 @@ control plane.
 
 ```sh
 git clone https://github.com/azmi2409/forge-ci && cd forge-ci
-docker compose up -d
-docker compose logs web | grep -A2 "first admin"   # the admin password
+docker compose up -d --wait   # waits until ForgeCI is ready (first boot: a minute or two)
+docker compose exec web bin/rails forge_ci:reset_admin   # prints the admin password
 # → http://localhost:3000
 ```
 

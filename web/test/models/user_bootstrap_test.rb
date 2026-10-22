@@ -45,4 +45,19 @@ class UserBootstrapTest < ActiveSupport::TestCase
     assert_nil password
     assert_not File.exist?(User.initial_password_path)
   end
+
+  test "reset_admin_password! gives the first admin a new password, or creates one" do
+    user, password = User.reset_admin_password!
+    assert user.admin?
+    assert_equal "admin", user.username
+    assert_equal user, User.authenticate("admin", password)
+
+    File.write(User.initial_password_path, "old\n")
+    again, new_password = User.reset_admin_password!
+    assert_equal user, again
+    assert_not_equal password, new_password
+    assert_nil User.authenticate("admin", password)
+    assert_equal user, User.authenticate("admin", new_password)
+    assert_not File.exist?(User.initial_password_path), "the stale first-boot password is forgotten"
+  end
 end

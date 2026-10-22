@@ -18,8 +18,8 @@ On any host with Docker and a public HTTPS URL (GitHub webhooks need one):
 git clone https://github.com/azmi2409/forge-ci && cd forge-ci
 echo "APP_HOST=https://ci.example.com" > .env
 echo "FORCE_SSL=true" >> .env        # when a proxy in front serves HTTPS
-docker compose up -d
-docker compose logs web | grep -A2 "first admin"
+docker compose up -d --wait   # waits until ForgeCI is ready (first boot: a minute or two)
+docker compose exec web bin/rails forge_ci:reset_admin   # prints the admin password
 ```
 
 This starts Postgres and one ForgeCI container on port 3000 (`WEB_PORT`
@@ -32,9 +32,13 @@ service your domain.
 On first boot ForgeCI:
 - creates its databases;
 - generates its secrets into the `forge-ci-data` volume (`secrets.yml`);
-- creates an `admin` user and prints its password in the logs.
+- creates an `admin` user and prints its password in the `web` logs.
 
-Sign in, then change the password under **Account**.
+`bin/rails forge_ci:reset_admin`, run in the `web` container, prints a new
+password for that admin at any time. Use it if you missed the logs or the
+database already had users. On Coolify, run it from the `web` service's
+**Terminal** tab. Sign in with the username and password it prints, then change the password under
+**Account**.
 
 ## 2. Connect GitHub
 
