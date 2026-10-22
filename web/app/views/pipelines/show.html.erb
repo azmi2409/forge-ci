@@ -46,7 +46,19 @@
       <% if @pipeline.forked %><span class="chip" title="Pull request from a fork: contexts are not injected">fork</span><% end %>
     </div>
   </div>
-  <% unless @pipeline.terminal? %>
+  <% if @pipeline.terminal? %>
+    <div class="page-actions">
+      <% unless @pipeline.success? %>
+        <%= button_to rerun_project_pipeline_path(@project, @pipeline, scope: "failed"), method: :post, class: "button-primary" do %>
+          <%= icon "refresh" %>Rerun failed jobs
+        <% end %>
+      <% end %>
+      <%= button_to rerun_project_pipeline_path(@project, @pipeline, scope: "all"), method: :post,
+                    class: @pipeline.success? ? "button-primary" : "button-secondary" do %>
+        <%= icon "refresh" %>Rerun all
+      <% end %>
+    </div>
+  <% else %>
     <div class="page-actions">
       <%= button_to cancel_project_pipeline_path(@project, @pipeline), method: :post, class: "button-danger",
                     form: { onsubmit: "return confirm('Cancel this pipeline?')" } do %>

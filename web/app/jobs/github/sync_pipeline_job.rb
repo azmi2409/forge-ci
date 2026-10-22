@@ -34,6 +34,21 @@ module Github
         return
       end
 
+      # A push to a branch with an open pull request sends both a `push` and a
+      # `pull_request` event for the same commit: build it once. The row lock
+      # makes two deliveries arriving together wait for each other.
+      github_repo.with_lock do
+        if project.pipelines.exists?(github_repository: github_repo, sha: sha)
+          Rails.logger.info("[github] #{repo_full_name}@#{sha[0, 7]} already has a pipeline — skipping")
+        else
+          create_pipeline(project, github_repo, yaml, sha: sha, branch: branch, forked: forked)
+        end
+      end
+    end
+
+    private
+
+    def create_pipeline(project, github_repo, yaml, sha:, branch:, forked:)
       number = project.pipelines.maximum(:pipeline_number).to_i + 1
       ir, errors = ForgeCI::Compiler.compile(yaml, pipeline_params: { "branch" => branch, "number" => number })
 

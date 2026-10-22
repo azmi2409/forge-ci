@@ -103,6 +103,13 @@ class Github::SyncPipelineJobTest < ActiveJob::TestCase
     assert_equal [1, 2], Pipeline.order(:pipeline_number).pluck(:pipeline_number)
   end
 
+  test "push and pull_request events for the same commit build it once" do
+    perform_with_fake(**base_args(branch: "feature"))                # push
+    perform_with_fake(**base_args(branch: "feature"))                # pull_request synchronize
+    assert_equal 1, Pipeline.where(sha: "abc123").count
+    assert_equal 1, @client.statuses.count { |st| st[:state] == "pending" }
+  end
+
   test "repo without .circleci/config.yml is skipped silently (no pipeline, no status)" do
     use_fake_client(FakeClient.new(yaml: nil))
     perform_with_fake(**base_args)
