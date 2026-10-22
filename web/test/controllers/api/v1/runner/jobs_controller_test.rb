@@ -54,6 +54,14 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_not_nil job.heartbeat_at
   end
 
+  test "claim includes the project's dashboard variables, without the records" do
+    @project.variables.create!(name: "FROM_DASHBOARD", value: "dash-value-1234")
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    assert_equal "dash-value-1234", json_body["environment"]["FROM_DASHBOARD"]
+    assert_not json_body.key?("variables")
+  end
+
   test "claim returns 422 when nothing is claimable" do
     post "/api/v1/runner/jobs/claim", headers: auth
     assert_response :ok # first claim took build

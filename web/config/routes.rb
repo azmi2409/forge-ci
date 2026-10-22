@@ -28,6 +28,7 @@ Rails.application.routes.draw do
     resources :pipelines, only: %i[show] do
       member { post :cancel }
     end
+    resources :variables, only: %i[create destroy], controller: "project_variables"
   end
   resources :job_runs, only: %i[show]
 

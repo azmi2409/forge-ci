@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_22_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_22_180000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.string "name", null: false
     t.string "record_type", null: false
@@ -155,6 +155,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_22_160000) do
     t.index ["project_id"], name: "index_pipelines_on_project_id"
   end
 
+  create_table "project_variables", force: :cascade do |t|
+    t.integer "project_id", null: false
+    t.string "name", null: false
+    t.text "value", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_id", "name"], name: "index_project_variables_on_project_id_and_name", unique: true
+    t.index ["project_id"], name: "index_project_variables_on_project_id"
+  end
+
   create_table "projects", force: :cascade do |t|
     t.string "name", null: false
     t.string "repo_url"
@@ -221,6 +231,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_22_160000) do
   add_foreign_key "log_chunks", "job_runs"
   add_foreign_key "pipelines", "github_repositories"
   add_foreign_key "pipelines", "projects"
+  add_foreign_key "project_variables", "projects"
   add_foreign_key "step_runs", "job_runs"
   add_foreign_key "workflow_runs", "pipelines"
 end

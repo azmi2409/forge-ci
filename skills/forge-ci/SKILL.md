@@ -41,8 +41,10 @@ Write standard CircleCI 2.1. These are the differences that matter:
   `CIRCLE_TAG` are not set.
 - **Timeouts:** a step is killed after 10 minutes without output (raise it
   per step with `no_output_timeout:`), a job after 1 hour.
-- **Secrets** belong in a forge-ci context, referenced with `context:` in the
-  workflow, never in the config. Pull requests from forks get no contexts.
+- **Secrets** belong in the project's environment variables (the project
+  page in the ForgeCI dashboard) or a context, never in the config. Every job
+  gets them; a job's own `environment:` wins over project variables and
+  contexts win over both. Pull requests from forks get neither.
 
 ### Runners and `resource_class`
 

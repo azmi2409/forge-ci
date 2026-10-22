@@ -163,11 +163,13 @@ class JobRun < ApplicationRecord
     executor || {}
   end
 
-  # Executor environment merged with resolved context payloads; contexts win
-  # on key conflicts. This is what the runner receives — never the raw
-  # Context records.
+  # What the runner receives as the job's environment, lowest precedence
+  # first: the project's dashboard variables (read now, never for fork pull
+  # requests), the executor environment from the config, then resolved
+  # context payloads. Never the raw ProjectVariable or Context records.
   def merged_environment
-    (executor_hash["environment"] || {}).merge(context_environment || {})
+    variables = pipeline.forked? ? {} : project.variables_environment
+    variables.merge(executor_hash["environment"] || {}).merge(context_environment || {})
   end
 
   # --- claiming ----------------------------------------------------------------

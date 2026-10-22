@@ -1,5 +1,14 @@
 <% content_for(:title, "#{@project.name} — ForgeCI") %>
 <% content_for(:breadcrumbs) { breadcrumbs(["Overview", projects_path], [@project.name]) } %>
+<% content_for(:head) do %>
+  <style>
+    .variable-fields { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(200px, 2fr) auto; gap: 8px; align-items: start; }
+    .variable-fields > button { align-self: end; }
+    .variable-fields .form-row + .form-row { margin-top: 0; }
+    .variable-fields textarea { resize: vertical; height: 40px; min-height: 40px; }
+    @media (max-width: 720px) { .variable-fields { grid-template-columns: 1fr; } }
+  </style>
+<% end %>
 
 <div class="page-header">
   <div>
@@ -13,6 +22,8 @@
   </div>
 </div>
 
+<%= render "shared/flash" %>
+
 <section class="card" aria-labelledby="pipelines-title">
   <div class="card-header">
     <div>
@@ -25,4 +36,60 @@
   <% else %>
     <div class="card-body"><div class="empty-state"><h3>No pipelines yet</h3><p>Push to the repo, or run <code>forge-ci trigger .circleci/config.yml --project <%= @project.name %></code>.</p></div></div>
   <% end %>
+</section>
+
+<section class="card" id="variables" aria-labelledby="variables-title" style="margin-top: 24px">
+  <div class="card-header">
+    <div>
+      <h2 id="variables-title" class="card-title"><%= icon "lock" %>Environment variables</h2>
+      <p class="card-desc">Every job in this project gets these, except jobs from fork pull requests. A job's own <code>environment:</code> in the config wins on a clash. Values are encrypted and hidden from logs, and can't be viewed again after saving.</p>
+    </div>
+  </div>
+  <% if @variables.any? %>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Name</th><th>Value</th><th>Updated</th><% if current_user.admin? %><th class="num">Actions</th><% end %></tr></thead>
+        <tbody>
+          <% @variables.each do |variable| %>
+            <tr>
+              <td class="mono"><%= variable.name %></td>
+              <td class="mono text-muted"><%= variable.masked_value %></td>
+              <td class="text-muted"><%= time_ago_tag(variable.updated_at) %></td>
+              <% if current_user.admin? %>
+                <td class="num nowrap">
+                  <%= button_to "Delete", project_variable_path(@project, variable), method: :delete, class: "button-danger button-sm",
+                                form: { class: "inline", onsubmit: "return confirm('Delete #{j variable.name}?')" } %>
+                </td>
+              <% end %>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+  <div class="card-body">
+    <% if current_user.admin? %>
+      <%= form_with url: project_variables_path(@project), method: :post, data: { turbo: false }, class: "variable-form" do %>
+        <div class="variable-fields">
+          <div class="form-row">
+            <label class="field-label" for="variable-name">Name</label>
+            <input class="field mono" type="text" id="variable-name" name="name" required maxlength="255"
+                   pattern="[A-Za-z_][A-Za-z0-9_]*" title="Letters, digits and _, not starting with a digit"
+                   placeholder="e.g. DATABASE_URL" autocapitalize="characters" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="form-row">
+            <label class="field-label" for="variable-value">Value</label>
+            <textarea class="field mono" id="variable-value" name="value" required rows="1" autocomplete="off" spellcheck="false"></textarea>
+          </div>
+          <button type="submit" class="button-primary"><%= icon "plus" %>Add variable</button>
+        </div>
+        <p class="field-hint">Saving a name that already exists replaces its value. Values shorter than 8 characters aren't hidden in logs.</p>
+      <% end %>
+    <% elsif @variables.empty? %>
+      <p class="text-muted">No environment variables. An admin can add them here.</p>
+    <% end %>
+    <% if @context_names.any? %>
+      <p class="field-hint" style="margin-top: 16px">Contexts (set through the API, win over these): <%= safe_join(@context_names.map { |n| tag.span(n, class: "chip") }, " ") %></p>
+    <% end %>
+  </div>
 </section>

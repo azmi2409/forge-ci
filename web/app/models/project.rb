@@ -5,6 +5,7 @@ class Project < ApplicationRecord
   has_many :workflow_runs, through: :pipelines
   has_many :job_runs, through: :workflow_runs
   has_many :contexts, dependent: :destroy
+  has_many :variables, -> { order(:name) }, class_name: "ProjectVariable", dependent: :destroy
   has_many :cache_entries, dependent: :destroy
   has_many :github_repositories, dependent: :destroy
 
@@ -15,6 +16,11 @@ class Project < ApplicationRecord
   # Fork pull requests NEVER get these (see Github::SyncPipelineJob).
   def default_context_names
     contexts.pluck(:name)
+  end
+
+  # The dashboard's environment variables as a Hash of name => value.
+  def variables_environment
+    variables.to_h { |v| [v.name, v.value] }
   end
 
   # Jobs currently occupying a concurrency slot.

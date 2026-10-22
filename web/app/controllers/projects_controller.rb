@@ -17,6 +17,8 @@ class ProjectsController < ApplicationController
     @project = Project.find(params[:id])
     @pipelines = @project.pipelines.order(created_at: :desc).limit(PROJECT_PIPELINES)
     @total = @project.pipelines.count
+    @variables = @project.variables.to_a
+    @context_names = @project.contexts.order(:name).pluck(:name)
   end
 
   private

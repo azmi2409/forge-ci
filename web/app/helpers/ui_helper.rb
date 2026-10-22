@@ -20,6 +20,7 @@ module UiHelper
     "user" => "M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 21v-1a7 7 0 0 1 14 0v1",
     "selector" => "M8 9l4-4 4 4 M8 15l4 4 4-4",
     "plus" => "M12 5v14 M5 12h14",
+    "lock" => "M6 11h12v10H6z M8 11V7a4 4 0 0 1 8 0v4",
     "check" => "M5 12.5l4.5 4.5L19 7.5",
     "external" => "M14 4h6v6 M20 4l-9 9 M18 14v6H4V6h6",
     "arrow-right" => "M5 12h14 M13 6l6 6-6 6",
