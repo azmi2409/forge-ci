@@ -212,7 +212,13 @@ sudo systemctl enable --now forge-ci-runner
 sudo journalctl -u forge-ci-runner -f   # watch it poll
 ```
 
-Generate one token per host (or per resource class) in the Rails console:
+`RESOURCE_CLASS` routes jobs: a runner only claims jobs whose
+`resource_class:` matches it, plus jobs with none. With the shared
+`RUNNER_TOKEN` each host just sets its own `RESOURCE_CLASS` (e.g. `spot`
+for interruptible check runners, `deploy` for an on-demand deploy runner);
+a per-host token's own class, if it has one, takes precedence.
+
+Or generate one token per host (or per resource class) in the Rails console:
 
 ```ruby
 record, raw = RunnerToken.generate!(name: "worker-1", resource_class: "medium")

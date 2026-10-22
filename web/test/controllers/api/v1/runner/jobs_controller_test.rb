@@ -65,6 +65,25 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity, "small token must not claim the medium build job"
   end
 
+  test "a classless token claims only the resource class the runner asks for" do
+    _rec, any_raw = RunnerToken.generate!(name: "shared-runner")
+    post "/api/v1/runner/jobs/claim", params: { resource_class: "spot" },
+         headers: bearer_headers(any_raw), as: :json
+    assert_response :unprocessable_entity, "a spot runner must not claim the medium build job"
+
+    post "/api/v1/runner/jobs/claim", params: { resource_class: "medium" },
+         headers: bearer_headers(any_raw), as: :json
+    assert_response :ok
+    assert_equal "build", json_body["name"]
+  end
+
+  test "a token's own resource class wins over the requested one" do
+    _rec, small_raw = RunnerToken.generate!(name: "small-runner", resource_class: "small")
+    post "/api/v1/runner/jobs/claim", params: { resource_class: "medium" },
+         headers: bearer_headers(small_raw), as: :json
+    assert_response :unprocessable_entity
+  end
+
   test "claim honors the project's max_concurrency cap" do
     @project.update!(max_concurrency: 1)
     post "/api/v1/runner/jobs/claim", headers: auth

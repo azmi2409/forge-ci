@@ -176,22 +176,24 @@ class JobRun < ApplicationRecord
   end
 
   # Atomically claim the oldest queued job this token may run:
-  #  - executor.resource_class matches the token's resource_class
-  #    (a NULL on either side matches anything), and
+  #  - executor.resource_class matches the token's resource_class, or, for
+  #    a token without one (e.g. the shared FORGE_CI_RUNNER_TOKEN), the
+  #    class the runner asked for (a NULL on either side matches anything), and
   #  - the job's project still has a free max_concurrency slot
   #    (counted across claimed + running jobs).
   # Returns the claimed JobRun, or nil when nothing is claimable.
-  def self.claim_next!(token)
+  def self.claim_next!(token, requested_resource_class: nil)
+    resource_class = token.resource_class || requested_resource_class.presence
     transaction do
       scope = queued.order(:created_at)
                     .preload(workflow_run: { pipeline: :project })
       # NULL on either side matches anything. A NULL token class needs no
       # filter at all; binding NULL into `OR :rc IS NULL` makes Postgres
       # unable to infer the parameter type (PG::IndeterminateDatatype).
-      unless token.resource_class.nil?
+      unless resource_class.nil?
         scope = scope.where(
           "job_runs.resource_class = ? OR job_runs.resource_class IS NULL",
-          token.resource_class
+          resource_class
         )
       end
       scope = scope.lock("FOR UPDATE SKIP LOCKED") if postgres?

@@ -8,9 +8,10 @@ module Api
       class JobsController < BaseController
         # POST /api/v1/runner/jobs/claim { resource_class: "medium" }
         # Atomically claims the oldest queued job matching the token's
-        # resource class, honoring each project's max_concurrency.
+        # resource class (or, for a token without one, the requested
+        # resource_class), honoring each project's max_concurrency.
         def claim
-          job = JobRun.claim_next!(current_runner_token)
+          job = JobRun.claim_next!(current_runner_token, requested_resource_class: params[:resource_class].to_s)
           return render json: { error: "no claimable jobs right now" }, status: :unprocessable_entity unless job
 
           render json: job_payload(job), status: :ok
