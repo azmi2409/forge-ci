@@ -24,8 +24,13 @@ Write standard CircleCI 2.1. These are the differences that matter:
   `type: approval` jobs, dynamic config (`setup:`). Don't use them; write the
   steps out instead of using an orb.
 - **Ignored with a warning:** `filters: tags:`. `store_test_results` and
-  `add_ssh_keys` validate but the runner skips them. `setup_remote_docker` is
-  not available, so jobs cannot run Docker themselves.
+  `add_ssh_keys` validate but the runner skips them.
+- **Docker inside a job:** `setup_remote_docker` gives the job the runner
+  machine's own Docker daemon (`docker build`, `docker run`, Kamal). Only
+  runners set up with `ALLOW_DOCKER_SOCKET=1` accept it, normally just the
+  deploy runner, so use it only on jobs with that runner's `resource_class`;
+  elsewhere the job fails with an error. Pull requests from forks never get
+  it. `version:` and `docker_layer_caching:` are accepted and ignored.
 - **Lists, not strings:** `branches: only: [main]`, not `only: main`.
 - **Absolute paths:** the runner expands `~` to `/root`, but `cimg/*` images
   run as the `circleci` user. Use `/home/circleci/project` for

@@ -43,6 +43,9 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "test", body["environment"]["RAILS_ENV"]
     assert_equal "s3cr3t", body["environment"]["DEPLOY_KEY"]
 
+    # a pipeline from this repository (not a fork) is trusted
+    assert_equal true, body["trusted"]
+
     # raw context records are never exposed
     assert_not body.key?("contexts")
     assert_not body.key?("context")

@@ -201,6 +201,28 @@ class CompilerTest < Minitest::Test
     assert_equal ["aa:bb:cc:dd"], ssh[:fingerprints]
   end
 
+  def test_setup_remote_docker_compiles_with_or_without_options
+    ir, errors = compile_yaml(<<~YAML)
+      version: 2.1
+      jobs:
+        deploy:
+          docker: [{ image: cimg/ruby:3.3 }]
+          resource_class: deploy
+          steps:
+            - checkout
+            - setup_remote_docker
+            - setup_remote_docker:
+                docker_layer_caching: true
+            - run: docker info
+      workflows:
+        ci:
+          jobs: [deploy]
+    YAML
+    assert_empty errors
+    types = job_by_name(ir, "deploy")[:steps].map { |st| st[:type] }
+    assert_equal %w[checkout setup_remote_docker setup_remote_docker run], types
+  end
+
   # --- matrix ---------------------------------------------------------------
 
   def test_matrix_desugars_into_numbered_jobs

@@ -83,6 +83,9 @@ module Api
             steps: job.steps || [],
             environment: job.merged_environment,
             pipeline: { sha: pipeline.sha, branch: pipeline.branch },
+            # false for fork pull requests: the runner refuses them the
+            # host's Docker (setup_remote_docker).
+            trusted: !pipeline.forked?,
             workflow_run_id: job.workflow_run_id,
             project_id: job.project.id,
             repository: repository_info(job)

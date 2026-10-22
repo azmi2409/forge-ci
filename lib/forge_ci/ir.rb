@@ -109,6 +109,11 @@ module ForgeCI
           { type: "store_test_results", path: cfg["path"] }
         when "add_ssh_keys"
           { type: "add_ssh_keys", fingerprints: cfg["fingerprints"] || [] }
+        when "setup_remote_docker"
+          # The runner gives the job its own Docker daemon (see the runner's
+          # ALLOW_DOCKER_SOCKET). `version` and `docker_layer_caching` don't
+          # apply: the runner's daemon and its layer cache are used as is.
+          { type: "setup_remote_docker" }
         else
           raise Error, "internal error: unknown step type #{type.inspect} reached IR normalization"
         end

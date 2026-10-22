@@ -186,12 +186,42 @@ module ForgeCIRunner
               "--network", @network]
       wd = expand_workdir(@payload["working_directory"])
       args += ["-w", wd] if wd
+      args += docker_socket_args if remote_docker?
       args += env_args(job_environment)
       args += ["--entrypoint", ex["entrypoint"]] if ex["entrypoint"]
       args << image
       # Long-lived container: steps run via `docker exec`.
       args += ex["command"] ? ["/bin/sh", "-c", ex["command"]] : ["sleep", "infinity"]
       args
+    end
+
+    # Whether the job asked for Docker (a setup_remote_docker step).
+    def remote_docker?
+      Array(@payload["steps"]).any? { |s| s.is_a?(Hash) && s["type"] == "setup_remote_docker" }
+    end
+
+    # The host's Docker socket in the job container, plus its group so a
+    # non-root image user (cimg's `circleci`) can use it. Whoever has this
+    # socket controls the runner machine, hence the checks in
+    # #check_remote_docker!.
+    def docker_socket_args
+      socket = @config.docker_socket_path
+      args = ["-v", "#{socket}:/var/run/docker.sock"]
+      gid = File.stat(socket).gid rescue nil
+      args += ["--group-add", gid.to_s] if gid
+      args
+    end
+
+    def check_remote_docker!
+      return unless remote_docker?
+
+      unless @config.allow_docker_socket
+        raise "this job uses setup_remote_docker, which this runner doesn't allow. Only runners trusted " \
+              "with their host's Docker (like a deploy runner) set ALLOW_DOCKER_SOCKET=1"
+      end
+      return unless @payload["trusted"] == false
+
+      raise "setup_remote_docker isn't available to pull requests from forks"
     end
 
     # Returns [service_name, argv].
@@ -318,6 +348,7 @@ module ForgeCIRunner
     end
 
     def setup_containers
+      check_remote_docker!
       ex = @payload["executor"] || {}
       images = [ex["image"]] + Array(ex["secondary_images"]).map { |s| s["image"] }
       images.compact.uniq.each do |image|
@@ -391,6 +422,7 @@ module ForgeCIRunner
         when "store_artifacts" then execute_store_artifacts(step)
         when "persist_to_workspace" then execute_persist_workspace(step)
         when "attach_workspace" then execute_attach_workspace(step)
+        when "setup_remote_docker" then execute_setup_remote_docker
         when *DEFERRED_STEPS then deferred_skip(step)
         else
           log_line("[forge-ci] WARNING: unknown step type #{step["type"].inspect}; skipping")
@@ -754,6 +786,12 @@ module ForgeCIRunner
       0
     rescue StandardError => e
       warn_zero("attach_workspace failed: #{e.class}: #{e.message}")
+    end
+
+    # The socket was mounted when the container started; this only reports it.
+    def execute_setup_remote_docker
+      log_line("[forge-ci] setup_remote_docker: docker commands in this job use the runner's Docker daemon")
+      0
     end
 
     def deferred_skip(step)
