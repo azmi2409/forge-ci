@@ -16,5 +16,5 @@ require_relative "forge_ci/compiler"
 # JSON-serializable intermediate representation (IR) that a scheduler and
 # runner can execute. Pure Ruby, stdlib only, no network, no processes.
 module ForgeCI
-  VERSION = "0.1.0"
+  VERSION = "0.2.0"
 end

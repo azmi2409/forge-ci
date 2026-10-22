@@ -16,7 +16,7 @@ Or build locally:
 
 ```sh
 gem build forge-ci.gemspec
-gem install ./forge-ci-0.1.0.gem
+gem install ./forge-ci-0.2.0.gem
 ```
 
 ## Usage

@@ -77,7 +77,7 @@ Coolify, S3, scaling to zero) see **[DEPLOY.md](DEPLOY.md)**.
 Check a config locally first; the compiler needs only Ruby 3.0+:
 
 ```sh
-gem build forge-ci.gemspec && gem install ./forge-ci-0.1.0.gem
+gem build forge-ci.gemspec && gem install ./forge-ci-0.2.0.gem
 forge-ci validate .circleci/config.yml
 forge-ci compile .circleci/config.yml --branch main   # the jobs that will run on main
 ```
