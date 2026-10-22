@@ -261,6 +261,19 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "https://github.com/octo/hello.git", json_body["repository"]["url"]
   end
 
+  test "manual pipelines on a GitHub App project clone from its repo with a token" do
+    inst = GithubInstallation.create!(installation_id: 99, account_login: "octo")
+    inst.github_repositories.create!(full_name: "octo/private", project: @project)
+    fake = Object.new
+    fake.define_singleton_method(:installation_token) { "ghs_checkout_token" }
+    with_github_app(->(_id) { fake }) do
+      post "/api/v1/runner/jobs/claim", headers: auth
+    end
+    assert_response :ok
+    assert_equal "https://github.com/octo/private.git", json_body["repository"]["url"]
+    assert_equal "ghs_checkout_token", json_body["repository"]["token"]
+  end
+
   test "claim payload falls back to project repo_url" do
     @project.update!(repo_url: "https://git.example.com/acme/app.git")
 

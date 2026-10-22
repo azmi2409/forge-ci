@@ -88,18 +88,22 @@ module Api
 
         # Where the runner can `git clone` the code for `checkout` steps.
         # Prefers the GitHub repo the pipeline came from, then the project's
-        # configured repo_url. Omitted entirely when neither is known.
+        # configured repo_url, then the project's GitHub App repo (so manual
+        # `forge-ci trigger` pipelines on App-created projects still clone).
+        # Omitted entirely when none is known.
         def repository_info(job)
           pipeline = job.pipeline
-          url = if pipeline.github_repository
-                  "https://github.com/#{pipeline.github_repository.full_name}.git"
+          github_repo = pipeline.github_repository
+          github_repo ||= job.project.github_repositories.first if job.project.repo_url.blank?
+          url = if github_repo
+                  "https://github.com/#{github_repo.full_name}.git"
                 elsif job.project.repo_url.present?
                   job.project.repo_url
                 end
           return nil if url.blank?
 
           { url: url, sha: pipeline.sha, branch: pipeline.branch,
-            token: checkout_token(pipeline.github_repository) }.compact
+            token: checkout_token(github_repo) }.compact
         end
 
         # Short-lived GitHub App installation token so the runner can clone
