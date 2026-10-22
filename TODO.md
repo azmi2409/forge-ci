@@ -38,6 +38,8 @@ priority order. Check items off as they land.
 - [ ] Audit log for secret rotation
 - [ ] Log blob delta-append (each chunk POST currently rewrites the whole blob)
 - [x] Runner: no-output step timeout + job timeout, per-step `environment:` — 2026-10-16
+- [x] Runner: bash default shell, `$BASH_ENV`, `CIRCLE_*` built-in env vars — 2026-10-22
+- [ ] Runner: `setup_remote_docker` (Docker access for jobs, e.g. deploys)
 - [ ] Runner: container CPU/memory limits
 - [ ] Runner: `store_test_results` (JUnit → timing DB) and `add_ssh_keys`
 - [ ] Publish the `forge-ci` gem to RubyGems (then `web/` can depend on the
@@ -50,7 +52,8 @@ priority order. Check items off as they land.
 - [ ] GPU resource classes
 - [ ] Orb registry (local orbs first, then a registry)
 - [ ] Dynamic config (`setup:` workflows + `pipeline.continue`)
-- [ ] `parallelism` + timing-based test splitting
+- [x] `parallelism` + `circleci tests glob|split|run` (name/filesize) — 2026-10-22
+- [ ] Timing-based test splitting (needs `store_test_results` → timing DB)
 - [ ] Scheduled (cron) pipelines
 - [ ] SSH re-run / rerun-from-failed
 - [ ] Approval jobs (`type: approval`)

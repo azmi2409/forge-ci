@@ -56,7 +56,8 @@ module Api
               name: wf.name,
               status: wf.status,
               jobs: wf.job_runs.map do |job|
-                { id: job.id, name: job.name, status: job.status, requires: job.requires_list }
+                { id: job.id, name: job.name, node_index: job.node_index, parallelism: job.parallelism,
+                  status: job.status, requires: job.requires_list }
               end
             }
           end

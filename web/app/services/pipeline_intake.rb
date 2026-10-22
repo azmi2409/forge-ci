@@ -62,22 +62,28 @@ class PipelineIntake
           job_name = job["name"].to_s
           executor = job["executor"] || {}
           requires = Array(job["requires"]).map(&:to_s)
+          parallelism = [job["parallelism"].to_i, 1].max
 
-          job_run = workflow_run.job_runs.create!(
-            name: job_name,
-            executor: executor,
-            steps: Array(job["steps"]),
-            working_directory: job["working_directory"],
-            requires: requires,
-            resource_class: executor["resource_class"],
-            context_environment: context_env,
-            concurrency_key: [@project.id, wf_name, job_name].join("/"),
-            status: requires.empty? ? "queued" : "pending"
-          )
+          # `parallelism: N` -> N JobRuns (nodes) of the same job.
+          parallelism.times do |node_index|
+            job_run = workflow_run.job_runs.create!(
+              name: job_name,
+              parallelism: parallelism,
+              node_index: node_index,
+              executor: executor,
+              steps: Array(job["steps"]),
+              working_directory: job["working_directory"],
+              requires: requires,
+              resource_class: executor["resource_class"],
+              context_environment: context_env,
+              concurrency_key: [@project.id, wf_name, job_name].join("/"),
+              status: requires.empty? ? "queued" : "pending"
+            )
 
-          Array(job["steps"]).each do |step|
-            step_name = (step["name"] || step["type"]).to_s
-            job_run.step_runs.create!(name: step_name.presence || "step", status: "pending")
+            Array(job["steps"]).each do |step|
+              step_name = (step["name"] || step["type"]).to_s
+              job_run.step_runs.create!(name: step_name.presence || "step", status: "pending")
+            end
           end
         end
       end

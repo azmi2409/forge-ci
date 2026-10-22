@@ -54,7 +54,9 @@ class JobRun < ApplicationRecord
   serialize :requires, coder: JSON
   serialize :context_environment, coder: JSON
 
-  validates :name, presence: true, uniqueness: { scope: :workflow_run_id }
+  validates :name, presence: true, uniqueness: { scope: %i[workflow_run_id node_index] }
+  validates :parallelism, numericality: { only_integer: true, greater_than_or_equal_to: 1 }
+  validates :node_index, numericality: { only_integer: true, greater_than_or_equal_to: 0, less_than: :parallelism }
 
   # --- guarded transitions -------------------------------------------------
 
@@ -69,6 +71,11 @@ class JobRun < ApplicationRecord
     # Durable log store: once terminal, the blob holds the final log and the
     # ingestion rows are dropped (see #finalize_log_blob!).
     finalize_log_blob! if TERMINAL_STATUSES.include?(new_status)
+  end
+
+  # "test" or, for a parallel job, "test [2/4]" (1-based for people).
+  def display_name
+    parallelism > 1 ? "#{name} [#{node_index + 1}/#{parallelism}]" : name
   end
 
   def mark_queued!
@@ -176,22 +183,24 @@ class JobRun < ApplicationRecord
   end
 
   # Atomically claim the oldest queued job this token may run:
-  #  - executor.resource_class matches the token's resource_class
-  #    (a NULL on either side matches anything), and
+  #  - executor.resource_class matches the token's resource_class, or, for
+  #    a token without one (e.g. the shared FORGE_CI_RUNNER_TOKEN), the
+  #    class the runner asked for (a NULL on either side matches anything), and
   #  - the job's project still has a free max_concurrency slot
   #    (counted across claimed + running jobs).
   # Returns the claimed JobRun, or nil when nothing is claimable.
-  def self.claim_next!(token)
+  def self.claim_next!(token, requested_resource_class: nil)
+    resource_class = token.resource_class || requested_resource_class.presence
     transaction do
       scope = queued.order(:created_at)
                     .preload(workflow_run: { pipeline: :project })
       # NULL on either side matches anything. A NULL token class needs no
       # filter at all; binding NULL into `OR :rc IS NULL` makes Postgres
       # unable to infer the parameter type (PG::IndeterminateDatatype).
-      unless token.resource_class.nil?
+      unless resource_class.nil?
         scope = scope.where(
           "job_runs.resource_class = ? OR job_runs.resource_class IS NULL",
-          token.resource_class
+          resource_class
         )
       end
       scope = scope.lock("FOR UPDATE SKIP LOCKED") if postgres?
@@ -272,8 +281,13 @@ class JobRun < ApplicationRecord
     end
   end
 
+  # A required job counts as successful only once every one of its
+  # parallel nodes has succeeded.
   def unblock_dependents!
-    successful = workflow_run.job_runs.success.pluck(:name).to_set
+    successful = workflow_run.job_runs.pluck(:name, :status)
+                             .group_by(&:first)
+                             .select { |_name, rows| rows.all? { |_n, status| status == "success" } }
+                             .keys.to_set
     workflow_run.job_runs.pending.find_each do |job|
       job.mark_queued! if job.requires_list.all? { |r| successful.include?(r) }
     end

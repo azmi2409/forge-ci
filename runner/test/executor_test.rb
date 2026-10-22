@@ -162,6 +162,109 @@ class ExecutorTest < Minitest::Test
     assert_equal 0, ex.commands.count { |c| c[0] == :stream_exec }
   end
 
+  def test_checkout_with_token_uses_auth_header_not_remote_url
+    token = "ghs_installationtoken1234567890"
+    ex = executor("steps" => [{ "type" => "checkout" }],
+                  "repository" => { "url" => "https://github.com/octo/private.git",
+                                    "sha" => "abc123", "token" => token })
+    status, = ex.execute
+    assert_equal "success", status
+    argv = ex.commands.find { |c| c[0] == :stream_exec }[1]
+    assert_includes argv, "FORGE_CI_CHECKOUT_TOKEN=#{token}"
+    script = argv.last
+    assert_includes script, "http.extraHeader"
+    assert_includes script, "remote add origin https://github.com/octo/private.git"
+    refute_includes script, token
+    assert_equal "[REDACTED]", ex.instance_variable_get(:@redactor).redact(token)
+  end
+
+  def test_checkout_without_token_has_no_auth
+    ex = executor("steps" => [{ "type" => "checkout" }],
+                  "repository" => { "url" => "https://github.com/octo/public.git", "sha" => "abc123" })
+    ex.execute
+    argv = ex.commands.find { |c| c[0] == :stream_exec }[1]
+    refute(argv.any? { |a| a.start_with?("FORGE_CI_CHECKOUT_TOKEN") })
+    refute_includes argv.last, "extraHeader"
+  end
+
+  def test_strip_userinfo
+    ex = executor
+    assert_equal "https://github.com/o/r.git",
+                 ex.send(:strip_userinfo, "https://x-access-token:abc@github.com/o/r.git")
+    assert_equal "https://github.com/o/r.git", ex.send(:strip_userinfo, "https://github.com/o/r.git")
+  end
+
+  def test_builtin_circleci_environment
+    ex = executor("repository" => { "url" => "https://github.com/KilatHost/web.git", "sha" => "abc123" },
+                  "workflow_run_id" => 7)
+    env = ex.builtin_environment
+    assert_equal "true", env["CI"]
+    assert_equal "true", env["CIRCLECI"]
+    assert_equal "main", env["CIRCLE_BRANCH"]
+    assert_equal "abc123", env["CIRCLE_SHA1"]
+    assert_equal "build", env["CIRCLE_JOB"]
+    assert_equal "11", env["CIRCLE_BUILD_NUM"]
+    assert_equal "7", env["CIRCLE_WORKFLOW_ID"]
+    assert_equal "/root/project", env["CIRCLE_WORKING_DIRECTORY"]
+    assert_equal "KilatHost", env["CIRCLE_PROJECT_USERNAME"]
+    assert_equal "web", env["CIRCLE_PROJECT_REPONAME"]
+    assert_equal "/tmp/forge-ci-bash-env", env["BASH_ENV"]
+    args = ex.primary_run_args
+    assert_includes args, "CIRCLE_SHA1=abc123"
+  end
+
+  def test_node_variables_default_to_a_single_node
+    env = executor.builtin_environment
+    assert_equal "0", env["CIRCLE_NODE_INDEX"]
+    assert_equal "1", env["CIRCLE_NODE_TOTAL"]
+  end
+
+  def test_node_variables_for_a_parallel_job
+    env = executor("node_index" => 2, "parallelism" => 4).builtin_environment
+    assert_equal "2", env["CIRCLE_NODE_INDEX"]
+    assert_equal "4", env["CIRCLE_NODE_TOTAL"]
+  end
+
+  def test_installs_the_circleci_helper_into_the_container
+    ex = executor("steps" => [{ "type" => "run", "name" => "x", "command" => "true" }])
+    ex.execute
+    cp = ex.commands.find { |c| c[0] == :run_docker && c[1][1] == "cp" }
+    refute_nil cp, "expected a docker cp of the circleci helper"
+    assert File.executable?(cp[1][2]), "the helper must be executable"
+    assert_match(%r{\Aforge-ci-job-11-\h+:/usr/local/bin/circleci\z}, cp[1][3])
+  end
+
+  def test_job_environment_wins_over_builtins
+    ex = executor("environment" => { "CI" => "custom" })
+    assert_equal "custom", ex.job_environment["CI"]
+  end
+
+  def test_builtins_are_not_redacted
+    ex = executor("pipeline" => { "sha" => "0123456789abcdef", "branch" => "feature-long-name" })
+    redactor = ex.instance_variable_get(:@redactor)
+    assert_equal "feature-long-name 0123456789abcdef", redactor.redact("feature-long-name 0123456789abcdef")
+  end
+
+  def test_default_shell_is_bash_when_image_has_it
+    ex = executor("steps" => [{ "type" => "run", "name" => "x", "command" => "true" }])
+    ex.execute
+    argv = ex.commands.find { |c| c[0] == :stream_exec }[1]
+    assert_equal ["/bin/bash", "-eo", "pipefail", "-c", "true"], argv.last(5)
+    assert(ex.commands.any? { |c| c[0] == :run_docker && c[1].last.include?("touch /tmp/forge-ci-bash-env") })
+  end
+
+  def test_default_shell_falls_back_to_sh
+    ex = RecordingExecutor.new(test_config, NullClient.new,
+                               test_payload("steps" => [{ "type" => "run", "name" => "x", "command" => "true" }]))
+    def ex.run_docker(*args)
+      @commands << [:run_docker, args]
+      ["", args.last.to_s.include?("test -x /bin/bash") ? 1 : 0]
+    end
+    ex.execute
+    argv = ex.commands.find { |c| c[0] == :stream_exec }[1]
+    assert_equal ["/bin/sh", "-c", "true"], argv.last(3)
+  end
+
   def test_shutdown_flag_cancels_remaining_steps
     ex = executor(
       "steps" => [

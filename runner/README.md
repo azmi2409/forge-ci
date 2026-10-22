@@ -27,8 +27,21 @@ Per claimed job the runner:
 4. Executes steps in order:
    - `checkout` — clones `repository.url` from the claim payload (falls back
      to `CHECKOUT_REPO_URL`, then skips loudly) at the pipeline SHA.
-   - `run` — `docker exec` with the step's `shell` (default `/bin/sh -c`),
-     environment, and working directory; stdout/stderr streamed as
+   - `run` — `docker exec` with the step's `shell` (default, like CircleCI:
+     `/bin/bash -eo pipefail` when the image has bash, else `/bin/sh`),
+     environment, and working directory. `$BASH_ENV` points at a file
+     created empty at job start that bash sources before each step, so
+     `echo 'export X=1' >> "$BASH_ENV"` passes values to later steps.
+     CircleCI-style built-ins are set (`CI`, `CIRCLECI`, `CIRCLE_BRANCH`,
+     `CIRCLE_SHA1`, `CIRCLE_JOB`, `CIRCLE_BUILD_NUM`, `CIRCLE_WORKFLOW_ID`,
+     `CIRCLE_WORKING_DIRECTORY`, `CIRCLE_REPOSITORY_URL`,
+     `CIRCLE_PROJECT_USERNAME`/`REPONAME`, `CIRCLE_NODE_INDEX`/`TOTAL`);
+     the job's own environment wins on a clash. A `circleci` helper
+     (`lib/forge_ci_runner/circleci_cli.sh`) is copied to
+     `/usr/local/bin/circleci` in every job container for test splitting:
+     `circleci tests glob`, `tests split --split-by=name|filesize|timings`
+     (timings falls back to filesize) and `tests run --command=…`, which
+     skips the command when a node's share is empty. stdout/stderr streamed as
      seq-numbered log chunks. `when: on_success/on_fail/always` is
      evaluated at runtime: a non-zero exit skips remaining `on_success`
      steps, `on_fail`/`always` steps still run, the job is marked `failed`.
@@ -108,8 +121,9 @@ No endpoints invented; nothing else assumed.
 ### Contract gaps (found while building)
 
 1. ~~The claim payload carries no repo URL or checkout token.~~ **Resolved:**
-   the payload now includes `repository: { url, sha, branch }`
-   (`CHECKOUT_REPO_URL` remains as fallback).
+   the payload now includes `repository: { url, sha, branch, token }` —
+   `token` is a GitHub App installation token, present only for App-backed
+   private repos (`CHECKOUT_REPO_URL` remains as fallback).
 2. **The claim payload carries no `project_id`.** The cache API is
    project-scoped (`PUT/GET /api/v1/projects/:id/cache`), so `save_cache`,
    `restore_cache`, `persist_to_workspace`, and `attach_workspace` skip

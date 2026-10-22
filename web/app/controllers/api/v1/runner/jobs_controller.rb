@@ -8,9 +8,10 @@ module Api
       class JobsController < BaseController
         # POST /api/v1/runner/jobs/claim { resource_class: "medium" }
         # Atomically claims the oldest queued job matching the token's
-        # resource class, honoring each project's max_concurrency.
+        # resource class (or, for a token without one, the requested
+        # resource_class), honoring each project's max_concurrency.
         def claim
-          job = JobRun.claim_next!(current_runner_token)
+          job = JobRun.claim_next!(current_runner_token, requested_resource_class: params[:resource_class].to_s)
           return render json: { error: "no claimable jobs right now" }, status: :unprocessable_entity unless job
 
           render json: job_payload(job), status: :ok
@@ -75,6 +76,8 @@ module Api
           {
             id: job.id,
             name: job.name,
+            node_index: job.node_index,
+            parallelism: job.parallelism,
             working_directory: job.working_directory,
             executor: job.executor_hash,
             steps: job.steps || [],
@@ -88,17 +91,35 @@ module Api
 
         # Where the runner can `git clone` the code for `checkout` steps.
         # Prefers the GitHub repo the pipeline came from, then the project's
-        # configured repo_url. Omitted entirely when neither is known.
+        # configured repo_url, then the project's GitHub App repo (so manual
+        # `forge-ci trigger` pipelines on App-created projects still clone).
+        # Omitted entirely when none is known.
         def repository_info(job)
           pipeline = job.pipeline
-          url = if pipeline.github_repository
-                  "https://github.com/#{pipeline.github_repository.full_name}.git"
+          github_repo = pipeline.github_repository
+          github_repo ||= job.project.github_repositories.first if job.project.repo_url.blank?
+          url = if github_repo
+                  "https://github.com/#{github_repo.full_name}.git"
                 elsif job.project.repo_url.present?
                   job.project.repo_url
                 end
           return nil if url.blank?
 
-          { url: url, sha: pipeline.sha, branch: pipeline.branch }
+          { url: url, sha: pipeline.sha, branch: pipeline.branch,
+            token: checkout_token(github_repo) }.compact
+        end
+
+        # Short-lived GitHub App installation token so the runner can clone
+        # private repos. Sent as its own field (never embedded in the URL);
+        # nil when the App isn't configured or GitHub refuses, in which case
+        # public repos still clone anonymously.
+        def checkout_token(github_repository)
+          return nil unless github_repository && ::Github.configured?
+
+          ::Github.client_for(github_repository.github_installation.installation_id).installation_token
+        rescue StandardError => e
+          Rails.logger.warn("[runner] no checkout token for #{github_repository.full_name}: #{e.class}: #{e.message}")
+          nil
         end
       end
     end

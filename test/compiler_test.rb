@@ -20,6 +20,41 @@ class CompilerTest < Minitest::Test
 
   # --- happy path ---------------------------------------------------------
 
+  def compile_yaml(yaml)
+    ForgeCI::Compiler.compile(yaml, pipeline_params: { "branch" => "main" })
+  end
+
+  PARALLEL_CONFIG = <<~YAML
+    version: 2.1
+    jobs:
+      test:
+        docker: [{ image: cimg/ruby:3.3 }]
+        parallelism: %<n>s
+        steps: [checkout]
+    workflows:
+      ci:
+        jobs: [test]
+  YAML
+
+  def test_parallelism_passes_through_to_ir
+    ir, errors = compile_yaml(format(PARALLEL_CONFIG, n: 4))
+    assert_empty errors
+    assert_equal 4, job_by_name(ir, "test")[:parallelism]
+  end
+
+  def test_parallelism_defaults_to_one
+    ir, = compile_full
+    assert_equal 1, job_by_name(ir, "build")[:parallelism]
+  end
+
+  def test_parallelism_must_be_a_sane_whole_number
+    %w[0 -1 65 two 1.5].each do |bad|
+      _ir, errors = compile_yaml(format(PARALLEL_CONFIG, n: bad))
+      refute_empty errors, "parallelism #{bad} should be rejected"
+      assert_match(/parallelism/, errors.map(&:to_s).join)
+    end
+  end
+
   def test_full_workflow_compiles_cleanly
     ir, errors = compile_full
     assert_empty errors, "expected no errors, got: #{errors.inspect}"

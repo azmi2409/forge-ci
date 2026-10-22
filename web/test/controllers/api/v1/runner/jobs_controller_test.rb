@@ -36,6 +36,8 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "abc123", body["pipeline"]["sha"]
     assert_equal "main", body["pipeline"]["branch"]
     assert_equal @pipeline.workflow_runs.sole.id, body["workflow_run_id"]
+    assert_equal 0, body["node_index"]
+    assert_equal 1, body["parallelism"]
 
     # environment: executor env merged with context payloads, contexts win
     assert_equal "test", body["environment"]["RAILS_ENV"]
@@ -63,6 +65,25 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     _rec, small_raw = RunnerToken.generate!(name: "small-runner", resource_class: "small")
     post "/api/v1/runner/jobs/claim", headers: bearer_headers(small_raw)
     assert_response :unprocessable_entity, "small token must not claim the medium build job"
+  end
+
+  test "a classless token claims only the resource class the runner asks for" do
+    _rec, any_raw = RunnerToken.generate!(name: "shared-runner")
+    post "/api/v1/runner/jobs/claim", params: { resource_class: "spot" },
+         headers: bearer_headers(any_raw), as: :json
+    assert_response :unprocessable_entity, "a spot runner must not claim the medium build job"
+
+    post "/api/v1/runner/jobs/claim", params: { resource_class: "medium" },
+         headers: bearer_headers(any_raw), as: :json
+    assert_response :ok
+    assert_equal "build", json_body["name"]
+  end
+
+  test "a token's own resource class wins over the requested one" do
+    _rec, small_raw = RunnerToken.generate!(name: "small-runner", resource_class: "small")
+    post "/api/v1/runner/jobs/claim", params: { resource_class: "medium" },
+         headers: bearer_headers(small_raw), as: :json
+    assert_response :unprocessable_entity
   end
 
   test "claim honors the project's max_concurrency cap" do
@@ -230,6 +251,50 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "main", repo["branch"]
   end
 
+  test "claim payload carries a GitHub App installation token for checkout" do
+    inst = GithubInstallation.create!(installation_id: 99, account_login: "octo")
+    inst.github_repositories.create!(full_name: "octo/private", project: @project)
+    @pipeline.update!(github_repository: inst.github_repositories.sole)
+    requested = nil
+    fake = Object.new
+    fake.define_singleton_method(:installation_token) { "ghs_checkout_token" }
+    with_github_app(->(id) { requested = id; fake }) do
+      post "/api/v1/runner/jobs/claim", headers: auth
+    end
+    assert_response :ok
+    repo = json_body["repository"]
+    assert_equal 99, requested
+    assert_equal "ghs_checkout_token", repo["token"]
+    assert_equal "https://github.com/octo/private.git", repo["url"]
+  end
+
+  test "claim payload omits the token when GitHub refuses" do
+    inst = GithubInstallation.create!(installation_id: 99, account_login: "octo")
+    inst.github_repositories.create!(full_name: "octo/hello", project: @project)
+    @pipeline.update!(github_repository: inst.github_repositories.sole)
+    fake = Object.new
+    fake.define_singleton_method(:installation_token) { raise Github::AppClient::ApiError.new(401, "bad") }
+    with_github_app(->(_id) { fake }) do
+      post "/api/v1/runner/jobs/claim", headers: auth
+    end
+    assert_response :ok
+    assert_not json_body["repository"].key?("token")
+    assert_equal "https://github.com/octo/hello.git", json_body["repository"]["url"]
+  end
+
+  test "manual pipelines on a GitHub App project clone from its repo with a token" do
+    inst = GithubInstallation.create!(installation_id: 99, account_login: "octo")
+    inst.github_repositories.create!(full_name: "octo/private", project: @project)
+    fake = Object.new
+    fake.define_singleton_method(:installation_token) { "ghs_checkout_token" }
+    with_github_app(->(_id) { fake }) do
+      post "/api/v1/runner/jobs/claim", headers: auth
+    end
+    assert_response :ok
+    assert_equal "https://github.com/octo/private.git", json_body["repository"]["url"]
+    assert_equal "ghs_checkout_token", json_body["repository"]["token"]
+  end
+
   test "claim payload falls back to project repo_url" do
     @project.update!(repo_url: "https://git.example.com/acme/app.git")
 
@@ -244,5 +309,19 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     post "/api/v1/runner/jobs/claim", headers: auth
     assert_response :ok
     assert_not json_body.key?("repository")
+  end
+
+  private
+
+  def with_github_app(factory)
+    old_factory = Github.client_factory
+    old_env = ENV.to_h.slice("GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY")
+    ENV["GITHUB_APP_ID"] = "1"
+    ENV["GITHUB_APP_PRIVATE_KEY"] = "pem"
+    Github.client_factory = factory
+    yield
+  ensure
+    Github.client_factory = old_factory
+    %w[GITHUB_APP_ID GITHUB_APP_PRIVATE_KEY].each { |k| old_env.key?(k) ? ENV[k] = old_env[k] : ENV.delete(k) }
   end
 end

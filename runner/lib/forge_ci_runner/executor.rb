@@ -33,6 +33,16 @@ module ForgeCIRunner
     # persist_to_workspace uploads one tarball per root; attach_workspace
     # reads the manifest and extracts every root tarball at `at`.
     WORKSPACE_KEY_PREFIX = "forge-ci-workspace"
+
+    # CircleCI's default for `run` steps when the image has bash.
+    BASH_SHELL = "/bin/bash -eo pipefail"
+    POSIX_SHELL = "/bin/sh"
+    # Created empty at job start; bash sources it before every step, so
+    # `echo 'export X=1' >> "$BASH_ENV"` carries values to later steps.
+    BASH_ENV_PATH = "/tmp/forge-ci-bash-env"
+    # `circleci tests glob|split|run` for test splitting (parallelism).
+    CIRCLECI_CLI_SOURCE = File.expand_path("circleci_cli.sh", __dir__)
+    CIRCLECI_CLI_PATH = "/usr/local/bin/circleci"
     WORKSPACE_MANIFEST_NAME = "manifest.json"
 
     Result = Struct.new(:name, :exit_code, :started_at, :finished_at, :note,
@@ -53,7 +63,11 @@ module ForgeCIRunner
       @network = "forge-ci-net-#{@job_id}-#{@suffix}"
       @services = []
       @environment = payload["environment"] || {}
-      @redactor = Redactor.new(@environment, min_length: config.redact_min_length)
+      @checkout_token = payload.dig("repository", "token").to_s if payload["repository"].is_a?(Hash)
+      # The checkout token never enters @environment (steps must not see
+      # it), but it is still redacted from logs like any secret.
+      @redactor = Redactor.new(@environment.merge("__checkout_token" => @checkout_token.to_s),
+                               min_length: config.redact_min_length)
       @streamer = LogStreamer.new(client, @job_id, @redactor,
                                   chunk_size: config.log_chunk_size)
       @workdir = nil
@@ -61,6 +75,7 @@ module ForgeCIRunner
       @workflow_run_id = payload["workflow_run_id"]
       @cache_store = @project_id ? CacheStore.new(@client, @project_id) : nil
       @artifact_store = ArtifactStore.new(@client, @job_id)
+      @default_shell = POSIX_SHELL
     end
 
     def self.docker_available?(docker_bin = "docker")
@@ -129,6 +144,36 @@ module ForgeCIRunner
       env.flat_map { |k, v| ["-e", "#{k}=#{v}"] }
     end
 
+    # CircleCI-compatible built-in variables. Kept out of @environment so
+    # the redactor doesn't mask branch names and SHAs; the job's own
+    # environment wins on a name clash.
+    def builtin_environment
+      repo = @payload["repository"].is_a?(Hash) ? @payload["repository"] : {}
+      repo_url = strip_userinfo(repo["url"]) unless repo["url"].to_s.empty?
+      owner, name = repo_url&.match(%r{github\.com[/:]([^/]+)/([^/]+?)(?:\.git)?\z})&.captures
+      {
+        "CI" => "true",
+        "CIRCLECI" => "true",
+        "FORGE_CI" => "true",
+        "BASH_ENV" => BASH_ENV_PATH,
+        "CIRCLE_BRANCH" => @payload.dig("pipeline", "branch"),
+        "CIRCLE_SHA1" => @payload.dig("pipeline", "sha"),
+        "CIRCLE_JOB" => @payload["name"],
+        "CIRCLE_BUILD_NUM" => @job_id,
+        "CIRCLE_NODE_INDEX" => @payload["node_index"] || 0,
+        "CIRCLE_NODE_TOTAL" => @payload["parallelism"] || 1,
+        "CIRCLE_WORKFLOW_ID" => @workflow_run_id,
+        "CIRCLE_WORKING_DIRECTORY" => expand_workdir(@payload["working_directory"]),
+        "CIRCLE_REPOSITORY_URL" => repo_url,
+        "CIRCLE_PROJECT_USERNAME" => owner,
+        "CIRCLE_PROJECT_REPONAME" => name
+      }.reject { |_k, v| v.nil? || v.to_s.empty? }.transform_values(&:to_s)
+    end
+
+    def job_environment
+      builtin_environment.merge(@environment)
+    end
+
     def primary_run_args
       ex = @payload["executor"] || {}
       image = ex["image"]
@@ -139,7 +184,7 @@ module ForgeCIRunner
               "--network", @network]
       wd = expand_workdir(@payload["working_directory"])
       args += ["-w", wd] if wd
-      args += env_args(@environment)
+      args += env_args(job_environment)
       args += ["--entrypoint", ex["entrypoint"]] if ex["entrypoint"]
       args << image
       # Long-lived container: steps run via `docker exec`.
@@ -163,11 +208,11 @@ module ForgeCIRunner
 
     # argv for `docker exec` running a step's shell command.
     def exec_argv(step, detached: false)
-      shell = Shellwords.split(step["shell"] || "/bin/sh")
+      shell = Shellwords.split(step["shell"] || @default_shell)
       args = [@config.docker_bin, "exec"]
       args << "-d" if detached
       args += ["-w", @workdir] if @workdir
-      args += env_args(@environment)
+      args += env_args(job_environment)
       args += env_args(step["environment"]) if step["environment"].is_a?(Hash)
       args << @container
       args + shell + ["-c", step["command"].to_s]
@@ -296,6 +341,27 @@ module ForgeCIRunner
       log_line("[forge-ci] starting primary container #{@container} (#{ex["image"]})")
       _out, code = run_docker(*primary_run_args)
       raise "primary container failed to start (exit #{code})" unless code.zero?
+
+      prepare_shell
+      install_circleci_cli
+    end
+
+    # Copies the `circleci tests` helper into the job container (docker cp
+    # writes as root, so this works for non-root images too). A failure only
+    # costs test splitting, so it warns instead of failing the job.
+    def install_circleci_cli
+      _out, code = run_docker(@config.docker_bin, "cp", CIRCLECI_CLI_SOURCE, "#{@container}:#{CIRCLECI_CLI_PATH}")
+      return if code.zero?
+
+      log_line("[forge-ci] WARNING: could not install #{CIRCLECI_CLI_PATH}; `circleci tests` won't be available")
+    end
+
+    # Pick the default `run` shell (bash when the image has it, like
+    # CircleCI) and create the empty $BASH_ENV file.
+    def prepare_shell
+      _out, code = run_docker(@config.docker_bin, "exec", @container, "/bin/sh", "-c",
+                              "touch #{BASH_ENV_PATH} && test -x /bin/bash")
+      @default_shell = code.zero? ? BASH_SHELL : POSIX_SHELL
     end
 
     def cleanup_containers
@@ -361,15 +427,33 @@ module ForgeCIRunner
       workdir = @workdir || "/root/project"
       target = step["path"] ? File.join(workdir, step["path"]) : workdir
       q = ->(s) { Shellwords.escape(s.to_s) }
+      # A GitHub App installation token (private repos) is passed as an env
+      # var on this one exec (the same way step env reaches `docker exec`)
+      # and sent as an HTTP header for the fetch only, so it never lands in
+      # .git/config or any step's environment.
+      fetch = "git -C #{q.call(target)} fetch --depth 1 origin #{q.call(sha)}"
+      if @checkout_token.to_s.empty?
+        env = []
+      else
+        env = ["-e", "FORGE_CI_CHECKOUT_TOKEN=#{@checkout_token}"]
+        fetch = "git -C #{q.call(target)} -c http.extraHeader=\"Authorization: Basic " \
+                "$(printf 'x-access-token:%s' \"$FORGE_CI_CHECKOUT_TOKEN\" | base64 | tr -d '\\n')\" " \
+                "fetch --depth 1 origin #{q.call(sha)}"
+      end
       cmds = [
         "git init #{q.call(target)}",
         "git -C #{q.call(target)} remote add origin #{q.call(repo)} 2>/dev/null || " \
         "git -C #{q.call(target)} remote set-url origin #{q.call(repo)}",
-        "git -C #{q.call(target)} fetch --depth 1 origin #{q.call(sha)}",
+        fetch,
         "git -C #{q.call(target)} checkout #{q.call(sha)}"
       ]
-      log_line("[forge-ci] cloning #{repo} @ #{sha}")
-      stream_exec([@config.docker_bin, "exec", @container, "/bin/sh", "-c", cmds.join(" && ")])
+      log_line("[forge-ci] cloning #{strip_userinfo(repo)} @ #{sha}")
+      stream_exec([@config.docker_bin, "exec", *env, @container, "/bin/sh", "-c", cmds.join(" && ")])
+    end
+
+    # https://user:token@host/x.git -> https://host/x.git (for log lines).
+    def strip_userinfo(url)
+      url.to_s.sub(%r{\A([a-z][a-z0-9+.-]*://)[^/@]*@}i, '\\1')
     end
 
     # --- cache / artifacts / workspaces (object storage is live) ---

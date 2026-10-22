@@ -84,8 +84,12 @@ forge-ci cancel 42          # stop a running pipeline
 ```
 
 Or install the GitHub App and just push (see [DEPLOY.md](DEPLOY.md)).
-Private repos: set `CHECKOUT_REPO_URL` on the runner with a token embedded
-(`https://x-access-token:TOKEN@github.com/org/repo.git`), or use the GitHub App.
+Private repos: with the GitHub App installed, each claim carries a short-lived
+installation token that the runner uses for `checkout` (sent as an HTTP auth
+header, never written to `.git/config` or step environments). Without the App,
+set `CHECKOUT_REPO_URL` on the runner with a token embedded
+(`https://x-access-token:TOKEN@github.com/org/repo.git`) and leave the
+project's `repo_url` empty — a project `repo_url` takes precedence.
 Steps are killed after `STEP_NO_OUTPUT_TIMEOUT` seconds of silence (default
 600; per-step `no_output_timeout:` is honored) and jobs after `JOB_TIMEOUT`
 (default 3600).
@@ -196,7 +200,7 @@ Each part has its own README with setup, API, and env vars:
 | 8 | Contexts/secrets (encrypted at rest, env injection, masking, rotation, fork gating) | ✅ |
 
 Deliberately deferred: `machine`/`macos`/`windows` executors, orb registry,
-dynamic config, `parallelism`/test splitting, cron pipelines, SSH re-run.
+dynamic config, timing-based test splitting, cron pipelines, SSH re-run.
 Full list in [TODO.md](TODO.md).
 
 ## The gem (config compiler)
@@ -333,7 +337,9 @@ Jobs inside each workflow are emitted in **topological order** of their
 | `machine:` / `macos:` executors | ❌ rejected with a clear error (Docker only) |
 | `type: approval` jobs | ❌ rejected with a clear error |
 | Dynamic config (`setup:` workflows) | ❌ not yet supported |
-| Docker layer caching, `parallelism` / test splitting | ❌ not yet supported |
+| `parallelism: N` (N nodes, `CIRCLE_NODE_INDEX`/`TOTAL`, dependents wait for all) | ✅ |
+| `circleci tests glob` / `split --split-by=name\|filesize` / `run` | ✅ (built-in helper in every job container; `timings` falls back to `filesize`) |
+| Docker layer caching | ❌ not yet supported |
 | `filters: tags:` | ⚠️ parsed, ignored with a warning |
 | Missing `workflows:` | ⚠️ implicit `default` workflow with a warning |
 

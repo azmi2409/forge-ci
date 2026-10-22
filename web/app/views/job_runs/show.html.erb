@@ -1,4 +1,4 @@
-<% content_for(:title, "Job #{@job.name} — ForgeCI") %>
+<% content_for(:title, "Job #{@job.display_name} — ForgeCI") %>
 
 <% pipeline = @job.pipeline %>
 <p class="meta">
@@ -7,7 +7,7 @@
   <%= @job.workflow_run.name %>
 </p>
 
-<h1>Job <span class="mono"><%= @job.name %></span></h1>
+<h1>Job <span class="mono"><%= @job.display_name %></span></h1>
 <p>
   <%= status_badge(@job.status) %>
   <span class="meta">
