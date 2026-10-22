@@ -153,6 +153,18 @@ class JobRun < ApplicationRecord
     log_chunks.delete_all
   end
 
+  # Back to pending for a rerun, as if never run: no runner, logs, artifacts
+  # or step results. Deliberately outside the state machine, which only moves
+  # forward. Pipeline#rerun! queues it again once its requires are met.
+  def reset_for_rerun!
+    log_chunks.delete_all
+    artifacts.destroy_all
+    log_blob.purge if log_blob.attached?
+    step_runs.update_all(status: StepRun.statuses.fetch("pending"), exit_code: nil,
+                         started_at: nil, finished_at: nil, updated_at: Time.current)
+    update_columns(status: "pending", claimed_by: nil, claimed_at: nil, heartbeat_at: nil, updated_at: Time.current)
+  end
+
   # --- helpers ---------------------------------------------------------------
 
   def requires_list

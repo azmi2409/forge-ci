@@ -49,6 +49,37 @@ class Pipeline < ApplicationRecord
     self
   end
 
+  # Run a finished pipeline's jobs again, in place (so workspaces and the
+  # commit status carry over): the jobs that didn't succeed, with every node
+  # of a parallel job, or with only_failed: false every job. Jobs whose
+  # requires already succeeded are queued now; the rest wait for them.
+  # Returns the number of jobs reset.
+  def rerun!(only_failed: true)
+    raise ArgumentError, "pipeline #{id} hasn't finished yet" unless terminal?
+
+    reset = 0
+    transaction do
+      workflow_runs.includes(:job_runs).each do |workflow|
+        by_name = workflow.job_runs.group_by(&:name)
+        rerun_names = by_name.keys.select { |name| !only_failed || !by_name[name].all?(&:success?) }
+        next if rerun_names.empty?
+
+        done = by_name.keys - rerun_names
+        rerun_names.each do |name|
+          by_name[name].each do |job|
+            job.reset_for_rerun!
+            job.mark_queued! if job.requires_list.all? { |r| done.include?(r) }
+            reset += 1
+          end
+        end
+        workflow.recompute_status!
+      end
+      recompute_status!
+    end
+    Github::StatusPoster.post_pending(self) if reset.positive?
+    reset
+  end
+
   private
 
   def post_github_status

@@ -26,7 +26,10 @@ Rails.application.routes.draw do
 
   resources :projects, only: %i[index show] do
     resources :pipelines, only: %i[show] do
-      member { post :cancel }
+      member do
+        post :cancel
+        post :rerun
+      end
     end
   end
   resources :job_runs, only: %i[show]
