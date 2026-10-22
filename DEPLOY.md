@@ -157,6 +157,24 @@ EC2 Auto Scaling Group with a minimum of 0. ForgeCI raises a group's desired
 capacity when that class's jobs queue. A runner that has been idle removes
 its own instance, so a scale-in never cuts a job short.
 
+**The quick way:** `runner/aws/create-spot-group.sh` does steps 1–3 with one
+command:
+- it stores the token in SSM;
+- it creates the runner role and instance profile, plus a security group
+  with no inbound rules;
+- it creates the launch template and a Spot group of minimum 0;
+- it prints the `FORGE_CI_AUTOSCALE` value for step 4.
+
+```sh
+AWS_PROFILE=<profile> AWS_REGION=<region> \
+CONTROL_PLANE_URL=https://ci.example.com RUNNER_TOKEN=<token from Settings> \
+  bash runner/aws/create-spot-group.sh
+```
+
+Set `RESOURCE_CLASS=deploy ON_DEMAND=1 MAX_SIZE=1` for an on-demand deploy
+group. The script's header lists its other options. The steps below do the
+same by hand.
+
 1. **Store the runner token** (from Settings) in SSM:
    `aws ssm put-parameter --name /forge-ci/runner-token --type SecureString --value <token>`.
 2. **Create a launch template** for each group. Use Ubuntu, an instance
