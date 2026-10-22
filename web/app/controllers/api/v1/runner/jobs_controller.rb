@@ -12,7 +12,13 @@ module Api
         # resource_class), honoring each project's max_concurrency.
         def claim
           job = JobRun.claim_next!(current_runner_token, requested_resource_class: params[:resource_class].to_s)
-          return render json: { error: "no claimable jobs right now" }, status: :unprocessable_entity unless job
+          unless job
+            # `upcoming`: this runner's class has jobs waiting on earlier ones;
+            # a runner with idle shutdown stays up for them.
+            klass = current_runner_token.resource_class || params[:resource_class].presence
+            return render json: { error: "no claimable jobs right now", upcoming: JobRun.upcoming_count(klass) },
+                          status: :unprocessable_entity
+          end
 
           render json: job_payload(job), status: :ok
         end

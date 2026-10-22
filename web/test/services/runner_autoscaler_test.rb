@@ -105,4 +105,34 @@ class RunnerAutoscalerTest < ActiveSupport::TestCase
     RunnerAutoscaler.client_factory = nil
     ENV.delete("FORGE_CI_AUTOSCALE")
   end
+
+  def with_warm(classes)
+    old = ENV["FORGE_CI_AUTOSCALE_WARM"]
+    ENV["FORGE_CI_AUTOSCALE_WARM"] = classes
+    yield
+  ensure
+    old.nil? ? ENV.delete("FORGE_CI_AUTOSCALE_WARM") : ENV["FORGE_CI_AUTOSCALE_WARM"] = old
+  end
+
+  test "a warm class starts its runner for jobs still waiting on earlier ones" do
+    job("spot", "running")
+    job("deploy", "pending") # waits for the checks
+    with_warm("deploy") do
+      autoscaler, asg = scaler("spot=ci-spot:4,deploy=ci-deploy:1", { "ci-spot" => 1, "ci-deploy" => 0 })
+      assert_equal({ "ci-deploy" => 1 }, autoscaler.call)
+      assert_equal [["ci-deploy", 1, false]], asg.sets
+    end
+  end
+
+  test "without the warm setting pending jobs don't count, and old pending jobs never do" do
+    job("deploy", "pending")
+    autoscaler, = scaler("deploy=ci-deploy:1", { "ci-deploy" => 0 })
+    assert_equal({}, autoscaler.call)
+
+    JobRun.update_all(created_at: 3.hours.ago)
+    with_warm("deploy") do
+      autoscaler, = scaler("deploy=ci-deploy:1", { "ci-deploy" => 0 })
+      assert_equal({}, autoscaler.call, "a pipeline stuck for hours doesn't keep booting runners")
+    end
+  end
 end

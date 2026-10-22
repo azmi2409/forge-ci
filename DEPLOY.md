@@ -187,6 +187,9 @@ its own instance, so a scale-in never cuts a job short.
    credentials need `autoscaling:DescribeAutoScalingGroups` and
    `autoscaling:SetDesiredCapacity` on those groups.
 
+To have a class's runner boot while the earlier jobs run, for example the
+deploy runner during the checks, set `FORGE_CI_AUTOSCALE_WARM=deploy`.
+
 The first job after an idle period waits 1–3 minutes for an instance to boot.
 If you use another cloud or your own autoscaler, `GET /api/v1/queue` (admin
 token) returns the queued and running jobs per class.

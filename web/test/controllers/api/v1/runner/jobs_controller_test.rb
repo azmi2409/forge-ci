@@ -65,6 +65,15 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_not json_body.key?("variables")
   end
 
+  test "an empty claim says how many jobs of the runner's class are on the way" do
+    3.times { post "/api/v1/runner/jobs/claim", headers: auth } # takes everything queued now
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :unprocessable_entity
+    expected = JobRun.pending.where(resource_class: "medium").count
+    assert_operator expected, :>, 0, "the fixture pipeline has jobs waiting on build"
+    assert_equal expected, json_body["upcoming"]
+  end
+
   test "claim returns 422 when nothing is claimable" do
     post "/api/v1/runner/jobs/claim", headers: auth
     assert_response :ok # first claim took build

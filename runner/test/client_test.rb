@@ -34,6 +34,14 @@ class ClientTest < Minitest::Test
     @server.stub("POST", "/api/v1/runner/jobs/claim", "422",
                  { "error" => "nothing claimable" })
     assert_nil @client.claim_job("medium")
+    assert_equal 0, @client.upcoming
+  end
+
+  def test_claim_remembers_upcoming_jobs
+    @server.stub("POST", "/api/v1/runner/jobs/claim", "422",
+                 { "error" => "nothing claimable", "upcoming" => 2 })
+    assert_nil @client.claim_job("deploy")
+    assert_equal 2, @client.upcoming
   end
 
   def test_claim_raises_on_401
