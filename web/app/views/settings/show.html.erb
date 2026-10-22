@@ -76,7 +76,7 @@
         <div class="inline-fields" style="margin-bottom: 12px">
           <div class="form-row">
             <label class="field-label" for="runner-class">Resource class (optional)</label>
-            <input class="field" type="text" id="runner-class" placeholder="e.g. spot or deploy; empty serves jobs without one" autocapitalize="none" spellcheck="false">
+            <input class="field" type="text" id="runner-class" placeholder="e.g. spot or deploy; empty claims any job" autocapitalize="none" spellcheck="false">
           </div>
           <div class="form-row">
             <label class="field-label" for="runner-idle">Stop when idle for (seconds, optional)</label>
@@ -88,6 +88,7 @@
           <button type="button" class="button-secondary" data-copy="install-command">Copy</button>
         </div>
         <p class="field-hint">Contains the runner token: anyone with it can run your jobs. Scaling to zero on AWS is in the <a class="text-link" href="https://github.com/azmi2409/forge-ci/blob/main/DEPLOY.md#scale-runners-to-zero-aws">deploy guide</a>.</p>
+        <p class="field-hint">To run jobs on this server instead, set <code>RUNNERS=1</code> in its environment and restart it with <code>docker compose up -d</code>.</p>
       <% end %>
     </div>
     <% if @queue.any? %>

@@ -66,9 +66,18 @@ with no class. A runner installed without `--class` claims any job.
 For example, run checks on Spot machines (`--class spot`) and deploys on an
 on-demand machine (`--class deploy`).
 
-To run a runner on the server itself, use
-`docker compose --profile runner up -d`. It needs the host's Docker socket,
-which Coolify doesn't allow.
+### Or run jobs on the server itself
+
+For a single machine, skip the install command: add `RUNNERS=1` to `.env`
+(or Coolify's environment) and run `docker compose up -d` again. Each runner
+container uses the server's Docker socket and the generated token, so there
+is nothing else to configure. `RUNNERS=2` runs two jobs at a time, and
+`RUNNER_RESOURCE_CLASS=spot` limits them to one class.
+
+Jobs then run on the server next to ForgeCI, and through the socket their
+commands have root on it. Use this for repositories you trust, and give the
+host enough CPU and memory for your jobs. You can still add separate runner
+machines alongside it.
 
 That's it. Push a commit to an installed repository and watch it on the
 Projects page.
