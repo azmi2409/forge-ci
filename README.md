@@ -62,8 +62,9 @@ docker compose logs web | grep -A2 "first admin"   # the admin password
 ```
 
 Nothing to configure: secrets are generated on first boot. Then, in the web
-UI, **Settings → Connect GitHub** and paste the runner command from
-**Settings → Runners** on a machine with Docker. For a real server (HTTPS,
+UI, **Settings → Connect GitHub**. To run jobs on the same machine, use
+`RUNNERS=1 docker compose up -d` (or put `RUNNERS=1` in `.env`); for other
+machines, paste the command from **Settings → Runners**. For a real server (HTTPS,
 Coolify, S3, scaling to zero) see **[DEPLOY.md](DEPLOY.md)**.
 
 ## Use it with your repo

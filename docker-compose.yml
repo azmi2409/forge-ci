@@ -1,8 +1,10 @@
 # ForgeCI: the control plane and its Postgres, plus an optional local runner.
 #
-#   docker compose up -d                    # http://localhost:3000
-#   docker compose logs web | grep password # the first admin's password
-#   docker compose --profile runner up -d   # also run a runner on this machine
+#   docker compose up -d                        # http://localhost:3000
+#   docker compose logs web | grep -A2 "first admin"   # the admin's password
+#
+# To run jobs on this machine too, set RUNNERS=1 (or more) in .env and run
+# `docker compose up -d` again. RUNNERS=0, the default, starts no runner.
 #
 # Nothing needs configuring for a local try-out. Secrets are generated on
 # first boot and kept in the forge-ci-data volume, along with logs, caches
@@ -59,14 +61,16 @@ services:
     networks:
       - forge-ci
 
-  # A runner on this machine, reading the generated token from the shared
-  # volume. It needs the host's Docker socket, which some platforms (Coolify)
-  # don't allow; there, install runners with the command on the Runners page.
+  # Runners on this machine (RUNNERS=1 or more; none by default). They drive
+  # the host's Docker through its socket, so jobs run as sibling containers,
+  # and read the generated runner token from the shared volume. The socket
+  # gives jobs' commands root on this host: only build repositories you trust.
   runner:
-    profiles: ["runner"]
     build:
       context: ./runner
     restart: unless-stopped
+    deploy:
+      replicas: ${RUNNERS:-0}
     depends_on:
       web:
         condition: service_healthy
