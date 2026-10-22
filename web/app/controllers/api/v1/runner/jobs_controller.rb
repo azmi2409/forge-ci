@@ -98,7 +98,21 @@ module Api
                 end
           return nil if url.blank?
 
-          { url: url, sha: pipeline.sha, branch: pipeline.branch }
+          { url: url, sha: pipeline.sha, branch: pipeline.branch,
+            token: checkout_token(pipeline.github_repository) }.compact
+        end
+
+        # Short-lived GitHub App installation token so the runner can clone
+        # private repos. Sent as its own field (never embedded in the URL);
+        # nil when the App isn't configured or GitHub refuses, in which case
+        # public repos still clone anonymously.
+        def checkout_token(github_repository)
+          return nil unless github_repository && ::Github.configured?
+
+          ::Github.client_for(github_repository.github_installation.installation_id).installation_token
+        rescue StandardError => e
+          Rails.logger.warn("[runner] no checkout token for #{github_repository.full_name}: #{e.class}: #{e.message}")
+          nil
         end
       end
     end

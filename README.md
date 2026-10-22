@@ -84,8 +84,12 @@ forge-ci cancel 42          # stop a running pipeline
 ```
 
 Or install the GitHub App and just push (see [DEPLOY.md](DEPLOY.md)).
-Private repos: set `CHECKOUT_REPO_URL` on the runner with a token embedded
-(`https://x-access-token:TOKEN@github.com/org/repo.git`), or use the GitHub App.
+Private repos: with the GitHub App installed, each claim carries a short-lived
+installation token that the runner uses for `checkout` (sent as an HTTP auth
+header, never written to `.git/config` or step environments). Without the App,
+set `CHECKOUT_REPO_URL` on the runner with a token embedded
+(`https://x-access-token:TOKEN@github.com/org/repo.git`) and leave the
+project's `repo_url` empty — a project `repo_url` takes precedence.
 Steps are killed after `STEP_NO_OUTPUT_TIMEOUT` seconds of silence (default
 600; per-step `no_output_timeout:` is honored) and jobs after `JOB_TIMEOUT`
 (default 3600).

@@ -162,6 +162,38 @@ class ExecutorTest < Minitest::Test
     assert_equal 0, ex.commands.count { |c| c[0] == :stream_exec }
   end
 
+  def test_checkout_with_token_uses_auth_header_not_remote_url
+    token = "ghs_installationtoken1234567890"
+    ex = executor("steps" => [{ "type" => "checkout" }],
+                  "repository" => { "url" => "https://github.com/octo/private.git",
+                                    "sha" => "abc123", "token" => token })
+    status, = ex.execute
+    assert_equal "success", status
+    argv = ex.commands.find { |c| c[0] == :stream_exec }[1]
+    assert_includes argv, "FORGE_CI_CHECKOUT_TOKEN=#{token}"
+    script = argv.last
+    assert_includes script, "http.extraHeader"
+    assert_includes script, "remote add origin https://github.com/octo/private.git"
+    refute_includes script, token
+    assert_equal "[REDACTED]", ex.instance_variable_get(:@redactor).redact(token)
+  end
+
+  def test_checkout_without_token_has_no_auth
+    ex = executor("steps" => [{ "type" => "checkout" }],
+                  "repository" => { "url" => "https://github.com/octo/public.git", "sha" => "abc123" })
+    ex.execute
+    argv = ex.commands.find { |c| c[0] == :stream_exec }[1]
+    refute(argv.any? { |a| a.start_with?("FORGE_CI_CHECKOUT_TOKEN") })
+    refute_includes argv.last, "extraHeader"
+  end
+
+  def test_strip_userinfo
+    ex = executor
+    assert_equal "https://github.com/o/r.git",
+                 ex.send(:strip_userinfo, "https://x-access-token:abc@github.com/o/r.git")
+    assert_equal "https://github.com/o/r.git", ex.send(:strip_userinfo, "https://github.com/o/r.git")
+  end
+
   def test_shutdown_flag_cancels_remaining_steps
     ex = executor(
       "steps" => [

@@ -85,7 +85,8 @@ use a plain ordered first-row claim inside the transaction. The claim sets
   "workflow_run_id": 1,
   "project_id": 1,
   "repository": { "url": "https://github.com/acme/demo.git",       // additive & nil-safe: omitted entirely when
-                  "sha": "abc123def456", "branch": "main" } }       // neither the GitHub repo nor project.repo_url is known
+                  "sha": "abc123def456", "branch": "main",          // neither the GitHub repo nor project.repo_url is known
+                  "token": "ghs_..." } }                            // GitHub App installation token; only for App-backed repos
 // Raw Context records are NEVER returned.
 ```
 

@@ -53,7 +53,11 @@ module ForgeCIRunner
       @network = "forge-ci-net-#{@job_id}-#{@suffix}"
       @services = []
       @environment = payload["environment"] || {}
-      @redactor = Redactor.new(@environment, min_length: config.redact_min_length)
+      @checkout_token = payload.dig("repository", "token").to_s if payload["repository"].is_a?(Hash)
+      # The checkout token never enters @environment (steps must not see
+      # it), but it is still redacted from logs like any secret.
+      @redactor = Redactor.new(@environment.merge("__checkout_token" => @checkout_token.to_s),
+                               min_length: config.redact_min_length)
       @streamer = LogStreamer.new(client, @job_id, @redactor,
                                   chunk_size: config.log_chunk_size)
       @workdir = nil
@@ -361,15 +365,33 @@ module ForgeCIRunner
       workdir = @workdir || "/root/project"
       target = step["path"] ? File.join(workdir, step["path"]) : workdir
       q = ->(s) { Shellwords.escape(s.to_s) }
+      # A GitHub App installation token (private repos) is passed as an env
+      # var on this one exec (the same way step env reaches `docker exec`)
+      # and sent as an HTTP header for the fetch only, so it never lands in
+      # .git/config or any step's environment.
+      fetch = "git -C #{q.call(target)} fetch --depth 1 origin #{q.call(sha)}"
+      if @checkout_token.to_s.empty?
+        env = []
+      else
+        env = ["-e", "FORGE_CI_CHECKOUT_TOKEN=#{@checkout_token}"]
+        fetch = "git -C #{q.call(target)} -c http.extraHeader=\"Authorization: Basic " \
+                "$(printf 'x-access-token:%s' \"$FORGE_CI_CHECKOUT_TOKEN\" | base64 | tr -d '\\n')\" " \
+                "fetch --depth 1 origin #{q.call(sha)}"
+      end
       cmds = [
         "git init #{q.call(target)}",
         "git -C #{q.call(target)} remote add origin #{q.call(repo)} 2>/dev/null || " \
         "git -C #{q.call(target)} remote set-url origin #{q.call(repo)}",
-        "git -C #{q.call(target)} fetch --depth 1 origin #{q.call(sha)}",
+        fetch,
         "git -C #{q.call(target)} checkout #{q.call(sha)}"
       ]
-      log_line("[forge-ci] cloning #{repo} @ #{sha}")
-      stream_exec([@config.docker_bin, "exec", @container, "/bin/sh", "-c", cmds.join(" && ")])
+      log_line("[forge-ci] cloning #{strip_userinfo(repo)} @ #{sha}")
+      stream_exec([@config.docker_bin, "exec", *env, @container, "/bin/sh", "-c", cmds.join(" && ")])
+    end
+
+    # https://user:token@host/x.git -> https://host/x.git (for log lines).
+    def strip_userinfo(url)
+      url.to_s.sub(%r{\A([a-z][a-z0-9+.-]*://)[^/@]*@}i, '\\1')
     end
 
     # --- cache / artifacts / workspaces (object storage is live) ---

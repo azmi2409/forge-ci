@@ -108,8 +108,9 @@ No endpoints invented; nothing else assumed.
 ### Contract gaps (found while building)
 
 1. ~~The claim payload carries no repo URL or checkout token.~~ **Resolved:**
-   the payload now includes `repository: { url, sha, branch }`
-   (`CHECKOUT_REPO_URL` remains as fallback).
+   the payload now includes `repository: { url, sha, branch, token }` —
+   `token` is a GitHub App installation token, present only for App-backed
+   private repos (`CHECKOUT_REPO_URL` remains as fallback).
 2. **The claim payload carries no `project_id`.** The cache API is
    project-scoped (`PUT/GET /api/v1/projects/:id/cache`), so `save_cache`,
    `restore_cache`, `persist_to_workspace`, and `attach_workspace` skip
