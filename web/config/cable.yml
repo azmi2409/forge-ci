@@ -1,0 +1,12 @@
+# Action Cable carries the job page's live log notices (JobLogChannel).
+# Production uses Postgres LISTEN/NOTIFY on the app database, so web and
+# worker processes reach every subscriber with nothing extra to run. A
+# non-Postgres DATABASE_URL (local SQLite tries) falls back to in-process.
+development:
+  adapter: async
+
+test:
+  adapter: test
+
+production:
+  adapter: <%= ENV["DATABASE_URL"].to_s.start_with?("postgres") ? "postgresql" : "async" %>

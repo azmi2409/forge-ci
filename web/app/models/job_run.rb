@@ -70,7 +70,10 @@ class JobRun < ApplicationRecord
     update!(attrs.merge(status: new_status))
     # Durable log store: once terminal, the blob holds the final log and the
     # ingestion rows are dropped (see #finalize_log_blob!).
-    finalize_log_blob! if TERMINAL_STATUSES.include?(new_status)
+    return unless TERMINAL_STATUSES.include?(new_status)
+
+    finalize_log_blob!
+    JobLogChannel.notify(id, event: "done", status: new_status)
   end
 
   # "test" or, for a parallel job, "test [2/4]" (1-based for people).
@@ -110,13 +113,13 @@ class JobRun < ApplicationRecord
         created_at: Time.current, updated_at: Time.current },
       unique_by: :index_log_chunks_on_job_run_id_and_seq
     )
-    rebuild_log_blob!
+    # The rows are the durable store until the job finishes; the blob is
+    # written once then (finalize_log_blob!), not on every chunk.
+    JobLogChannel.notify(id, event: "chunk", seq: seq.to_i)
   end
 
   # Concatenate all chunks in seq order into the blob, replacing any
-  # previous blob. Called on every chunk ingest; chatty jobs re-upload the
-  # blob per chunk — correct for v1, and a documented candidate for a
-  # delta-append optimization later.
+  # previous blob. Called once, when the job finishes.
   def rebuild_log_blob!
     text = log_chunks.order(:seq).map(&:chunk).join
     log_blob.attach(
@@ -138,12 +141,21 @@ class JobRun < ApplicationRecord
     end
   end
 
-  def log_chunk_list
-    rows = log_chunks.order(:seq).map { |c| { seq: c.seq, chunk: c.chunk } }
-    return rows if rows.any?
-    return [{ seq: 0, chunk: stored_log_text }] if log_blob.attached?
+  # Chunks after +after+ (all by default). Once the job has finished the
+  # rows are gone and the whole log comes back as one chunk; callers that
+  # pass +after+ should replace what they have when #log_complete? is true.
+  def log_chunk_list(after: nil)
+    rows = log_chunks.order(:seq)
+    rows = rows.where("seq > ?", after.to_i) unless after.nil?
+    rows = rows.map { |c| { seq: c.seq, chunk: c.chunk } }
+    return rows if rows.any? || !log_complete?
 
-    []
+    [{ seq: 0, chunk: stored_log_text }]
+  end
+
+  # The log lives in the blob: the job finished and its rows were dropped.
+  def log_complete?
+    log_blob.attached? && !log_chunks.exists?
   end
 
   # The finished log from storage. Downloads come back as binary

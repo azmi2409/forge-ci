@@ -69,7 +69,8 @@ module ForgeCIRunner
       @redactor = Redactor.new(@environment.merge("__checkout_token" => @checkout_token.to_s),
                                min_length: config.redact_min_length)
       @streamer = LogStreamer.new(client, @job_id, @redactor,
-                                  chunk_size: config.log_chunk_size)
+                                  chunk_size: config.log_chunk_size,
+                                  flush_interval: config.log_flush_interval)
       @workdir = nil
       @project_id = payload["project_id"]
       @workflow_run_id = payload["workflow_run_id"]
@@ -96,6 +97,7 @@ module ForgeCIRunner
       @cancel_check = cancel_check
       @job_deadline = @config.job_timeout.to_f.positive? ? monotonic + @config.job_timeout : nil
 
+      @streamer.start
       begin
         log_line("[forge-ci] starting job ##{@job_id} " \
                  "(#{@payload["name"]}, sha=#{@payload.dig("pipeline", "sha")})")
@@ -122,7 +124,7 @@ module ForgeCIRunner
         log_line("[forge-ci] ERROR: #{e.class}: #{e.message}")
         failed = true
       ensure
-        @streamer.flush
+        @streamer.close
         cleanup_containers
       end
 

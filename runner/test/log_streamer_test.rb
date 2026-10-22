@@ -86,4 +86,27 @@ class LogStreamerTest < Minitest::Test
     total = client.chunks.map { |c| c[2] }.join
     assert_equal 4 * 25, total.scan(/t\dline/).length
   end
+
+  def test_flusher_sends_partial_output_without_waiting_for_a_full_chunk
+    client = FakeLogClient.new
+    redactor = ForgeCIRunner::Redactor.new({})
+    s = ForgeCIRunner::LogStreamer.new(client, 42, redactor, chunk_size: 65_536, flush_interval: 0.05).start
+    s.write("running test 1\n")
+    deadline = Time.now + 2
+    sleep 0.01 until client.chunks.any? || Time.now > deadline
+    assert_equal [[42, 0, "running test 1\n"]], client.chunks, "sent within the flush interval"
+
+    s.write("done\n")
+    s.close
+    assert_equal ["running test 1\n", "done\n"], client.chunks.map(&:last)
+    assert_equal [0, 1], client.chunks.map { |c| c[1] }
+  end
+
+  def test_close_without_start_just_flushes
+    client = FakeLogClient.new
+    s = streamer(client, chunk_size: 100)
+    s.write("tail")
+    s.close
+    assert_equal [[42, 0, "tail"]], client.chunks
+  end
 end

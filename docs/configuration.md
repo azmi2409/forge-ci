@@ -46,6 +46,7 @@ first boot and kept in `secrets.yml` in the data directory.
 | `MAX_IDLE_INTERVAL` | no | `60` | Idle backoff cap, seconds |
 | `HEARTBEAT_INTERVAL` | no | `15` | Heartbeat interval while running (server reclaims after 120s) |
 | `LOG_CHUNK_SIZE` | no | `65536` | Bytes per log chunk |
+| `LOG_FLUSH_INTERVAL` | no | `1` | Send buffered output at least this often (seconds), so the job page shows it live |
 | `CHECKOUT_REPO_URL` | no | — | Fallback git URL for `checkout` (the claim payload's `repository.url` is preferred) |
 | `REDACT_MIN_LENGTH` | no | `8` | Env values shorter than this are not redacted from logs |
 | `DOCKER_BIN` | no | `docker` | Path to the docker CLI |
