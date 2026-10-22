@@ -5,10 +5,16 @@
 # can claim them. Runs every 60s; a job is stale after 120s without a
 # heartbeat — see JobRun::RECLAIM_INTERVAL / JobRun::STALE_HEARTBEAT_AFTER.
 # Both thresholds are constants so they can be tuned in one place.
+#
+# scale_runners raises runner Auto Scaling Groups when jobs queue; it does
+# nothing unless FORGE_CI_AUTOSCALE is set (see DEPLOY.md).
 production:
   reclaim_stale_jobs:
     class: ReclaimStaleJobsJob
     schedule: every minute
+  scale_runners:
+    class: ScaleRunnersJob
+    schedule: every 30 seconds
   purge_old_artifacts:
     class: PurgeOldArtifactsJob
     schedule: every day at 3am
@@ -17,6 +23,9 @@ development:
   reclaim_stale_jobs:
     class: ReclaimStaleJobsJob
     schedule: every minute
+  scale_runners:
+    class: ScaleRunnersJob
+    schedule: every 30 seconds
   purge_old_artifacts:
     class: PurgeOldArtifactsJob
     schedule: every day at 3am

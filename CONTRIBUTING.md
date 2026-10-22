@@ -36,6 +36,7 @@ this guide is all you need to get a change merged.
 | `lib/`, `exe/`, `test/` | The `forge-ci` gem: config compiler and CLI (stdlib only) |
 | `web/` | Rails 8 control plane: API, GitHub App, web UI, background jobs |
 | `runner/` | Docker runner daemon (stdlib only) |
+| `skills/forge-ci/SKILL.md` | The agent skill (`forge-ci skill install`); keep it in step when config support or the CLI changes |
 | `docs/` | Architecture, API, configuration, troubleshooting, README screenshots |
 | `DEPLOY.md`, `TODO.md` | Production deployment guide, remaining work |
 

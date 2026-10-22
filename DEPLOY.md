@@ -197,9 +197,14 @@ Environment=CONTROL_PLANE_URL=https://ci.example.com
 Environment=RUNNER_TOKEN=<shared secret, same as the server's FORGE_CI_RUNNER_TOKEN>
 Environment=RESOURCE_CLASS=medium
 Environment=POLL_INTERVAL=5
+# Scale to zero: stop after 10 idle minutes and remove this instance from its
+# Auto Scaling Group (see "Scale runners to zero" below).
+#Environment=IDLE_SHUTDOWN_AFTER=600
+#Environment=IDLE_SHUTDOWN_COMMAND=/opt/forge-ci-runner/bin/forge-ci-asg-terminate-self
 WorkingDirectory=/opt/forge-ci-runner
 ExecStart=/usr/bin/ruby /opt/forge-ci-runner/bin/forge-ci-runner
-Restart=always
+# on-failure, not always: an idle shutdown exits 0 and must stay stopped.
+Restart=on-failure
 RestartSec=10
 
 [Install]
@@ -227,6 +232,65 @@ puts raw  # save it — only the digest is stored
 
 Scale by adding hosts. A crashed runner simply stops heartbeating and its job
 is reclaimed after 120s.
+
+### Scale runners to zero (AWS)
+
+Runners can cost nothing while nobody is pushing. Each resource class gets an
+EC2 Auto Scaling Group with a minimum of 0. The control plane raises a
+group's desired capacity when jobs of that class queue, and an idle runner
+removes its own instance when it has had no work for a while.
+
+Scaling down is always done by the runner, after it has stopped claiming, so
+a scale-in never cuts a job short. The control plane only ever scales up.
+
+**1. Store the runner token in SSM** so it isn't in the launch template:
+
+```sh
+aws ssm put-parameter --name /forge-ci/runner-token --type SecureString --value "$RUNNER_TOKEN"
+```
+
+**2. Create a launch template per group.** Use Ubuntu 22.04 or 24.04
+(Graviton `t4g`/`c7g` work well) and an instance profile allowing:
+
+- `ssm:GetParameter` on `/forge-ci/runner-token`, plus `kms:Decrypt` for its key;
+- `autoscaling:TerminateInstanceInAutoScalingGroup` on the runner groups;
+- whatever your jobs themselves need (for a deploy runner, its deploy permissions).
+
+For user data, use [`runner/aws/user-data.sh`](runner/aws/user-data.sh) with
+its four settings edited: control plane URL, `RESOURCE_CLASS`, the SSM
+parameter name and `IDLE_SHUTDOWN_AFTER`. It installs Docker, Ruby and the
+AWS CLI, then starts the runner with
+`IDLE_SHUTDOWN_COMMAND=bin/forge-ci-asg-terminate-self`.
+
+**3. Create the Auto Scaling Groups** with minimum 0, desired 0 and a maximum
+of your choice. For interruptible check runners, use a mixed-instances policy
+on Spot. A deploy runner can scale to zero as well, on on-demand instances.
+An idle shutdown never interrupts a job, but a Spot reclaim can.
+
+**4. Tell the control plane about the groups** (on the web and worker
+processes):
+
+```
+FORGE_CI_AUTOSCALE=spot=ci-spot-runners:4,deploy=ci-deploy-runner:1
+FORGE_CI_AUTOSCALE_REGION=ap-southeast-3   # if the groups aren't in AWS_REGION
+```
+
+Each entry is `resource_class=asg-name[:max[:jobs_per_instance]]`. Jobs with
+no `resource_class` count toward the first entry. The control plane's AWS
+credentials (the same `AWS_*` variables as S3) need
+`autoscaling:DescribeAutoScalingGroups` and `autoscaling:SetDesiredCapacity`
+on those groups.
+
+The `scale_runners` job checks every 30 seconds. It raises a group to cover
+that class's queued and running jobs (one instance per `jobs_per_instance`
+jobs, capped at `max`) and never lowers it.
+
+**What to expect:**
+- **Cold start:** the first job after an idle period waits for an instance to
+  boot and pull its image, typically 1–3 minutes. Later jobs reuse the warm
+  runner until it has been idle for `IDLE_SHUTDOWN_AFTER`.
+- **Another cloud or your own autoscaler:** `GET /api/v1/queue` (admin token)
+  returns queued and running counts per resource class for it to act on.
 
 ## 5. GitHub App
 

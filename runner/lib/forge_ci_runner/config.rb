@@ -25,13 +25,19 @@ module ForgeCIRunner
   #                        `no_output_timeout:` overrides it; 0 disables)
   #   JOB_TIMEOUT          wall-clock seconds a whole job may run (default: 3600;
   #                        0 disables)
+  #   IDLE_SHUTDOWN_AFTER  seconds without a job after which the runner stops
+  #                        claiming, runs IDLE_SHUTDOWN_COMMAND and exits
+  #                        (default: 0, never). For scale-to-zero groups.
+  #   IDLE_SHUTDOWN_COMMAND shell command run once on idle shutdown, e.g.
+  #                        bin/forge-ci-asg-terminate-self (optional)
   class Config
     class Error < StandardError; end
 
     attr_reader :control_plane_url, :runner_token, :resource_class,
                 :poll_interval, :max_idle_interval, :heartbeat_interval,
                 :log_chunk_size, :checkout_repo_url, :redact_min_length,
-                :docker_bin, :step_no_output_timeout, :job_timeout
+                :docker_bin, :step_no_output_timeout, :job_timeout,
+                :idle_shutdown_after, :idle_shutdown_command
 
     def self.from_env(env = ENV)
       new(
@@ -46,7 +52,9 @@ module ForgeCIRunner
         redact_min_length: (env["REDACT_MIN_LENGTH"] || 8).to_i,
         docker_bin: env["DOCKER_BIN"] || "docker",
         step_no_output_timeout: (env["STEP_NO_OUTPUT_TIMEOUT"] || 600).to_f,
-        job_timeout: (env["JOB_TIMEOUT"] || 3600).to_f
+        job_timeout: (env["JOB_TIMEOUT"] || 3600).to_f,
+        idle_shutdown_after: (env["IDLE_SHUTDOWN_AFTER"] || 0).to_f,
+        idle_shutdown_command: env["IDLE_SHUTDOWN_COMMAND"]
       )
     end
 
@@ -60,7 +68,8 @@ module ForgeCIRunner
                    heartbeat_interval: 15.0, log_chunk_size: 65_536,
                    checkout_repo_url: nil, redact_min_length: 8,
                    docker_bin: "docker", step_no_output_timeout: 600.0,
-                   job_timeout: 3600.0)
+                   job_timeout: 3600.0, idle_shutdown_after: 0.0,
+                   idle_shutdown_command: nil)
       raise Error, "CONTROL_PLANE_URL is required" if control_plane_url.to_s.empty?
       if runner_token.to_s.empty?
         raise Error, "RUNNER_TOKEN is required — set it to the same secret as " \
@@ -79,6 +88,8 @@ module ForgeCIRunner
       @docker_bin = docker_bin
       @step_no_output_timeout = step_no_output_timeout
       @job_timeout = job_timeout
+      @idle_shutdown_after = idle_shutdown_after
+      @idle_shutdown_command = idle_shutdown_command
     end
   end
 end

@@ -298,4 +298,37 @@ class CLITest < Minitest::Test
       assert_match(/canceled/, out)
     end
   end
+
+  # -- skill -------------------------------------------------------------------
+
+  def test_skill_show_prints_the_skill
+    status, out, _err = run_cli("skill", "show")
+    assert_equal 0, status
+    assert_match(/\A---\nname: forge-ci\n/, out)
+  end
+
+  def test_skill_install_writes_and_refuses_to_overwrite
+    Dir.mktmpdir do |dir|
+      skills = File.join(dir, ".claude", "skills")
+      status, out, = run_cli("skill", "install", "--dir", skills)
+      assert_equal 0, status
+      target = File.join(skills, "forge-ci", "SKILL.md")
+      assert_equal File.read(ForgeCI::CLI::SKILL_SOURCE, encoding: "UTF-8"), File.read(target, encoding: "UTF-8")
+      assert_match(/installed/, out)
+
+      File.write(target, "my notes")
+      status, _out, err = run_cli("skill", "install", "--dir", skills)
+      assert_equal 1, status
+      assert_match(/already exists/, err)
+      assert_equal "my notes", File.read(target)
+
+      assert_equal 0, run_cli("skill", "install", "--dir", skills, "--force").first
+      refute_equal "my notes", File.read(target)
+    end
+  end
+
+  def test_skill_without_subcommand_is_a_usage_error
+    assert_equal 2, run_cli("skill").first
+    assert_equal 2, run_cli("skill", "nope").first
+  end
 end

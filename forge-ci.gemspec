@@ -20,6 +20,6 @@ Gem::Specification.new do |spec|
   spec.bindir = "exe"
   spec.executables = ["forge-ci"]
 
-  spec.files = Dir["lib/**/*.rb", "exe/forge-ci", "MIT-LICENSE", "README.md"]
+  spec.files = Dir["lib/**/*.rb", "exe/forge-ci", "skills/**/*.md", "MIT-LICENSE", "README.md"]
   spec.require_paths = ["lib"]
 end

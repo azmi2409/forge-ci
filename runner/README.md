@@ -97,6 +97,8 @@ if `docker info` fails.
 | `CHECKOUT_REPO_URL` | no | — | Git URL for `checkout`; may embed a token: `https://x-access-token:TOKEN@github.com/org/repo.git` |
 | `REDACT_MIN_LENGTH` | no | `8` | Env values shorter than this are not redacted |
 | `DOCKER_BIN` | no | `docker` | Path to the docker CLI |
+| `IDLE_SHUTDOWN_AFTER` | no | `0` (never) | Seconds without a job after which the runner stops claiming, runs `IDLE_SHUTDOWN_COMMAND` and exits (scale to zero) |
+| `IDLE_SHUTDOWN_COMMAND` | no | — | Shell command run once on idle shutdown; `bin/forge-ci-asg-terminate-self` removes this EC2 instance from its Auto Scaling Group |
 
 ## Control-plane contract
 

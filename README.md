@@ -19,6 +19,7 @@
 <p align="center">
   <a href="#quickstart">Quickstart</a> ·
   <a href="#use-it-with-your-repo">Use it with your repo</a> ·
+  <a href="#agent-skills">Agent skills</a> ·
   <a href="#supported-subset-vs-circleci">Compatibility</a> ·
   <a href="DEPLOY.md">Deploy</a> ·
   <a href="docs/">Docs</a> ·
@@ -33,7 +34,7 @@ commit statuses go back to the pull request. Runners need no inbound ports,
 and there's no proprietary control plane.
 
 **Status: MVP complete.** All 8 planned components are built and tested
-(355 tests across the compiler, control plane and runner, all green). See
+(371 tests across the compiler, control plane and runner, all green). See
 [TODO.md](TODO.md) for what's left.
 
 ## Highlights
@@ -54,6 +55,11 @@ and there's no proprietary control plane.
   and never given to pull requests from forks.
 - **GitHub native.** A GitHub App starts pipelines on push and pull request,
   clones private repos with short-lived tokens and posts commit statuses.
+- **Scale to zero.** Idle runners remove themselves and the control plane
+  scales Auto Scaling Groups back up when jobs queue, so runners cost
+  nothing while nobody is pushing.
+- **Agent-ready.** A bundled skill teaches Claude Code and other coding
+  agents how to write, validate and run your pipeline.
 - **Boring technology.** A stdlib-only Ruby gem and runner, one Rails 8 app,
   Postgres and S3. Nothing exotic to operate.
 
@@ -161,6 +167,64 @@ Runners hold no state. A runner that dies stops heartbeating and its job goes
 back in the queue after 120s, so you scale by adding hosts. Steps are killed
 after `STEP_NO_OUTPUT_TIMEOUT` seconds without output (default 600; a step's
 `no_output_timeout:` wins) and jobs after `JOB_TIMEOUT` (default 3600).
+
+### Scale runners to zero
+
+Runners don't need to run all day. Put each resource class in an AWS Auto
+Scaling Group with a minimum of 0:
+- **Scaling down:** a runner with `IDLE_SHUTDOWN_AFTER=600` that has had no job
+  for 10 minutes stops claiming and removes its own instance. A job is never
+  cut short.
+- **Scaling up:** with `FORGE_CI_AUTOSCALE=spot=ci-spot-runners:4,deploy=ci-deploy-runner:1`
+  set, the control plane raises a group as soon as jobs of that class queue.
+
+The first job after a quiet period waits 1–3 minutes for an instance to boot.
+Setup, IAM and a ready-made launch-template script are in
+[DEPLOY.md](DEPLOY.md#scale-runners-to-zero-aws). Using another cloud?
+`GET /api/v1/queue` gives queue depth per class for your own autoscaler.
+
+## Agent skills
+
+ForgeCI ships a skill for coding agents:
+[`skills/forge-ci/SKILL.md`](skills/forge-ci/SKILL.md). It tells an agent
+how to write `.circleci/config.yml` for ForgeCI (what's supported, absolute
+paths, resource classes, test splitting), validate it before committing, and
+start, watch and cancel pipelines. Install it in each repository that ForgeCI
+builds.
+
+**Claude Code.** Install it as a project skill, so everyone working in the
+repository gets it, and commit it:
+
+```sh
+forge-ci skill install                    # writes .claude/skills/forge-ci/SKILL.md
+git add .claude/skills/forge-ci && git commit -m "Add the forge-ci agent skill"
+```
+
+- **Just for you, in every repository:** `forge-ci skill install --dir ~/.claude/skills`.
+- **Without the gem installed:**
+
+  ```sh
+  mkdir -p .claude/skills/forge-ci
+  curl -fsSL https://raw.githubusercontent.com/azmi2409/forge-ci/main/skills/forge-ci/SKILL.md \
+    -o .claude/skills/forge-ci/SKILL.md
+  ```
+
+Claude loads it whenever a task touches the pipeline, or when you type
+`/forge-ci`.
+
+**Other agents** (Codex, Cursor, GitHub Copilot and anything else that reads
+an instructions file): append the skill to that file.
+
+```sh
+forge-ci skill show >> AGENTS.md                         # Codex, and agents that read AGENTS.md
+forge-ci skill show >> .github/copilot-instructions.md   # GitHub Copilot
+```
+
+**Make it yours.** The skill ends with a "Repository notes" section. Write
+that repository's rules there: its resource classes, contexts, which job
+deploys, and what an agent must not change without asking. Agents read them
+with everything else. `forge-ci skill install --force` updates the skill but
+replaces the file, so copy your notes back in afterwards.
 
 ## Example
 
@@ -270,7 +334,8 @@ Deep dive: [docs/architecture.md](docs/architecture.md)
 |---|---|---|
 | `/` (this dir) | `forge-ci` gem: config **compiler** + CLI | 1 |
 | `web/` | Rails control plane: intake, claim API, GitHub App, log streaming, cache/artifacts, contexts | 2, 3, 4, 6, 7, 8 |
-| `runner/` | Docker runner daemon (stdlib-only Ruby) | 5 |
+| `runner/` | Docker runner daemon (stdlib-only Ruby), systemd unit, AWS launch-template script | 5 |
+| `skills/` | The `forge-ci` agent skill for Claude Code and other coding agents | — |
 | `docs/` | Architecture, API, configuration, troubleshooting, screenshots | — |
 | `TODO.md` | Remaining work, honestly listed | — |
 | `DEPLOY.md` | Production deployment guide | — |
@@ -355,6 +420,14 @@ forge-ci compile .circleci/config.yml --branch main --sha abc123 --number 42
 
 # Compact JSON output:
 forge-ci compile .circleci/config.yml --json
+
+# Start a pipeline on a server, wait for it, cancel one:
+forge-ci trigger .circleci/config.yml --project owner/repo --wait
+forge-ci cancel 42
+
+# Install the agent skill (see "Agent skills"), or print it:
+forge-ci skill install [--dir .claude/skills] [--force]
+forge-ci skill show
 ```
 
 On failure, each error goes to stderr with its YAML line number:

@@ -6,6 +6,7 @@ require "net/http"
 require "openssl"
 require "uri"
 require "open3"
+require "fileutils"
 
 module ForgeCI
   # Command-line interface for forge-ci.
@@ -42,6 +43,12 @@ module ForgeCI
                                                     exits 1 if it did not succeed)
         cancel <pipeline-id> [--url URL] [--token T]
                                                     cancel a running pipeline
+        skill install [--dir DIR] [--force]         install the forge-ci agent
+                                                    skill (default DIR:
+                                                    .claude/skills, for Claude
+                                                    Code in this repository)
+        skill show                                  print the skill, e.g. to add
+                                                    it to AGENTS.md
 
       Options:
         -h, --help      show this help and exit
@@ -69,11 +76,15 @@ module ForgeCI
       when "compile" then compile_command(argv)
       when "trigger" then trigger_command(argv)
       when "cancel" then cancel_command(argv)
+      when "skill" then skill_command(argv)
       when "-h", "--help", nil then help
       when "-v", "--version" then version
       else usage_error("unknown command #{command.inspect}")
       end
     end
+
+    # The agent skill shipped with the gem (skills/forge-ci/SKILL.md).
+    SKILL_SOURCE = File.expand_path("../../skills/forge-ci/SKILL.md", __dir__)
 
     private
 
@@ -382,6 +393,44 @@ module ForgeCI
     # interpolator still substitutes it.
     def coerce_number(value)
       value.match?(/\A\d+\z/) ? Integer(value, 10) : value
+    end
+
+    # -- forge-ci skill install|show --------------------------------------------
+
+    def skill_command(argv)
+      case argv.shift
+      when "show"
+        @out.write File.read(SKILL_SOURCE, encoding: "UTF-8")
+        0
+      when "install" then skill_install(argv)
+      else usage_error("skill needs a subcommand: install or show")
+      end
+    end
+
+    def skill_install(argv)
+      options = { dir: File.join(".claude", "skills"), force: false }
+      parser = OptionParser.new do |opts|
+        opts.banner = "Usage: forge-ci skill install [--dir DIR] [--force]"
+        opts.on("--dir DIR", "skills directory (default .claude/skills)") { |v| options[:dir] = v }
+        opts.on("--force", "replace an existing forge-ci skill") { options[:force] = true }
+      end
+      parser.parse!(argv)
+      return usage_error("unexpected argument #{argv.first.inspect}") if argv.any?
+
+      target = File.join(options[:dir], "forge-ci", "SKILL.md")
+      if File.exist?(target) && !options[:force]
+        @err.puts "forge-ci: #{target} already exists; pass --force to replace it " \
+                  "(your \"Repository notes\" would be lost)"
+        return 1
+      end
+
+      FileUtils.mkdir_p(File.dirname(target))
+      File.write(target, File.read(SKILL_SOURCE, encoding: "UTF-8"))
+      @out.puts "forge-ci: installed the forge-ci skill at #{target}"
+      @out.puts "forge-ci: add your repository's rules under \"Repository notes\" at the end"
+      0
+    rescue OptionParser::ParseError => e
+      usage_error(e.message)
     end
   end
 end

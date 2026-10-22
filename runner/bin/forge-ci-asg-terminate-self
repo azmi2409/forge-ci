@@ -1,0 +1,21 @@
+#!/bin/sh
+# Terminate this EC2 instance and lower its Auto Scaling Group's desired
+# capacity by one, so the group shrinks instead of replacing it. Meant as the
+# runner's IDLE_SHUTDOWN_COMMAND on scale-to-zero runner hosts.
+#
+# Needs the AWS CLI and an instance role allowing
+# autoscaling:TerminateInstanceInAutoScalingGroup on the runner group.
+set -eu
+
+imds="http://169.254.169.254/latest"
+token=$(curl -fsS -X PUT "$imds/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+meta() { curl -fsS -H "X-aws-ec2-metadata-token: $token" "$imds/meta-data/$1"; }
+
+instance_id=$(meta instance-id)
+region=$(meta placement/region)
+
+echo "forge-ci: terminating idle runner instance $instance_id ($region)"
+aws autoscaling terminate-instance-in-auto-scaling-group \
+  --region "$region" \
+  --instance-id "$instance_id" \
+  --should-decrement-desired-capacity
