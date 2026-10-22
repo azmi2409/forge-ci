@@ -31,4 +31,16 @@ class PipelinesControllerTest < ActionDispatch::IntegrationTest
     assert @pipeline.reload.running?
     assert_equal %w[pending pending queued], @pipeline.job_runs.map(&:status).sort
   end
+
+  test "the job page shows a finished job's non-ASCII log" do
+    job = @pipeline.job_runs.find_by!(name: "build")
+    job.mark_claimed!(claimed_by: "r")
+    job.mark_running!
+    job.log_chunks.create!(seq: 0, chunk: "✓ selesai — ünïcode\n")
+    job.complete_with_results!(status: "success")
+
+    get "/job_runs/#{job.id}"
+    assert_response :ok
+    assert_includes response.body, "✓ selesai — ünïcode"
+  end
 end

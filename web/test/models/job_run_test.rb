@@ -97,4 +97,24 @@ class JobRunTest < ActiveSupport::TestCase
     JobRun.reclaim_stale!
     assert_equal "queued", stale.reload.status
   end
+
+  test "a finished job's stored log comes back as UTF-8 text, with invalid bytes replaced" do
+    job = build_job(status: "running")
+    job.log_chunks.create!(seq: 0, chunk: "✓ 12 tests passed — sukses ünïcode\n")
+    job.transition_to!("success")
+    job.reload
+    assert job.log_blob.attached?
+
+    [job.log_text, job.log_chunk_list.first[:chunk]].each do |text|
+      assert_equal Encoding::UTF_8, text.encoding
+      assert text.valid_encoding?
+      assert_includes text, "✓ 12 tests passed — sukses ünïcode"
+      assert_includes "#{text}café", "café", "joins with other UTF-8 strings"
+    end
+
+    job.log_blob.attach(io: StringIO.new("ok \xFF end".b), filename: "job.log", content_type: "text/plain")
+    text = job.reload.log_text
+    assert text.valid_encoding?
+    assert_equal "ok \uFFFD end", text
+  end
 end
