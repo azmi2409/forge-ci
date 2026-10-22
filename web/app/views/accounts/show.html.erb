@@ -1,19 +1,42 @@
 <% content_for(:title, "Account — ForgeCI") %>
-<h1>Account</h1>
-<p class="meta">Signed in as <span class="mono"><%= current_user.username %></span> (<%= current_user.role %>)</p>
+<% content_for(:breadcrumbs) do %><%= link_to "Dashboard", projects_path %><%= icon "chevron-right" %><span>Account</span><% end %>
+
+<div class="page-head">
+  <div>
+    <h1>Account</h1>
+    <p class="sub"><span><%= icon "user" %> <span class="mono"><%= current_user.username %></span></span><span class="pill"><%= current_user.role %></span></p>
+  </div>
+</div>
 <%= render "shared/flash" %>
 
-<h2>Change password</h2>
-<%= form_with url: account_path, method: :patch, class: "stack" do %>
-  <label for="current_password">Current password</label>
-  <%= password_field_tag :current_password, nil, id: "current_password", autocomplete: "current-password", required: true %>
-  <label for="password">New password (min <%= User::MIN_PASSWORD_LENGTH %> characters)</label>
-  <%= password_field_tag :password, nil, id: "password", autocomplete: "new-password", required: true %>
-  <label for="password_confirmation">Confirm new password</label>
-  <%= password_field_tag :password_confirmation, nil, id: "password_confirmation", autocomplete: "new-password", required: true %>
-  <button type="submit">Change password</button>
-<% end %>
+<div style="display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-items: start">
+  <section class="card">
+    <div class="card-head"><h2>Change password</h2></div>
+    <div class="card-body">
+      <%= form_with url: account_path, method: :patch do %>
+        <div class="field">
+          <label for="current_password">Current password</label>
+          <%= password_field_tag :current_password, nil, id: "current_password", autocomplete: "current-password", required: true %>
+        </div>
+        <div class="field">
+          <label for="password">New password</label>
+          <%= password_field_tag :password, nil, id: "password", autocomplete: "new-password", required: true %>
+          <div class="hint">At least <%= User::MIN_PASSWORD_LENGTH %> characters.</div>
+        </div>
+        <div class="field">
+          <label for="password_confirmation">Confirm new password</label>
+          <%= password_field_tag :password_confirmation, nil, id: "password_confirmation", autocomplete: "new-password", required: true %>
+        </div>
+        <div class="form-actions"><button type="submit" class="btn-primary">Change password</button></div>
+      <% end %>
+    </div>
+  </section>
 
-<h2>Sessions</h2>
-<p class="meta">Sign out every other browser/device signed in as you.</p>
-<%= button_to "Sign out everywhere else", sign_out_everywhere_account_path, method: :post %>
+  <section class="card">
+    <div class="card-head"><h2>Sessions</h2></div>
+    <div class="card-body">
+      <p class="muted">Sign out every other browser and device signed in as you. This one stays signed in.</p>
+      <%= button_to "Sign out everywhere else", sign_out_everywhere_account_path, method: :post, class: "btn btn-danger" %>
+    </div>
+  </section>
+</div>

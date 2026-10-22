@@ -16,7 +16,7 @@ Rails.application.routes.draw do
 
   # --- Web UI (cookie-session login, see ApplicationController) ------------
 
-  resources :projects, only: %i[index] do
+  resources :projects, only: %i[index show] do
     resources :pipelines, only: %i[show] do
       member { post :cancel }
     end

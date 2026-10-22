@@ -1,3 +1,4 @@
 <% content_for(:title, "New user — ForgeCI") %>
-<h1>New user</h1>
+<% content_for(:breadcrumbs) do %><%= link_to "Dashboard", projects_path %><%= icon "chevron-right" %><%= link_to "Users", users_path %><%= icon "chevron-right" %><span>New user</span><% end %>
+<div class="page-head"><div><h1>New user</h1></div></div>
 <%= render "form", url: users_path, method: :post %>

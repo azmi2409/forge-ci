@@ -27,4 +27,22 @@ class WorkflowRun < ApplicationRecord
       end
     update!(status: new_status) if status != new_status
   end
+
+  # Jobs laid out for the pipeline graph: an array of stages (columns), each
+  # an array of node groups (all JobRuns of one job name, so a parallel job
+  # is one entry). A job's stage is one past the deepest job it requires;
+  # requires that name no job in this workflow are ignored.
+  def stages
+    groups = job_runs.sort_by(&:id).group_by(&:name)
+    depth = {}
+    depth_of = lambda do |name, seen|
+      return depth[name] if depth.key?(name)
+      return 0 if seen.include?(name) # defensive: the compiler rejects cycles
+
+      parents = groups[name].first.requires_list.select { |r| groups.key?(r) }
+      depth[name] = parents.empty? ? 0 : parents.map { |r| depth_of.call(r, seen + [name]) }.max + 1
+    end
+    groups.each_key { |name| depth_of.call(name, []) }
+    groups.group_by { |name, _| depth[name] }.sort.map { |_d, entries| entries.map(&:last) }
+  end
 end

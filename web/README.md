@@ -9,7 +9,7 @@ complete**.
 Component 1 is the [`forge-ci`](https://github.com/azmi2409/forge-ci) config-compiler
 gem, consumed here as a path gem (`gem "forge-ci", path: ".."`).
 
-> **Docs:** [architecture](../docs/architecture.md) · [API](../docs/api.md) · [configuration](../docs/configuration.md) · [troubleshooting](../docs/troubleshooting.md) · [contributing](../docs/contributing.md)
+> **Docs:** [architecture](../docs/architecture.md) · [API](../docs/api.md) · [configuration](../docs/configuration.md) · [troubleshooting](../docs/troubleshooting.md) · [contributing](../CONTRIBUTING.md)
 
 ## Versions used
 

@@ -1,53 +1,101 @@
-# forge-ci
+<p align="center">
+  <img src="web/public/icon.svg" width="72" height="72" alt="ForgeCI logo">
+</p>
 
-[![CI](https://github.com/azmi2409/forge-ci/actions/workflows/ci.yml/badge.svg)](https://github.com/azmi2409/forge-ci/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](MIT-LICENSE)
-[![Ruby](https://img.shields.io/badge/ruby-%3E%3D%203.0-red.svg)](https://www.ruby-lang.org/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](docs/contributing.md)
+<h1 align="center">ForgeCI</h1>
 
-An open-source, **CircleCI-compatible CI/CD system** — pure Ruby, MIT licensed.
+<p align="center">
+  <strong>CircleCI-compatible CI/CD you run yourself.</strong><br>
+  Your <code>.circleci/config.yml</code>, your runners, your storage. Pure Ruby, MIT licensed.
+</p>
 
-**Status: MVP complete.** All 8 planned components are built, tested (292 runs,
-1090 assertions, green), and running from this repo.
+<p align="center">
+  <a href="https://github.com/azmi2409/forge-ci/actions/workflows/ci.yml"><img src="https://github.com/azmi2409/forge-ci/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="MIT-LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://www.ruby-lang.org/"><img src="https://img.shields.io/badge/ruby-%3E%3D%203.0-red.svg" alt="Ruby >= 3.0"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
+</p>
 
-Push code to GitHub → webhook → config compiled → jobs claimed by polling
-runners → executed in Docker → results and commit statuses posted back. No
-inbound ports on runners, no proprietary control plane.
+<p align="center">
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#use-it-with-your-repo">Use it with your repo</a> ·
+  <a href="#supported-subset-vs-circleci">Compatibility</a> ·
+  <a href="DEPLOY.md">Deploy</a> ·
+  <a href="docs/">Docs</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
-## Why forge-ci?
+![The ForgeCI dashboard](docs/images/dashboard.png)
 
-- **CircleCI-compatible config** — existing `.circleci/config.yml` files
-  (v2.1 subset) compile and run; the compiler mirrors CircleCI's own
+Push to GitHub → the webhook arrives → your config is compiled → polling
+runners claim the jobs → each step runs in Docker → logs stream live and
+commit statuses go back to the pull request. Runners need no inbound ports,
+and there's no proprietary control plane.
+
+**Status: MVP complete.** All 8 planned components are built and tested
+(355 tests across the compiler, control plane and runner, all green). See
+[TODO.md](TODO.md) for what's left.
+
+## Highlights
+
+- **Bring your CircleCI config.** `.circleci/config.yml` (v2.1) compiles and
+  runs: executors, commands, parameters, workflows, `requires`, `matrix`,
+  branch filters, contexts. The compiler mirrors CircleCI's own
   `configs/compile` semantics.
-- **Self-hosted, no lock-in** — your runners, your storage, your secrets.
-- **Boring technology** — pure-Ruby gem and runner (stdlib only, no gems),
-  one Rails app, Postgres, S3-compatible storage. Nothing exotic to operate.
-- **Polling runners** — runners need only outbound HTTPS; they work behind
-  NAT and firewalls, and scale by adding hosts.
+- **Runners anywhere.** Runners poll over outbound HTTPS, so they work behind
+  NAT. Route jobs with `resource_class`, for example checks on Spot instances
+  and deploys on an on-demand host.
+- **Parallel test splitting.** `parallelism: N` plus `circleci tests glob`,
+  `split --split-by=name|filesize` and `run`, built into every job container.
+- **The CircleCI runtime you expect.** Bash with `-eo pipefail` by default,
+  `$BASH_ENV` between steps, `CIRCLE_*` variables, step and job timeouts.
+- **Caches, workspaces and artifacts** on S3, with checksum cache keys.
+- **Secrets done carefully.** Contexts are encrypted at rest, masked in logs
+  and never given to pull requests from forks.
+- **GitHub native.** A GitHub App starts pipelines on push and pull request,
+  clones private repos with short-lived tokens and posts commit statuses.
+- **Boring technology.** A stdlib-only Ruby gem and runner, one Rails 8 app,
+  Postgres and S3. Nothing exotic to operate.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/pipeline.png" alt="A pipeline: stages from requires, with a 4-way parallel test job"></td>
+    <td width="50%"><img src="docs/images/job.png" alt="A job: steps, live log and details"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Pipelines laid out in stages from <code>requires</code>, parallel nodes grouped</sub></td>
+    <td align="center"><sub>Jobs with step results and a live log tail</sub></td>
+  </tr>
+</table>
 
 ## Quickstart
 
-**Run the whole stack with Docker Compose** (Postgres, control plane,
-worker, runner; object storage is AWS S3):
+Run the whole stack (Postgres, control plane, worker and a runner) with
+Docker Compose. Object storage is AWS S3, so create a bucket first
+(`aws s3 mb s3://<bucket>`).
 
 ```sh
-cp .env.example .env   # then fill in: secrets + AWS S3 bucket
-openssl rand -hex 32   # → put it in .env as RUNNER_TOKEN (shared runner secret)
+git clone https://github.com/azmi2409/forge-ci && cd forge-ci
+cp .env.example .env     # fill in the S3 bucket + credentials and the secrets
+openssl rand -hex 32     # put it in .env as RUNNER_TOKEN (shared runner secret)
 docker compose up --build -d
-# → http://localhost:3000 (admin / password from .env)
+docker compose up -d runner
+# → http://localhost:3000, sign in with FORGE_CI_UI_USER / FORGE_CI_UI_PASSWORD from .env
 ```
 
-**Or step by step:**
-
-**1. Validate a config anywhere (Ruby ≥ 3.0 only, no Docker):**
+Just want to check a config? The compiler needs only Ruby ≥ 3.0:
 
 ```sh
 gem build forge-ci.gemspec && gem install ./forge-ci-0.1.0.gem
 forge-ci validate .circleci/config.yml
-forge-ci compile .circleci/config.yml --branch main
+forge-ci compile .circleci/config.yml --branch main   # print the compiled jobs
 ```
 
-**2. Run the full system locally** (needs Docker for the runner):
+For production (HTTPS, Postgres, the GitHub App, runners on their own hosts)
+follow **[DEPLOY.md](DEPLOY.md)**.
+
+<details>
+<summary>Run the parts by hand for development</summary>
 
 ```sh
 # Control plane (SQLite fallback for dev; Postgres for production)
@@ -63,9 +111,19 @@ RUNNER_TOKEN="<raw token printed by db:seed>" \
   bin/forge-ci-runner
 ```
 
-## Using it for your CI/CD (no GitHub App needed)
+</details>
 
-Set `FORGE_CI_ADMIN_TOKEN` on the server (`openssl rand -hex 32`), then:
+## Use it with your repo
+
+**With the GitHub App** (recommended): register and install it (see
+[DEPLOY.md](DEPLOY.md#5-github-app)), then push. The first push from a repo
+creates its project, every push and pull request starts a pipeline, and
+results show up as a `forge-ci` commit status. Private repos are cloned with a
+short-lived installation token, sent as an HTTP header only for the fetch, so
+it never reaches `.git/config` or your steps.
+
+**Without the App**, drive it from any CI or script. Set
+`FORGE_CI_ADMIN_TOKEN` on the server (`openssl rand -hex 32`), then:
 
 ```sh
 export FORGE_CI_URL=https://ci.example.com FORGE_CI_ADMIN_TOKEN=...
@@ -76,26 +134,33 @@ curl -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" -H 'Content-Type: applicat
 curl -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" -H 'Content-Type: application/json' \
      -d '{"name":"prod","payload":{"DEPLOY_KEY":"..."}}' $FORGE_CI_URL/api/v1/projects/1/contexts
 
-# every run: compile .circleci/config.yml and start a pipeline for the
-# current git branch/sha; --wait blocks and exits non-zero on failure
+# every run: compile .circleci/config.yml and start a pipeline for the current
+# git branch and commit; --wait blocks and exits non-zero on failure
 forge-ci trigger .circleci/config.yml --project myapp --context prod --wait
-
-forge-ci cancel 42          # stop a running pipeline
+forge-ci cancel 42    # stop a running pipeline
 ```
 
-Or install the GitHub App and just push (see [DEPLOY.md](DEPLOY.md)).
-Private repos: with the GitHub App installed, each claim carries a short-lived
-installation token that the runner uses for `checkout` (sent as an HTTP auth
-header, never written to `.git/config` or step environments). Without the App,
-set `CHECKOUT_REPO_URL` on the runner with a token embedded
-(`https://x-access-token:TOKEN@github.com/org/repo.git`) and leave the
-project's `repo_url` empty — a project `repo_url` takes precedence.
-Steps are killed after `STEP_NO_OUTPUT_TIMEOUT` seconds of silence (default
-600; per-step `no_output_timeout:` is honored) and jobs after `JOB_TIMEOUT`
-(default 3600).
+For private repos without the App, set `CHECKOUT_REPO_URL` on the runner with
+a token embedded (`https://x-access-token:TOKEN@github.com/org/repo.git`) and
+leave the project's `repo_url` empty, since a project `repo_url` takes
+precedence.
 
-Production deployment: **[DEPLOY.md](DEPLOY.md)** · Remaining work:
-**[TODO.md](TODO.md)**
+### Runners and resource classes
+
+Every runner sets `RESOURCE_CLASS`, and a job's `resource_class:` decides
+which runners may claim it (jobs without one go to any runner). With the
+shared `RUNNER_TOKEN`, that's all the setup routing needs:
+
+```yaml
+jobs:
+  test:   { resource_class: spot,   ... }   # cheap, interruptible runners
+  deploy: { resource_class: deploy, ... }   # one on-demand runner with deploy credentials
+```
+
+Runners hold no state. A runner that dies stops heartbeating and its job goes
+back in the queue after 120s, so you scale by adding hosts. Steps are killed
+after `STEP_NO_OUTPUT_TIMEOUT` seconds without output (default 600; a step's
+`no_output_timeout:` wins) and jobs after `JOB_TIMEOUT` (default 3600).
 
 ## Example
 
@@ -103,35 +168,62 @@ Production deployment: **[DEPLOY.md](DEPLOY.md)** · Remaining work:
 # .circleci/config.yml
 version: 2.1
 
-jobs:
-  build:
+executors:
+  ruby:
     docker:
-      - image: cimg/ruby:3.2
+      - image: cimg/ruby:3.3
+      - image: cimg/postgres:16.4   # service container, reachable by its name
+    working_directory: /home/circleci/project
+
+jobs:
+  test:
+    executor: ruby
+    resource_class: spot
+    parallelism: 4
     steps:
       - checkout
-      - run:
-          name: Install dependencies
-          command: bundle install
+      - restore_cache:
+          keys:
+            - gems-v1-{{ checksum "Gemfile.lock" }}
+      - run: bundle config set path vendor/bundle && bundle install
       - save_cache:
           key: gems-v1-{{ checksum "Gemfile.lock" }}
           paths:
             - vendor/bundle
       - run:
-          name: Run tests
-          command: bundle exec rake test
+          name: Run tests (a quarter of the files on each node)
+          command: |
+            circleci tests glob "test/**/*_test.rb" |
+              circleci tests run --split-by=filesize --command="xargs bin/rails test"
       - store_artifacts:
           path: coverage
 
+  deploy:
+    executor: ruby
+    resource_class: deploy
+    steps:
+      - checkout
+      - run: ./bin/deploy
+
 workflows:
-  build-and-test:
+  ci:
     jobs:
-      - build
+      - test
+      - deploy:
+          requires: [test]
+          context: [production]
+          filters:
+            branches:
+              only: [main]
 ```
 
 ```sh
 $ forge-ci validate .circleci/config.yml
 forge-ci: .circleci/config.yml: valid
 ```
+
+Use absolute paths in `working_directory` and cache `paths`: forge-ci expands
+`~` to `/root`, while `cimg` images run as the `circleci` user.
 
 ## Architecture
 
@@ -149,9 +241,9 @@ GitHub ──push/PR webhook──▶ ┌─────────────
                                back to GitHub
 ```
 
-- **Control plane** owns projects, pipelines, workflow/job state machines,
-  the GitHub App, and the polling APIs. Runners never accept inbound
-  connections — they poll and claim work, Buildkite-style.
+- **Control plane** owns projects, pipelines, workflow and job state machines,
+  the GitHub App, the web UI and the polling APIs. Runners never accept
+  inbound connections: they poll and claim work, Buildkite-style.
 - **Runners** are dumb and disposable: claim → `docker run` → stream logs →
   report. Scale by adding hosts.
 - **Config compatibility**: `.circleci/config.yml` (v2.1 subset) is compiled
@@ -168,7 +260,7 @@ Deep dive: [docs/architecture.md](docs/architecture.md)
 | [docs/api.md](docs/api.md) | Full v1 API reference + runner contract checklist |
 | [docs/configuration.md](docs/configuration.md) | Every environment variable, per component |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Common problems and fixes |
-| [docs/contributing.md](docs/contributing.md) | Dev setup, test commands, PR process |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup, tests, UI work, PR process |
 | [DEPLOY.md](DEPLOY.md) | Production deployment guide |
 | [TODO.md](TODO.md) | Remaining work, honestly listed |
 
@@ -179,7 +271,7 @@ Deep dive: [docs/architecture.md](docs/architecture.md)
 | `/` (this dir) | `forge-ci` gem: config **compiler** + CLI | 1 |
 | `web/` | Rails control plane: intake, claim API, GitHub App, log streaming, cache/artifacts, contexts | 2, 3, 4, 6, 7, 8 |
 | `runner/` | Docker runner daemon (stdlib-only Ruby) | 5 |
-| `docs/` | Architecture, API, configuration, troubleshooting, contributing | — |
+| `docs/` | Architecture, API, configuration, troubleshooting, screenshots | — |
 | `TODO.md` | Remaining work, honestly listed | — |
 | `DEPLOY.md` | Production deployment guide | — |
 
@@ -363,17 +455,16 @@ through untouched — checksum expansion is a runner concern.
 ## Development
 
 ```sh
-rake test          # gem suite, fixtures in test/fixtures/
-cd web && bin/rails test
-cd runner && rake test
+rake test                                                  # compiler gem
+cd web && DATABASE_URL="sqlite3:db/test.sqlite3" bin/rails test   # control plane
+cd runner && rake test                                     # runner
 ```
-
-See [docs/contributing.md](docs/contributing.md) for the full guide.
 
 ## Contributing
 
-PRs welcome — against `main`, with tests green. See
-[docs/contributing.md](docs/contributing.md).
+PRs are welcome, against `main` with all three suites green. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions and how to work on
+the UI, and [TODO.md](TODO.md) for where help is needed.
 
 ## License
 

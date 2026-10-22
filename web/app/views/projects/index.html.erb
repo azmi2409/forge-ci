@@ -1,48 +1,82 @@
-<% content_for(:title, "Projects — ForgeCI") %>
+<% content_for(:title, "Dashboard — ForgeCI") %>
+<% content_for(:head) { tag.meta(http_equiv: "refresh", content: "15") } if @stats[:running].positive? %>
 
-<h1>Projects</h1>
-
-<table>
-  <thead>
-    <tr>
-      <th>Name</th>
-      <th>Repo</th>
-      <th>Default branch</th>
-      <th>Max concurrency</th>
-      <th>Pipelines</th>
-    </tr>
-  </thead>
-  <tbody>
-    <% @projects.each do |project| %>
-      <tr>
-        <td><%= project.name %></td>
-        <td class="mono"><%= project.repo_url %></td>
-        <td class="mono"><%= project.default_branch %></td>
-        <td><%= project.max_concurrency %></td>
-        <td><%= project.pipelines.count %></td>
-      </tr>
-    <% end %>
-  </tbody>
-</table>
-
-<% if @projects.empty? %>
-  <p class="note">No projects yet. Create one from the Rails console and POST a pipeline to <span class="mono">/api/v1/projects/:id/pipelines</span> — see README.</p>
+<% content_for(:head) do %>
+<style>
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 28px; }
+  .stat { padding: 16px 18px; }
+  .stat .label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; font-weight: 600; }
+  .stat .value { font-size: 28px; font-weight: 750; letter-spacing: -.02em; margin-top: 4px; }
+  .stat .value small { font-size: 14px; color: var(--muted); font-weight: 500; }
+  .projects { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .project { display: block; padding: 16px 18px; color: var(--text); transition: border-color .12s, transform .12s; }
+  .project:hover { border-color: var(--border-strong); text-decoration: none; transform: translateY(-1px); }
+  .project-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .project-name { display: flex; align-items: center; gap: 8px; font-weight: 650; min-width: 0; }
+  .project-repo { color: var(--muted); font: 12.5px var(--mono); margin: 6px 0 12px; }
+  .project-meta { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
+</style>
 <% end %>
 
-<h2>Recent pipelines</h2>
-<table>
-  <thead>
-    <tr><th>Project</th><th>SHA</th><th>Branch</th><th>Status</th><th>Created</th></tr>
-  </thead>
-  <tbody>
-    <% Pipeline.includes(:project).order(created_at: :desc).limit(20).each do |pipeline| %>
-      <tr>
-        <td><%= pipeline.project.name %></td>
-        <td class="mono"><%= link_to pipeline.sha[0, 10], project_pipeline_path(pipeline.project, pipeline) %></td>
-        <td class="mono"><%= pipeline.branch %></td>
-        <td><%= status_badge(pipeline.status) %></td>
-        <td class="meta"><%= pipeline.created_at.strftime("%Y-%m-%d %H:%M") %></td>
-      </tr>
+<div class="page-head">
+  <div>
+    <h1>Dashboard</h1>
+    <p class="sub">Pipelines across every project on this control plane.</p>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="card stat">
+    <div class="label"><%= icon "folder" %> Projects</div>
+    <div class="value"><%= @stats[:projects] %></div>
+  </div>
+  <div class="card stat">
+    <div class="label"><%= icon "play" %> Running now</div>
+    <div class="value"><%= @stats[:running] %></div>
+  </div>
+  <div class="card stat">
+    <div class="label"><%= icon "activity" %> Pipelines, last 24h</div>
+    <div class="value"><%= @stats[:today] %></div>
+  </div>
+  <div class="card stat">
+    <div class="label"><%= icon "check" %> Success rate, last 24h</div>
+    <div class="value"><%= @stats[:success_rate] ? "#{@stats[:success_rate]}%" : "—" %></div>
+  </div>
+</div>
+
+<div class="section-title"><h2>Projects</h2></div>
+<% if @projects.empty? %>
+  <div class="card empty">
+    <%= icon "folder" %>
+    <h3>No projects yet</h3>
+    <p>Install the GitHub App and push: the first push from a repo creates its project. Or create one with the admin API and run <code>forge-ci trigger</code>.</p>
+    <p><a href="https://github.com/azmi2409/forge-ci/blob/main/DEPLOY.md">Setup guide</a></p>
+  </div>
+<% else %>
+  <div class="projects">
+    <% @projects.each do |project| %>
+      <% last = @last_pipelines[project.id] %>
+      <%= link_to project_path(project), class: "card project" do %>
+        <div class="project-top">
+          <span class="project-name"><%= icon "repo" %><span class="truncate"><%= project.name %></span></span>
+          <%= last ? status_badge(last.status) : tag.span("No runs", class: "badge st-pending") %>
+        </div>
+        <div class="project-repo truncate"><%= project.repo_url.presence || "repo set by the GitHub App" %></div>
+        <div class="project-meta">
+          <span><%= icon "branch" %> <%= project.default_branch %></span>
+          <span><%= icon "layers" %> <%= pluralize(@pipeline_counts.fetch(project.id, 0), "pipeline") %></span>
+          <span><%= icon "clock" %> <%= last ? time_ago_tag(last.created_at) : "never" %></span>
+        </div>
+      <% end %>
     <% end %>
-  </tbody>
-</table>
+  </div>
+<% end %>
+
+<div class="section-title"><h2>Recent pipelines</h2></div>
+<div class="card">
+  <% if @recent.any? %>
+    <%= render "pipelines/table", pipelines: @recent %>
+  <% else %>
+    <div class="empty"><%= icon "layers" %><h3>No pipelines yet</h3><p>Pipelines show up here as soon as a push or <code>forge-ci trigger</code> starts one.</p></div>
+  <% end %>
+</div>

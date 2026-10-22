@@ -1,0 +1,28 @@
+<% content_for(:title, "#{@project.name} — ForgeCI") %>
+<% content_for(:breadcrumbs) do %>
+  <%= link_to "Dashboard", projects_path %><%= icon "chevron-right" %><span><%= @project.name %></span>
+<% end %>
+
+<div class="page-head">
+  <div>
+    <h1><%= @project.name %></h1>
+    <p class="sub">
+      <% if @project.repo_url.present? %><span><%= icon "repo" %><span class="mono"><%= @project.repo_url %></span></span><% end %>
+      <span><%= icon "branch" %> default <span class="mono"><%= @project.default_branch %></span></span>
+      <span><%= icon "cpu" %> up to <%= pluralize(@project.max_concurrency, "job") %> at once</span>
+      <span><%= icon "layers" %> <%= pluralize(@total, "pipeline") %></span>
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <h2>Pipelines</h2>
+    <% if @total > @pipelines.size %><span class="muted">latest <%= @pipelines.size %> of <%= @total %></span><% end %>
+  </div>
+  <% if @pipelines.any? %>
+    <%= render "pipelines/table", pipelines: @pipelines, show_project: false %>
+  <% else %>
+    <div class="empty"><%= icon "layers" %><h3>No pipelines yet</h3><p>Push to the repo, or run <code>forge-ci trigger .circleci/config.yml --project <%= @project.name %></code>.</p></div>
+  <% end %>
+</div>

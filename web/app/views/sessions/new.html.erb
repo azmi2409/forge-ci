@@ -1,17 +1,25 @@
-<div class="card">
-  <h1>&#9881; ForgeCI</h1>
-  <p class="sub">Sign in to the control plane</p>
-  <% if flash[:alert] %><div class="alert" role="alert"><%= flash[:alert] %></div><% end %>
-  <% if flash[:notice] %><div class="notice"><%= flash[:notice] %></div><% end %>
-  <%= form_with url: login_path, method: :post do %>
-    <label for="username">Username</label>
-    <%= text_field_tag :username, params[:username], id: "username", autocomplete: "username", autofocus: true, required: true, autocapitalize: "none" %>
-    <label for="password">Password</label>
-    <%= password_field_tag :password, nil, id: "password", autocomplete: "current-password", required: true %>
-    <button type="submit">Sign in</button>
-  <% end %>
-  <% if @no_users %>
-    <p class="hint">No users exist yet. Set <code>FORGE_CI_UI_USER</code> and <code>FORGE_CI_UI_PASSWORD</code> and reload to create the first admin, or run <code>bin/rails forge_ci:create_user</code>.</p>
-  <% end %>
-  <p class="hint"><a href="/">&larr; back to site</a></p>
+<div class="auth">
+  <a class="brand" href="/"><%= render "shared/logo" %>ForgeCI</a>
+  <div class="card">
+    <div class="card-body">
+      <h1>Sign in</h1>
+      <p class="lead">to the ForgeCI control plane</p>
+      <%= render "shared/flash" %>
+      <%= form_with url: login_path, method: :post do %>
+        <div class="field">
+          <label for="username">Username</label>
+          <%= text_field_tag :username, params[:username], id: "username", autocomplete: "username", autofocus: true, required: true, autocapitalize: "none", spellcheck: false %>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <%= password_field_tag :password, nil, id: "password", autocomplete: "current-password", required: true %>
+        </div>
+        <button type="submit" class="btn-primary">Sign in</button>
+      <% end %>
+      <% if @no_users %>
+        <p class="hint">No users exist yet. Set <code>FORGE_CI_UI_USER</code> and <code>FORGE_CI_UI_PASSWORD</code> and reload to create the first admin, or run <code>bin/rails forge_ci:create_user</code>.</p>
+      <% end %>
+    </div>
+  </div>
+  <p class="back"><a href="/">&larr; Back to the ForgeCI site</a></p>
 </div>

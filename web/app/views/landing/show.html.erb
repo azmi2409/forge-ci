@@ -1,164 +1,187 @@
-<% content_for(:title, "ForgeCI — CI/CD that speaks CircleCI") %>
+<% content_for(:title, "ForgeCI — CircleCI-compatible CI/CD you run yourself") %>
 
-<!-- ================= HERO ================= -->
-<section style="padding-top: 88px;">
+<section class="hero">
   <div class="wrap">
-    <div class="hero-grid">
-      <div>
-        <span class="eyebrow">Open source &middot; MIT licensed</span>
-        <h1 class="hero-title">CI/CD that speaks <span class="accent">CircleCI</span></h1>
-        <p class="hero-sub">
-          ForgeCI runs your <code>.circleci/config.yml</code>-style pipelines on your own
-          infrastructure. A pure-Ruby compiler turns CircleCI&nbsp;2.1 configs into
-          pipelines; Docker runners execute them and stream the logs back live.
-        </p>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="/projects">Open dashboard</a>
-          <a class="btn btn-secondary" href="https://github.com/azmi2409/forge-ci">View on GitHub</a>
-        </div>
+    <div>
+      <span class="eyebrow"><b>Open source</b> · MIT licensed · self-hosted</span>
+      <h1>CircleCI configs.<br><span class="grad">Your runners.</span></h1>
+      <p class="lead">
+        ForgeCI runs your existing <code>.circleci/config.yml</code> on infrastructure you control.
+        Push to GitHub and Docker runners pick up the work, stream logs live and report back to your pull requests.
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary btn-lg" href="#quickstart"><%= icon "terminal" %> Get started</a>
+        <a class="btn btn-lg" href="https://github.com/azmi2409/forge-ci"><%= icon "github" %> View on GitHub</a>
       </div>
-      <div class="terminal">
-        <div class="terminal-bar">
-          <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-          <span class="terminal-title">.forge-ci/config.yml</span>
-        </div>
-<pre class="terminal-body"><code><span class="c"># Looks like CircleCI. That's the point.</span>
+      <div class="proof">
+        <span><%= icon "check" %> CircleCI 2.1 configs</span>
+        <span><%= icon "check" %> Outbound-only runners</span>
+        <span><%= icon "check" %> No per-minute bill</span>
+      </div>
+    </div>
+    <div class="terminal" aria-label="Example config">
+      <div class="terminal-bar"><span class="dots"><i></i><i></i><i></i></span>.circleci/config.yml</div>
+<pre><code><span class="c"># Your existing config. No rewrite.</span>
 <span class="k">version</span>: <span class="s">2.1</span>
 
 <span class="k">jobs</span>:
-  <span class="k">build</span>:
+  <span class="k">test</span>:
     <span class="k">docker</span>:
-      - <span class="k">image</span>: <span class="s">cimg/ruby:3.4</span>
+      - <span class="k">image</span>: <span class="s">cimg/ruby:3.3</span>
+    <span class="k">resource_class</span>: <span class="s">spot</span>
+    <span class="k">parallelism</span>: <span class="s">4</span>
     <span class="k">steps</span>:
       - <span class="k">checkout</span>
-      - <span class="k">run</span>:
-          <span class="k">name</span>: <span class="s">Install dependencies</span>
-          <span class="k">command</span>: <span class="s">bundle install</span>
-      - <span class="k">run</span>:
-          <span class="k">name</span>: <span class="s">Run tests</span>
-          <span class="k">command</span>: <span class="s">bundle exec rake test</span>
+      - <span class="k">run</span>: <span class="s">bundle install</span>
+      - <span class="k">run</span>: |
+          <span class="s">circleci tests glob "test/**/*_test.rb" |</span>
+            <span class="s">circleci tests run --split-by=filesize \</span>
+              <span class="s">--command="xargs bin/rails test"</span>
 
 <span class="k">workflows</span>:
-  <span class="k">build-and-test</span>:
-    <span class="k">jobs</span>:
-      - <span class="k">build</span></code></pre>
-      </div>
+  <span class="k">ci</span>:
+    <span class="k">jobs</span>: [<span class="s">test</span>]</code></pre>
     </div>
   </div>
 </section>
 
-<!-- ================= FEATURES ================= -->
-<section id="features">
+<section class="block" id="features">
   <div class="wrap">
-    <h2 class="section-title">Everything a CI needs. Nothing it doesn't.</h2>
-    <p class="section-sub">A complete continuous-integration system in two pieces: a Rails control plane and zero-dependency Docker runners.</p>
-    <div class="features">
-      <div class="feature">
-        <div class="icon">&#128260;</div>
+    <div class="kicker">Features</div>
+    <h2 class="h2">Everything you use in CircleCI, on your own hardware</h2>
+    <p class="sub">A Rails control plane, a pure-Ruby config compiler and zero-dependency Docker runners. Boring technology you can operate.</p>
+    <div class="grid3">
+      <div class="card feature">
+        <div class="fi"><%= icon "layers" %></div>
         <h3>CircleCI 2.1 compatible</h3>
-        <p>A pure-Ruby, zero-dependency config compiler turns CircleCI-style YAML into executable pipelines. Bring your existing config and muscle memory.</p>
+        <p>Executors, commands, parameters, workflows, <code>requires</code>, branch filters and <code>matrix</code>. The compiler mirrors CircleCI's own compile semantics.</p>
       </div>
-      <div class="feature">
-        <div class="icon">&#128051;</div>
-        <h3>Docker runners</h3>
-        <p>Stdlib-only Ruby runners claim queued jobs and run each step in isolated Docker containers. Scale horizontally — just add more runners.</p>
+      <div class="card feature">
+        <div class="fi"><%= icon "cpu" %></div>
+        <h3>Runners anywhere</h3>
+        <p>Runners poll for work over outbound HTTPS, so they run behind NAT. Route jobs by <code>resource_class</code>, e.g. checks on Spot, deploys on on-demand.</p>
       </div>
-      <div class="feature">
-        <div class="icon">&#128225;</div>
-        <h3>Live log streaming</h3>
-        <p>Watch job output in real time. Runners push log chunks over the API; the dashboard tails them via Server-Sent Events.</p>
+      <div class="card feature">
+        <div class="fi"><%= icon "activity" %></div>
+        <h3>Parallel test splitting</h3>
+        <p><code>parallelism: N</code> plus <code>circleci tests glob | split | run</code>. Split your suite by name or file size across as many runners as you have.</p>
       </div>
-      <div class="feature">
-        <div class="icon">&#128190;</div>
-        <h3>Cache &amp; artifacts</h3>
-        <p>Dependency caches and build artifacts backed by S3, with per-project scoping and configurable retention.</p>
+      <div class="card feature">
+        <div class="fi"><%= icon "terminal" %></div>
+        <h3>Live logs</h3>
+        <p>Every step's output streams to the dashboard as it happens, with secrets masked before they leave the runner.</p>
       </div>
-      <div class="feature">
-        <div class="icon">&#128272;</div>
-        <h3>Contexts &amp; secrets</h3>
-        <p>Encrypted environment contexts shared across projects, injected at runtime — with admin-gated secret rotation.</p>
+      <div class="card feature">
+        <div class="fi"><%= icon "folder" %></div>
+        <h3>Caches, workspaces, artifacts</h3>
+        <p><code>save_cache</code>/<code>restore_cache</code> with checksum keys, workspaces between jobs and downloadable artifacts, stored in S3.</p>
       </div>
-      <div class="feature">
-        <div class="icon">&#128025;</div>
-        <h3>GitHub App integration</h3>
-        <p>Push webhooks trigger pipelines automatically, and commit statuses report build results back to your pull requests.</p>
+      <div class="card feature">
+        <div class="fi"><%= icon "github" %></div>
+        <h3>GitHub native</h3>
+        <p>A GitHub App starts pipelines on push and pull request, clones private repos with short-lived tokens and posts commit statuses back.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ================= HOW IT WORKS ================= -->
-<section id="how-it-works">
+<section class="block" id="how-it-works">
   <div class="wrap">
-    <h2 class="section-title">How it works</h2>
-    <p class="section-sub">Three stages, from <code>git push</code> to green build.</p>
-    <div class="steps">
-      <div class="step">
-        <div class="step-num">1</div>
+    <div class="kicker">How it works</div>
+    <h2 class="h2">From <code>git push</code> to a green check</h2>
+    <p class="sub">No inbound ports on your runners and no proprietary control plane.</p>
+    <div class="steps3">
+      <div class="card step">
         <h3>Push</h3>
-        <p>Install the GitHub App on your repos. Every push fires a webhook; ForgeCI fetches <code>.forge-ci/config.yml</code> at that commit.</p>
+        <p>The GitHub App receives the webhook and fetches <code>.circleci/config.yml</code> at that commit. Or start a run from any CI with <code>forge-ci trigger</code>.</p>
       </div>
-      <div class="step">
-        <div class="step-num">2</div>
+      <div class="card step">
         <h3>Compile</h3>
-        <p>The control plane compiles your CircleCI-style config into a pipeline of jobs, workflows, and dependencies — validated before anything runs.</p>
+        <p>The config is validated and compiled into workflows and jobs, with a dependency graph. Bad configs fail fast with a clear error on the commit.</p>
       </div>
-      <div class="step">
-        <div class="step-num">3</div>
+      <div class="card step">
         <h3>Run</h3>
-        <p>Runners claim queued jobs, execute each step in Docker, and stream logs live to the dashboard while commit statuses update on GitHub.</p>
+        <p>Runners claim queued jobs, run each step in Docker and stream logs back. Jobs that depend on others start as soon as those pass.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ================= ARCHITECTURE ================= -->
-<section id="architecture">
+<section class="block" id="compatibility">
   <div class="wrap">
-    <h2 class="section-title">Simple architecture</h2>
-    <p class="section-sub">One control plane, as many runners as you need, boring dependable storage.</p>
-    <div class="arch">
-<pre>                    ┌─────────────────────┐
-                    │     <span class="hl">GitHub App</span>        │
-                    │  webhooks + statuses │
-                    └──────────┬──────────┘
-                               │ push
-                    ┌──────────▼──────────┐      ┌──────────────┐
-                    │   <span class="hl">Control plane</span>     │─────▶│   <span class="hl">Postgres</span>   │
-                    │      (Rails 8)      │      │  jobs + state│
-                    └──────────┬──────────┘      └──────────────┘
-                               │ claim / heartbeat / logs
-                    ┌──────────▼──────────┐      ┌──────────────┐
-                    │ <span class="hl">Runners</span> (Docker)    │─────▶│      <span class="hl">S3</span>      │
-                    │   zero-dep Ruby     │      │ logs/artifacts│
-                    └─────────────────────┘      └──────────────┘</pre>
+    <div class="kicker">Compatibility</div>
+    <h2 class="h2">Honest about what's supported</h2>
+    <p class="sub">The CircleCI 2.1 features most pipelines use work today. The rest fail with a clear error instead of misbehaving.</p>
+    <div class="compat">
+      <div class="card">
+        <div class="card-head"><h3>Supported</h3></div>
+        <ul>
+          <li class="yes"><%= icon "check" %><span>Docker executors, service containers, <code>executors:</code>, <code>commands:</code>, parameters</span></li>
+          <li class="yes"><%= icon "check" %><span>Workflows, <code>requires</code>, <code>matrix</code>, branch filters, contexts</span></li>
+          <li class="yes"><%= icon "check" %><span>Caches, workspaces, artifacts, <code>when:</code> conditions, timeouts</span></li>
+          <li class="yes"><%= icon "check" %><span><code>parallelism</code> and <code>circleci tests</code> splitting</span></li>
+          <li class="yes"><%= icon "check" %><span>Bash steps, <code>$BASH_ENV</code>, <code>CIRCLE_*</code> variables</span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Not yet</h3></div>
+        <ul>
+          <li class="no"><%= icon "x" %><span>Orbs (no registry yet)</span></li>
+          <li class="no"><%= icon "x" %><span><code>machine</code>, <code>macos</code> and <code>windows</code> executors</span></li>
+          <li class="no"><%= icon "x" %><span>Approval jobs, dynamic config, scheduled pipelines</span></li>
+          <li class="no"><%= icon "x" %><span>Timing-based splitting, <code>setup_remote_docker</code></span></li>
+          <li class="no"><%= icon "x" %><span>Docker layer caching, SSH re-runs</span></li>
+        </ul>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ================= QUICKSTART ================= -->
-<section id="quickstart">
+<section class="block" id="architecture">
   <div class="wrap">
-    <h2 class="section-title">Quickstart</h2>
-    <p class="section-sub">The whole stack — Postgres, control plane, worker, runner — with one compose file.</p>
+    <div class="kicker">Architecture</div>
+    <h2 class="h2">One control plane, as many runners as you need</h2>
+    <p class="sub">Postgres for state, S3 for logs and artifacts. Runners hold nothing, so you scale by adding hosts.</p>
+    <div class="card arch">
+<pre>  <span class="hl">GitHub</span> ── push / PR webhook ──▶ ┌─────────────────────┐ ◀── claim · heartbeat · logs ── <span class="hl">Runner</span> (Docker)
+          ◀── commit statuses ─── │   <span class="hl">Control plane</span>     │ ◀── claim · heartbeat · logs ── <span class="hl">Runner</span> (Docker)
+                                  │   Rails 8 · web UI  │ ◀── claim · heartbeat · logs ── <span class="hl">Runner</span> (Docker)
+                                  └──────┬───────┬──────┘
+                                         │       │
+                                   <span class="hl">Postgres</span>     <span class="hl">S3</span>
+                                 jobs, state   logs, caches, artifacts</pre>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="quickstart">
+  <div class="wrap">
+    <div class="kicker">Quickstart</div>
+    <h2 class="h2">Up in five minutes</h2>
+    <p class="sub">Postgres, the control plane, the worker and a runner from one compose file.</p>
     <div class="terminal">
-      <div class="terminal-bar">
-        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-        <span class="terminal-title">terminal</span>
-      </div>
-<pre class="terminal-body"><code><span class="p">$</span> cp .env.example .env   <span class="c"># fill in S3 credentials + bucket, pick a RUNNER_TOKEN secret</span>
-<span class="p">$</span> openssl rand -hex 32   <span class="c"># → paste into .env as RUNNER_TOKEN</span>
+      <div class="terminal-bar"><span class="dots"><i></i><i></i><i></i></span>terminal</div>
+<pre><code><span class="p">$</span> git clone https://github.com/azmi2409/forge-ci && cd forge-ci
+<span class="p">$</span> cp .env.example .env          <span class="c"># S3 bucket + credentials, secrets</span>
+<span class="p">$</span> openssl rand -hex 32          <span class="c"># paste into .env as RUNNER_TOKEN</span>
 <span class="p">$</span> docker compose up --build -d
 <span class="p">$</span> docker compose up -d runner
-<span class="p">$</span> <span class="c"># → open http://localhost:3000</span></code></pre>
+<span class="c">  → open http://localhost:3000 and sign in</span></code></pre>
     </div>
-    <p class="qs-note">
-      Object storage is AWS S3 — create the bucket first
-      (<code>aws s3 mb s3://&lt;your-bucket&gt;</code>). The same
-      <code>RUNNER_TOKEN</code> value authenticates the runner against the control
-      plane, so there's no token to copy around. See
-      <a href="https://github.com/azmi2409/forge-ci/blob/main/DEPLOY.md">DEPLOY.md</a>
-      for production deploys.
+    <p class="note">
+      Create the S3 bucket first (<code>aws s3 mb s3://&lt;bucket&gt;</code>). For production (HTTPS, the GitHub App, runners on
+      their own hosts) follow <a href="https://github.com/azmi2409/forge-ci/blob/main/DEPLOY.md">DEPLOY.md</a>.
     </p>
+  </div>
+</section>
+
+<section class="block final">
+  <div class="wrap">
+    <h2 class="h2">Stop paying per minute for your own tests</h2>
+    <p class="sub">Point ForgeCI at the config you already have and run it on hardware you already own.</p>
+    <div class="cta">
+      <a class="btn btn-primary btn-lg" href="#quickstart">Get started</a>
+      <a class="btn btn-lg" href="/projects">Open the dashboard</a>
+    </div>
   </div>
 </section>

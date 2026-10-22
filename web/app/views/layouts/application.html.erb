@@ -1,55 +1,89 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <title><%= content_for(:title) || "ForgeCI" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="robots" content="noindex">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <%= csrf_meta_tags %>
     <%= yield :head %>
+    <%= render "layouts/design" %>
     <style>
-      body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; margin: 0; background: #0d1117; color: #e6edf3; }
-      header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 24px; }
-      header a { color: #e6edf3; text-decoration: none; font-weight: 700; font-size: 18px; }
-      header a:hover { text-decoration: underline; }
-      header a.home-link { font-weight: 400; font-size: 14px; color: #8b949e; float: right; margin-top: 3px; }
-      header a.home-link:hover { color: #e6edf3; }
-      main { padding: 24px; max-width: 1100px; margin: 0 auto; }
-      h1, h2 { font-weight: 600; }
-      h2 { margin-top: 32px; border-bottom: 1px solid #30363d; padding-bottom: 8px; }
-      a { color: #58a6ff; }
-      table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-      th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #30363d; font-size: 14px; }
-      th { color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 12px; }
-      .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-      .st-pending  { background: #30363d; color: #e6edf3; }
-      .st-queued   { background: #1f3a5f; color: #79c0ff; }
-      .st-claimed  { background: #3b2f6b; color: #d2a8ff; }
-      .st-running  { background: #5f4a1f; color: #ffdf5d; }
-      .st-success  { background: #1f5f3a; color: #7ee787; }
-      .st-failed   { background: #5f1f1f; color: #ff7b72; }
-      .st-canceled { background: #3d3d3d; color: #b0b0b0; }
-      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
-      .meta { color: #8b949e; font-size: 14px; }
-      pre.logs { background: #010409; border: 1px solid #30363d; border-radius: 6px; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
-      .requires { color: #8b949e; }
-      .flash-alert { background: #5f1f1f; color: #ff7b72; border-radius: 6px; padding: 10px 14px; font-size: 14px; }
-      .flash-notice { background: #1f5f3a; color: #7ee787; border-radius: 6px; padding: 10px 14px; font-size: 14px; }
-      .stack { max-width: 380px; }
-      .stack label { display: block; font-size: 13px; color: #8b949e; margin: 14px 0 6px; }
-      input[type=text], input[type=password], select { width: 100%; box-sizing: border-box; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; padding: 8px 10px; font-size: 14px; }
-      button, input[type=submit] { background: #238636; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font-size: 14px; font-weight: 600; cursor: pointer; }
-      .stack button { margin-top: 18px; }
-      .inline-form { display: inline; margin-left: 8px; }
-      button.inline-btn, .userbar button { background: transparent; color: #58a6ff; padding: 0; font-weight: 400; }
-      .userbar { float: right; margin-top: 3px; font-size: 14px; color: #8b949e; }
-      .userbar form { display: inline; }
-      .userbar a { font-weight: 400; font-size: 14px; color: #58a6ff; margin-left: 12px; }
-      .note { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 16px; font-size: 14px; color: #8b949e; }
+      .topbar { position: sticky; top: 0; z-index: 40; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--border); }
+      .topbar-inner { max-width: 1200px; margin: 0 auto; padding: 0 24px; height: 58px; display: flex; align-items: center; gap: 28px; }
+      .nav { display: flex; gap: 4px; flex: 1; }
+      .nav-item { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: var(--radius-sm); color: var(--text-2); font-weight: 550; font-size: 14px; }
+      .nav-item:hover { background: var(--gray-bg); color: var(--text); text-decoration: none; }
+      .nav-item.active { color: var(--text); background: var(--gray-bg); }
+      .user-menu { position: relative; }
+      .user-menu summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 5px 8px 5px 5px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); font-size: 14px; font-weight: 550; }
+      .user-menu summary::-webkit-details-marker { display: none; }
+      .user-menu summary:hover { border-color: var(--border-strong); color: var(--text); }
+      .menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 220px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0,0,0,.35); padding: 6px; }
+      .menu .menu-head { padding: 8px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 6px; font-size: 13px; color: var(--muted); }
+      .menu .menu-head strong { display: block; color: var(--text); font-size: 14px; }
+      .menu a, .menu button { display: flex; width: 100%; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-sm); color: var(--text-2); font: 500 14px var(--sans); background: none; border: 0; justify-content: flex-start; }
+      .menu a:hover, .menu button:hover { background: var(--gray-bg); color: var(--text); text-decoration: none; }
+      .menu form { display: block; }
+      main.page { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
+      .crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13.5px; color: var(--muted); margin-bottom: 14px; }
+      .crumbs a { color: var(--muted); } .crumbs a:hover { color: var(--text); }
+      .crumbs .icon { width: 14px; height: 14px; opacity: .6; }
+      .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+      .page-head h1 { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+      .page-head > div { min-width: 0; }
+      .page-head .sub { color: var(--muted); margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 14px; }
+      .page-head .sub > span { display: inline-flex; align-items: center; gap: 6px; }
+      .page-actions { display: flex; gap: 8px; align-items: center; }
+      .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 32px 0 12px; }
+      .site-foot { max-width: 1200px; margin: 0 auto; padding: 20px 24px 36px; color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--border); }
+      .site-foot a { color: var(--muted); } .site-foot a:hover { color: var(--text); }
+      @media (max-width: 720px) {
+        .topbar-inner { gap: 12px; padding: 0 14px; }
+        .brand .tag, .nav-item span, .user-menu .uname { display: none; }
+        main.page { padding: 20px 14px 48px; }
+      }
     </style>
   </head>
   <body>
-    <header><a href="/projects">&#9881; ForgeCI</a> <span class="meta">control plane</span><span class="userbar"><% if signed_in? %><%= current_user.username %>
-      <%= link_to "Account", account_path %><% if current_user.admin? %><%= link_to "Users", users_path %><% end %>
-      <%= button_to "Sign out", logout_path, method: :delete, form: { class: "inline-form" }, class: "inline-btn" %><% end %></span></header>
-    <main><%= yield %></main>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="/projects"><%= render "shared/logo" %>ForgeCI <span class="tag">control plane</span></a>
+        <% if signed_in? %>
+          <nav class="nav" aria-label="Main">
+            <%= nav_link "Dashboard", projects_path, "activity", active: controller_name.in?(%w[projects pipelines job_runs]) %>
+            <% if current_user.admin? %>
+              <%= nav_link "Users", users_path, "users", active: controller_name == "users" %>
+            <% end %>
+          </nav>
+          <details class="user-menu">
+            <summary aria-label="Account menu">
+              <span class="avatar"><%= current_user.username.first %></span>
+              <span class="uname"><%= current_user.username %></span>
+              <%= icon "chevron-down" %>
+            </summary>
+            <div class="menu">
+              <div class="menu-head">Signed in as<strong><%= current_user.username %></strong><%= current_user.role %></div>
+              <%= link_to account_path do %><%= icon "user" %> Account<% end %>
+              <% if current_user.admin? %>
+                <%= link_to users_path do %><%= icon "users" %> Manage users<% end %>
+              <% end %>
+              <a href="/"><%= icon "external" %> Public site</a>
+              <%= button_to logout_path, method: :delete do %><%= icon "logout" %> Sign out<% end %>
+            </div>
+          </details>
+        <% end %>
+      </div>
+    </header>
+    <main class="page">
+      <% if content_for?(:breadcrumbs) %>
+        <nav class="crumbs" aria-label="Breadcrumb"><%= yield :breadcrumbs %></nav>
+      <% end %>
+      <%= yield %>
+    </main>
+    <footer class="site-foot">
+      <span>ForgeCI · MIT licensed · CircleCI 2.1-compatible</span>
+      <span><a href="https://github.com/azmi2409/forge-ci"><%= icon "github" %> azmi2409/forge-ci</a></span>
+    </footer>
   </body>
 </html>

@@ -1,42 +1,100 @@
-<% content_for(:title, "Pipeline #{@pipeline.sha[0, 10]} — ForgeCI") %>
-<% content_for(:head) { tag.meta(http_equiv: "refresh", content: "5") } unless @pipeline.terminal? %>
-
-<p class="meta"><%= link_to "← projects", root_path %> / <%= @project.name %></p>
-<h1>Pipeline <span class="mono"><%= @pipeline.sha[0, 12] %></span></h1>
-<p>
-  <%= status_badge(@pipeline.status) %>
-  <span class="meta">branch <span class="mono"><%= @pipeline.branch %></span> · <%= @pipeline.created_at.strftime("%Y-%m-%d %H:%M") %></span>
-</p>
-<% unless @pipeline.terminal? %>
-  <%= button_to "Cancel pipeline", cancel_project_pipeline_path(@project, @pipeline),
-                method: :post, data: { turbo_confirm: "Cancel this pipeline?" } %>
+<% content_for(:title, "Pipeline ##{@pipeline.pipeline_number || @pipeline.id} · #{@project.name} — ForgeCI") %>
+<% content_for(:head) do %>
+  <% unless @pipeline.terminal? %><meta http-equiv="refresh" content="5"><% end %>
+  <style>
+    .wf { margin-top: 20px; }
+    .graph { display: flex; gap: 0; overflow-x: auto; padding: 20px 18px 22px; align-items: flex-start; }
+    .stage { display: flex; flex-direction: column; gap: 10px; min-width: 230px; position: relative; }
+    .stage + .stage { margin-left: 44px; }
+    .stage + .stage::before { content: ""; position: absolute; left: -36px; top: 58px; width: 28px; border-top: 2px dashed var(--border-strong); }
+    .stage-label { font-size: 11.5px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 2px; }
+    .jobnode { display: block; background: var(--bg-raised); border: 1px solid var(--border); border-left: 3px solid var(--gray); border-radius: var(--radius-sm); padding: 10px 12px; color: var(--text); }
+    .jobnode:hover { border-color: var(--border-strong); text-decoration: none; }
+    .jobnode.s-success { border-left-color: var(--green); } .jobnode.s-failed { border-left-color: var(--red); }
+    .jobnode.s-running, .jobnode.s-claimed { border-left-color: var(--amber); } .jobnode.s-queued { border-left-color: var(--blue); }
+    .jobnode-top { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+    .jobnode-name { font-weight: 650; font-size: 14px; }
+    .jobnode-meta { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+    .jobnode-meta span { display: inline-flex; gap: 5px; align-items: center; }
+    .jobnode-meta .icon { width: 13px; height: 13px; }
+    .nodes { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px; }
+    .nodes a { font: 600 11px var(--mono); padding: 2px 7px; border-radius: 4px; color: var(--text-2); background: var(--gray-bg); border: 1px solid transparent; }
+    .nodes a:hover { text-decoration: none; border-color: var(--border-strong); }
+    .nodes a.s-success { color: var(--green); background: var(--green-bg); } .nodes a.s-failed { color: var(--red); background: var(--red-bg); }
+    .nodes a.s-running, .nodes a.s-claimed { color: var(--amber); background: var(--amber-bg); } .nodes a.s-queued { color: var(--blue); background: var(--blue-bg); }
+  </style>
 <% end %>
-<% if flash[:notice] %><p class="note"><%= flash[:notice] %></p><% end %>
+<% content_for(:breadcrumbs) do %>
+  <%= link_to "Dashboard", projects_path %><%= icon "chevron-right" %>
+  <%= link_to @project.name, project_path(@project) %><%= icon "chevron-right" %>
+  <span>Pipeline #<%= @pipeline.pipeline_number || @pipeline.id %></span>
+<% end %>
+
+<%= render "shared/flash" %>
+
+<div class="page-head">
+  <div>
+    <h1>Pipeline #<%= @pipeline.pipeline_number || @pipeline.id %> <%= status_badge(@pipeline.status) %></h1>
+    <p class="sub">
+      <span><%= icon "branch" %><span class="mono"><%= @pipeline.branch %></span></span>
+      <span><%= icon "commit" %>
+        <% if (url = commit_url(@pipeline)) %>
+          <a class="mono" href="<%= url %>" title="<%= @pipeline.sha %>"><%= short_sha(@pipeline.sha) %></a>
+        <% else %>
+          <span class="mono" title="<%= @pipeline.sha %>"><%= short_sha(@pipeline.sha) %></span>
+        <% end %>
+      </span>
+      <span><%= icon "clock" %> started <%= time_ago_tag(@pipeline.created_at) %></span>
+      <span><%= icon "activity" %> <%= duration_text(pipeline_duration(@pipeline)) %></span>
+      <% if @pipeline.forked %><span class="pill" title="Pull request from a fork: contexts are not injected">fork</span><% end %>
+    </p>
+  </div>
+  <div class="page-actions">
+    <% unless @pipeline.terminal? %>
+      <%= button_to cancel_project_pipeline_path(@project, @pipeline), method: :post, class: "btn btn-danger",
+                    data: { turbo_confirm: "Cancel this pipeline?" }, form: { onsubmit: "return confirm('Cancel this pipeline?')" } do %>
+        <%= icon "stop" %> Cancel pipeline
+      <% end %>
+    <% end %>
+  </div>
+</div>
 
 <% @workflows.each do |wf| %>
-  <h2>Workflow: <%= wf.name %> <%= status_badge(wf.status) %></h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Job</th>
-        <th>Status</th>
-        <th>Requires</th>
-        <th>Resource class</th>
-        <th>Claimed by</th>
-        <th>Steps</th>
-      </tr>
-    </thead>
-    <tbody>
-      <% wf.job_runs.order(:id).each do |job| %>
-        <tr>
-          <td><%= link_to job.display_name, job_run_path(job), class: "mono" %></td>
-          <td><%= status_badge(job.status) %></td>
-          <td class="requires mono"><%= job.requires_list.any? ? job.requires_list.join(", ") : "—" %></td>
-          <td class="mono"><%= job.resource_class || "any" %></td>
-          <td class="mono"><%= job.claimed_by || "—" %></td>
-          <td><%= job.step_runs.count %></td>
-        </tr>
+  <section class="card wf" aria-label="Workflow <%= wf.name %>">
+    <div class="card-head">
+      <h2><%= icon "layers" %> <%= wf.name %></h2>
+      <%= status_badge(wf.status) %>
+    </div>
+    <div class="graph">
+      <% wf.stages.each_with_index do |stage, i| %>
+        <div class="stage">
+          <div class="stage-label">Stage <%= i + 1 %></div>
+          <% stage.each do |nodes| %>
+            <% job = nodes.first %>
+            <% status = group_status(nodes) %>
+            <div>
+            <%= link_to job_run_path(job), class: "jobnode s-#{status}" do %>
+              <div class="jobnode-top">
+                <span class="jobnode-name truncate"><%= job.name %></span>
+                <%= status_badge(status) %>
+              </div>
+              <div class="jobnode-meta">
+                <% if job.requires_list.any? %><span title="requires">requires <%= job.requires_list.join(", ") %></span><% end %>
+                <span><%= icon "cpu" %><%= job.resource_class || "any runner" %></span>
+                <% if nodes.size > 1 %><span><%= icon "layers" %><%= nodes.size %>× parallel</span><% end %>
+              </div>
+            <% end %>
+            <% if nodes.size > 1 %>
+              <div class="nodes" aria-label="Parallel nodes of <%= job.name %>">
+                <% nodes.each do |node| %>
+                  <%= link_to node.node_index + 1, job_run_path(node), class: "s-#{node.status}", title: "#{node.display_name}: #{node.status}" %>
+                <% end %>
+              </div>
+            <% end %>
+            </div>
+          <% end %>
+        </div>
       <% end %>
-    </tbody>
-  </table>
+    </div>
+  </section>
 <% end %>
