@@ -159,6 +159,11 @@ project's `repo_url` empty. The full API is in [docs/api.md](docs/api.md).
 
 ### Scale runners to zero (AWS)
 
+> Runners have only been tested on AWS EC2 Spot instances (Ubuntu 24.04,
+> Auto Scaling Groups in `ap-southeast-3`). Other clouds and bare metal should
+> work with the install command but are untested; see
+> [TODO.md](TODO.md#tested-so-far).
+
 Runners can cost nothing while nobody is pushing. Give each resource class an
 EC2 Auto Scaling Group with a minimum of 0. ForgeCI raises a group's desired
 capacity when that class's jobs queue. A runner that has been idle removes
