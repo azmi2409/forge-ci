@@ -90,6 +90,36 @@ class JobRunTest < ActiveSupport::TestCase
     assert_equal "queued", queued.reload.status
   end
 
+  test "reclaim_stale! fails a stale running job with a note, and keeps going after an error" do
+    job = build_job(status: "running")
+    job.update_columns(claimed_by: "static-runner", claimed_at: 10.minutes.ago, heartbeat_at: 5.minutes.ago)
+    job.step_runs.create!(name: "deploy", status: "running")
+    job.log_chunks.create!(seq: 0, chunk: "deploying...\n")
+    claimed = build_job(status: "claimed")
+    claimed.update_columns(heartbeat_at: 5.minutes.ago)
+
+    JobRun.reclaim_stale!
+
+    assert job.reload.failed?
+    assert_includes job.log_text, "stopped responding while this job was running"
+    assert_equal ["canceled"], job.step_runs.pluck(:status)
+    assert job.workflow_run.pipeline.reload.failed?, "the pipeline rolls up instead of hanging"
+    assert claimed.reload.queued?
+  end
+
+  test "one job that can't be reclaimed doesn't stop the others" do
+    a = build_job(status: "claimed")
+    b = build_job(status: "claimed")
+    [a, b].each { |j| j.update_columns(heartbeat_at: 5.minutes.ago) }
+    failing = a.id
+    JobRun.class_eval { alias_method :orig_reclaim, :reclaim_stale! }
+    JobRun.define_method(:reclaim_stale!) { id == failing ? raise("boom") : orig_reclaim }
+    JobRun.reclaim_stale!
+    assert b.reload.queued?
+  ensure
+    JobRun.class_eval { alias_method :reclaim_stale!, :orig_reclaim; remove_method :orig_reclaim }
+  end
+
   test "reclaim is idempotent" do
     stale = build_job(status: "claimed")
     stale.update_columns(heartbeat_at: 5.minutes.ago)

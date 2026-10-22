@@ -276,14 +276,32 @@ class JobRun < ApplicationRecord
 
   # --- reclaim -------------------------------------------------------------------
 
-  # Return stale claimed/running jobs (no heartbeat within STALE_HEARTBEAT_AFTER)
-  # to queued so another runner can pick them up. Idempotent.
+  # Jobs whose runner stopped heartbeating (none within STALE_HEARTBEAT_AFTER):
+  #  - claimed but never started: back to queued for another runner;
+  #  - running: failed, with a note in the log. Its steps may have done part
+  #    of their work (half a deploy), so it isn't retried automatically;
+  #    "Rerun failed jobs" is one click away.
+  # Each job is handled on its own, so one can't stop the rest. Idempotent.
   def self.reclaim_stale!(older_than: STALE_HEARTBEAT_AFTER)
     where(status: ACTIVE_STATUSES)
       .where("heartbeat_at < ?", older_than.ago)
       .find_each do |job|
-        job.transition_to!("queued", claimed_by: nil, claimed_at: nil, heartbeat_at: nil)
+        job.reclaim_stale!
+      rescue StandardError => e
+        Rails.logger.error("[reclaim] job #{job.id} (#{job.name}): #{e.class}: #{e.message}")
       end
+  end
+
+  def reclaim_stale!
+    if claimed?
+      transition_to!("queued", claimed_by: nil, claimed_at: nil, heartbeat_at: nil)
+    else
+      seq = log_chunks.maximum(:seq).to_i + 1
+      log_chunks.create!(seq: seq, chunk: "\n[forge-ci] the runner (#{claimed_by}) stopped responding " \
+                                         "while this job was running; marking it failed. Rerun it to try again.\n")
+      step_runs.where(status: %w[pending running]).update_all(status: StepRun.statuses.fetch("canceled"))
+      complete_with_results!(status: "failed")
+    end
   end
 
   private
