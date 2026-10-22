@@ -38,10 +38,16 @@ Sign in, then change the password under **Account**.
 
 ## 2. Connect GitHub
 
-Open **Settings**, then click **Connect GitHub**. Enter an organization name
-first if the repositories belong to one. GitHub creates a ForgeCI App with the
-right permissions and webhook and sends you back. Then click **Install on
-repositories** and pick the repositories.
+Open **Settings**, choose who owns your repositories (an organization, by
+name, or your personal account) and click **Connect GitHub**. GitHub creates a
+private ForgeCI App with the right permissions and webhook and sends you
+back. Then click **Install on repositories** and pick the repositories.
+
+A private App can only be installed on the account that owns it, so create it
+on the account that owns your repositories. To create an App for an
+organization you must be one of its owners. If you connected the wrong account, open
+**Use a different account** under Settings to create a new App for the right
+one, then delete the old App on GitHub (its **Advanced** settings).
 
 Each repository's first push creates its project. Pipelines run on push and
 pull request, and results come back as a `forge-ci` commit status. Private

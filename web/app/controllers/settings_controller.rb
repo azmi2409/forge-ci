@@ -4,6 +4,8 @@
 class SettingsController < ApplicationController
   before_action :require_admin
 
+  GITHUB_LOGIN = /\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\z/
+
   def show
     @base_url = control_plane_url
     @github = Github.stored
@@ -15,10 +17,20 @@ class SettingsController < ApplicationController
   end
 
   # Starts "Connect GitHub": renders a form that posts the manifest to GitHub.
+  # A private App can only be installed on the account that owns it, so the
+  # admin picks that account: an organization (by name) or their own.
   def github
+    org = params[:account] == "personal" ? nil : params[:org].to_s.strip.delete_prefix("@").presence
+    if params[:account] == "org" && org.nil?
+      return redirect_to settings_path, alert: "Enter the name of the organization that owns your repositories."
+    end
+    if org && !org.match?(GITHUB_LOGIN)
+      return redirect_to settings_path, alert: "\"#{org.truncate(40)}\" isn't a GitHub organization name."
+    end
+
     @state = session[:github_manifest_state] = SecureRandom.hex(16)
     @manifest = Github::Manifest.build(control_plane_url)
-    @action = Github::Manifest.new_app_url(org: params[:org].to_s.strip.presence, state: @state)
+    @action = Github::Manifest.new_app_url(org: org, state: @state)
     render :github_redirect, layout: false
   end
 

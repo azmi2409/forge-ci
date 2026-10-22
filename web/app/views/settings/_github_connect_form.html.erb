@@ -1,0 +1,16 @@
+<%# The "Connect GitHub" form: which account will own the new App. %>
+<%= form_with url: github_settings_path, method: :post, data: { turbo: false, github_connect: true } do %>
+  <fieldset class="account-choice">
+    <legend class="field-label">Who owns your repositories?</legend>
+    <label class="choice"><input type="radio" name="account" value="org" checked> An organization</label>
+    <label class="choice"><input type="radio" name="account" value="personal"> My personal account</label>
+  </fieldset>
+  <div class="inline-fields">
+    <div class="form-row" data-org-row>
+      <label class="field-label" for="org-<%= form_id %>">Organization name</label>
+      <input class="field" type="text" id="org-<%= form_id %>" name="org" placeholder="e.g. acme, as in github.com/acme" autocapitalize="none" spellcheck="false">
+    </div>
+    <button type="submit" class="button-primary"><%= icon "github" %><%= label %></button>
+  </div>
+  <p class="field-hint">This creates a private GitHub App for this server, with the right permissions, and then asks which repositories to install it on. GitHub only lets a private App be installed on the account that owns it, so pick the account that owns your repositories. For an organization, you need to be one of its owners.</p>
+<% end %>
