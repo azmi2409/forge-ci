@@ -17,6 +17,7 @@ class AccountsController < ApplicationController
 
     user.password = params[:password]
     if user.save
+      User.forget_initial_password!
       # Password change rotated the nonce; keep *this* browser signed in.
       SessionAuth.sign_in(self, user)
       redirect_to account_path, notice: "Password changed. Other sessions were signed out."

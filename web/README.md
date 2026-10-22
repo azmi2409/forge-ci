@@ -120,7 +120,12 @@ gem → `PipelineIntake` (the same seam as the REST API) → `pending` commit
 status → runners claim jobs → terminal status (`success`/`failure`) posted
 back via `Pipeline#after_update_commit`.
 
-### 1. Register the App on github.com (manual)
+### 1. Register the App
+
+The easy way: **Settings → Connect GitHub** in the web UI registers the App
+through GitHub's manifest flow and stores its credentials (encrypted) in the
+`github_app_credentials` table. To register it by hand instead (the
+`GITHUB_*` environment variables then take precedence):
 
 GitHub → Settings → Developer settings → GitHub Apps → New GitHub App:
 
@@ -194,8 +199,8 @@ tunable in one place (`app/models/job_run.rb`).
 
 - Solid Queue recurring task: `config/recurring.yml` runs
   `ReclaimStaleJobsJob` every `JobRun::RECLAIM_INTERVAL` (**60s**).
-  Run the worker with `bin/jobs` (after `bin/rails solid_queue:install` if the
-  queue tables aren't set up yet).
+  In production the worker runs inside Puma (`SOLID_QUEUE_IN_PUMA=1`, set in
+  the Docker image); in development run it with `bin/jobs`.
 - Cron alternative: `bin/rails forge_ci:reclaim` every minute.
 
 ## The requires seam fix (component 1.1)

@@ -1,6 +1,8 @@
 require "active_support/core_ext/integer/time"
 
 Rails.application.configure do
+  # SECRET_KEY_BASE, or one generated on first boot and kept on the data volume.
+  config.secret_key_base = ForgeCISecrets.fetch("secret_key_base")
   # Settings specified here will take precedence over those in config/application.rb.
 
   # Code is not reloaded between requests.

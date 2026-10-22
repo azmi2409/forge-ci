@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "tmpdir"
 
 class ConfigTest < Minitest::Test
   def test_requires_control_plane_url
@@ -15,6 +16,27 @@ class ConfigTest < Minitest::Test
       ForgeCIRunner::Config.from_env({ "CONTROL_PLANE_URL" => "http://x" })
     end
     assert_match(/RUNNER_TOKEN/, err.message)
+  end
+
+  def test_runner_token_file
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "runner-token")
+      File.write(path, "from-file\n")
+      config = ForgeCIRunner::Config.from_env({ "CONTROL_PLANE_URL" => "http://x", "RUNNER_TOKEN_FILE" => path })
+      assert_equal "from-file", config.runner_token
+
+      config = ForgeCIRunner::Config.from_env({ "CONTROL_PLANE_URL" => "http://x", "RUNNER_TOKEN" => "env", "RUNNER_TOKEN_FILE" => path })
+      assert_equal "env", config.runner_token, "RUNNER_TOKEN wins"
+    end
+    err = assert_raises(ForgeCIRunner::Config::Error) do
+      ForgeCIRunner::Config.from_env({ "CONTROL_PLANE_URL" => "http://x", "RUNNER_TOKEN_FILE" => "/nope/missing" })
+    end
+    assert_match(/RUNNER_TOKEN_FILE/, err.message)
+  end
+
+  def test_empty_resource_class_means_any
+    config = ForgeCIRunner::Config.from_env({ "CONTROL_PLANE_URL" => "http://x", "RUNNER_TOKEN" => "t", "RESOURCE_CLASS" => "" })
+    assert_nil config.resource_class
   end
 
   def test_defaults

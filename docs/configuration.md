@@ -1,48 +1,47 @@
 # Configuration reference
 
-Every environment variable forge-ci understands, per component. Anything
-marked **required** fails fast (or refuses to boot) when missing in
-production.
+Every environment variable ForgeCI understands, per component. A production
+server needs none of them except `DATABASE_URL` (set by `docker-compose.yml`)
+and, for a public deploy, `APP_HOST`. Secrets left unset are generated on
+first boot and kept in `secrets.yml` in the data directory.
 
 ## Control plane (`web/`)
 
-| Variable | Required | Default | Purpose |
-|---|---|---|---|
-| `DATABASE_URL` | yes (prod) | — | Postgres URL for the app DB |
-| `QUEUE_DATABASE_URL` / `CACHE_DATABASE_URL` | yes (prod) | `DATABASE_URL` | Separate Postgres URLs for the Solid Queue / cache DBs — must be separate physical DBs for `db:prepare` to load their schemas |
-| `SECRET_KEY_BASE` | yes (prod) | — | Rails secret (`openssl rand -hex 64`) |
-| `RAILS_MASTER_KEY` | yes (prod) | — | Rails credentials key |
-| `FORGE_CI_UI_USER` / `FORGE_CI_UI_PASSWORD` | yes (prod) | `admin` / `password` (dev only, loud warning) | Bootstrap for the first admin account (only used while there are no users) |
-| `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY` | yes (prod) | insecure dev key (loud warning) | Context payload encryption |
-| `ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY` | yes (prod) | insecure dev key (loud warning) | Context payload encryption |
-| `ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT` | yes (prod) | insecure dev key (loud warning) | Context payload encryption |
-| `ACTIVE_STORAGE_SERVICE` | yes (prod) | `local` | `amazon` (AWS S3) or `local` |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | with `amazon` | — | Storage credentials |
-| `AWS_REGION` | with `amazon` | `us-east-1` | Storage region |
-| `AWS_S3_BUCKET` | with `amazon` | — | Storage bucket |
-| `AWS_S3_ENDPOINT` | for S3-compatible stores | — | Endpoint override, e.g. MinIO at `http://minio:9000` (leave unset for AWS S3) |
-| `AWS_S3_FORCE_PATH_STYLE` | for S3-compatible stores | `false` | Set `true` for MinIO / path-style stores |
-| `ARTIFACT_RETENTION_DAYS` | no | `30` | Artifact retention (`PurgeOldArtifactsJob` runs daily 03:00) |
-| `GITHUB_APP_ID` | for GitHub | — | Numeric GitHub App ID |
-| `GITHUB_APP_PRIVATE_KEY` | for GitHub | — | App private key, PEM text (may contain newlines) |
-| `GITHUB_WEBHOOK_SECRET` | for GitHub | — | Webhook HMAC secret — **fail-closed**: the endpoint 401s everything when blank |
-| `APP_HOST` | recommended | — | Public base URL, e.g. `https://ci.example.com` (commit-status links) |
-| `FORGE_CI_ADMIN_TOKEN` | for rotation | — | Bearer token for context rotation — **fail-closed** (503 when blank) |
-| `FORGE_CI_STREAM_TIMEOUT_SECONDS` | no | `300` | How long the SSE log live-tail waits for output |
-| `RAILS_MAX_THREADS` | no | `5` | DB pool size |
-| `FORGE_CI_AUTOSCALE` | no | — | Scale runner Auto Scaling Groups up when jobs queue: `class=asg-name[:max[:jobs_per_instance]],…` (see DEPLOY.md, "Scale runners to zero") |
-| `FORGE_CI_AUTOSCALE_REGION` | no | `AWS_REGION` | Region of those Auto Scaling Groups |
-
-Generate encryption keys with `bin/rails db:encryption:init`.
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | — (required in production) | Postgres URL for the app database |
+| `QUEUE_DATABASE_URL` / `CACHE_DATABASE_URL` | `DATABASE_URL` with `_queue` / `_cache` appended to the database name | Solid Queue and cache databases; each must be a separate database |
+| `APP_HOST` | the request's host | Public base URL, e.g. `https://ci.example.com`: webhooks, commit-status links, the runner install command |
+| `FORCE_SSL` | `false` | `true` behind an HTTPS proxy: Secure session cookie, HSTS, HTTPS redirects |
+| `FORGE_CI_DATA_DIR` | `web/storage` (`/rails/storage` in the image, the `forge-ci-data` volume) | Where generated secrets (`secrets.yml`), `runner-token` and `initial-admin-password` are written |
+| `SECRET_KEY_BASE` | generated | Rails secret |
+| `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY` / `_DETERMINISTIC_KEY` / `_KEY_DERIVATION_SALT` | generated (insecure fixed keys outside production) | Encryption of contexts and the stored GitHub App credentials |
+| `FORGE_CI_ADMIN_TOKEN` | generated | Bearer token for the admin API and `forge-ci trigger`; shown under Settings |
+| `FORGE_CI_RUNNER_TOKEN` | generated | Shared runner secret; runners presenting it authenticate as `static-runner`. Shown in the Settings install command |
+| `FORGE_CI_UI_USER` / `FORGE_CI_UI_PASSWORD` | `admin` with a generated password printed in the logs (`admin` / `password` in development) | The first admin, created only while there are no users |
+| `ACTIVE_STORAGE_SERVICE` | `local` | Where logs, artifacts and caches go: `local` (the data volume) or `amazon` (S3 or compatible) |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | — | S3 credentials (with `amazon`), also used for autoscaling |
+| `AWS_REGION` | `us-east-1` | S3 region |
+| `AWS_S3_BUCKET` | — | S3 bucket (with `amazon`); create it first |
+| `AWS_S3_ENDPOINT` / `AWS_S3_FORCE_PATH_STYLE` | — / `false` | For S3-compatible stores such as MinIO |
+| `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_WEBHOOK_SECRET` | the App from Settings → Connect GitHub | An App you registered yourself; these take precedence over the stored one. The webhook endpoint rejects everything while no secret is set |
+| `ARTIFACT_RETENTION_DAYS` | `30` | Artifact retention (`PurgeOldArtifactsJob` runs daily at 03:00) |
+| `FORGE_CI_STREAM_TIMEOUT_SECONDS` | `300` | How long the SSE log live-tail waits for output |
+| `FORGE_CI_AUTOSCALE` | — | Scale runner Auto Scaling Groups up when jobs queue: `class=asg-name[:max[:jobs_per_instance]],…` (see DEPLOY.md, "Scale runners to zero") |
+| `FORGE_CI_AUTOSCALE_REGION` | `AWS_REGION` | Region of those Auto Scaling Groups |
+| `SOLID_QUEUE_IN_PUMA` | `1` in the image | Run the background jobs inside the web process. Unset it to run `bin/jobs` separately |
+| `FORGE_CI_RUNNER_PATH` | `/forge-ci/runner` in the image, `../runner` otherwise | The runner files served as `/runner.tar.gz` |
+| `FORGE_CI_SEED_DEMO` | — | `1` loads the demo project and pipelines in production (`db:prepare` skips them otherwise) |
+| `RAILS_MAX_THREADS` | `5` | Database pool size |
 
 ## Runner (`runner/`)
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `CONTROL_PLANE_URL` | yes | — | Base URL of the control plane |
-| `RUNNER_TOKEN` | yes (runner) | — | Shared runner secret (same value as the server's `FORGE_CI_RUNNER_TOKEN`) |
-| `FORGE_CI_RUNNER_TOKEN` | to enable (server) | — | Operator-chosen runner secret; runners presenting it authenticate as `static-runner` (no per-token provisioning needed) |
-| `RESOURCE_CLASS` | no | token's class | Passed to the claim endpoint; the server matches jobs on it |
+| `RUNNER_TOKEN` | yes, or `RUNNER_TOKEN_FILE` | — | The server's runner token (Settings → Runners), or a per-host token |
+| `RUNNER_TOKEN_FILE` | no | — | Read the token from this file instead, e.g. the `runner-token` file the server writes to its data volume |
+| `RESOURCE_CLASS` | no | token's class, else any | Passed to the claim endpoint; the server matches jobs on it |
 | `POLL_INTERVAL` | no | `5` | Idle poll interval, seconds (backoff base) |
 | `MAX_IDLE_INTERVAL` | no | `60` | Idle backoff cap, seconds |
 | `HEARTBEAT_INTERVAL` | no | `15` | Heartbeat interval while running (server reclaims after 120s) |

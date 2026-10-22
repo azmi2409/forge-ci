@@ -100,28 +100,53 @@ class User < ApplicationRecord
 
   # --- bootstrap -------------------------------------------------------------
 
+  INITIAL_PASSWORD_FILE = "initial-admin-password"
+
   # First-run convenience: while there are no users, create an admin from
-  # FORGE_CI_UI_USER / FORGE_CI_UI_PASSWORD (the old basic-auth variables).
-  # In development with nothing configured, fall back to admin/password.
+  # FORGE_CI_UI_USER / FORGE_CI_UI_PASSWORD. Without them: admin/password in
+  # development, and in production "admin" with a random password that is
+  # logged once and kept in initial-admin-password on the data volume until
+  # it's changed. Returns [user, generated_password_or_nil], or nil.
   def self.bootstrap_admin_from_env!
     return nil if exists?
 
     name = ENV["FORGE_CI_UI_USER"].presence
     pass = ENV["FORGE_CI_UI_PASSWORD"].presence
+    generated = nil
     if name.nil? || pass.nil?
-      return nil unless Rails.env.development?
-
-      name = "admin"
-      pass = "password"
+      if Rails.env.development?
+        name = "admin"
+        pass = "password"
+      elsif Rails.env.production?
+        name = "admin"
+        pass = generated = SecureRandom.alphanumeric(20)
+      else
+        return nil
+      end
     end
     user = new(username: name, password: pass, role: :admin)
     user.skip_password_policy = true
     user.save!
-    Rails.logger.warn("[forge-ci] created first admin '#{user.username}' from FORGE_CI_UI_USER/PASSWORD — " \
-                      "change the password in the UI (Account) and then remove those variables")
-    user
+    if generated
+      ForgeCISecrets.write_private(initial_password_path, "#{generated}\n")
+      Rails.logger.warn("[forge-ci] created the first admin: username 'admin', password '#{generated}' " \
+                        "(also in #{initial_password_path}). Change it under Account after signing in.")
+    else
+      Rails.logger.warn("[forge-ci] created first admin '#{user.username}' from FORGE_CI_UI_USER/PASSWORD — " \
+                        "change the password in the UI (Account) and then remove those variables")
+    end
+    [user, generated]
   rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
     nil
+  end
+
+  def self.initial_password_path
+    File.join(ForgeCISecrets.data_dir, INITIAL_PASSWORD_FILE)
+  end
+
+  # The generated first password stops being useful once anyone changes it.
+  def self.forget_initial_password!
+    FileUtils.rm_f(initial_password_path)
   end
 
   def inspect

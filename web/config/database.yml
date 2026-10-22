@@ -40,6 +40,22 @@ test:
 # Read https://guides.rubyonrails.org/configuring.html#configuring-a-database
 # for a full overview on how database connection configuration can be specified.
 #
+<%
+  # The queue and cache databases default to DATABASE_URL with _queue / _cache
+  # added to its database name, so one URL is enough.
+  forge_ci_derived_url = lambda do |suffix|
+    url = ENV["DATABASE_URL"].to_s
+    next nil if url.empty?
+
+    uri = URI.parse(url)
+    next url if uri.path.to_s.length <= 1
+
+    uri.path = "#{uri.path}_#{suffix}"
+    uri.to_s
+  rescue URI::Error
+    url
+  end
+%>
 production:
   primary: &primary_production
     <<: *default
@@ -49,15 +65,15 @@ production:
   # The queue (and cache) databases must be SEPARATE physical databases for
   # `bin/rails db:prepare` to load their schemas (db/queue_schema.rb,
   # db/cache_schema.rb) — sharing one DATABASE_URL makes Rails skip them as
-  # "already initialized". Each falls back to DATABASE_URL when its own URL
-  # isn't set.
+  # "already initialized". Without their own URLs they use DATABASE_URL with
+  # _cache / _queue added to the database name (forge_ci_cache, forge_ci_queue).
   cache:
     <<: *primary_production
-    url: <%= ENV.fetch("CACHE_DATABASE_URL", ENV["DATABASE_URL"]).presence&.inspect %>
+    url: <%= (ENV["CACHE_DATABASE_URL"].presence || forge_ci_derived_url.call("cache"))&.inspect %>
     database: forge_ci_web_production_cache
     migrations_paths: db/cache_migrate
   queue:
     <<: *primary_production
-    url: <%= ENV.fetch("QUEUE_DATABASE_URL", ENV["DATABASE_URL"]).presence&.inspect %>
+    url: <%= (ENV["QUEUE_DATABASE_URL"].presence || forge_ci_derived_url.call("queue"))&.inspect %>
     database: forge_ci_web_production_queue
     migrations_paths: db/queue_migrate

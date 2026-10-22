@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Connecting to GitHub — ForgeCI</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="robots" content="noindex">
+    <%= render "layouts/design" %>
+    <style>body { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; } .box { max-width: 420px; text-align: center; } .box p { margin: 8px 0 20px; color: var(--muted); }</style>
+  </head>
+  <body>
+    <div class="box">
+      <h1 class="card-title" style="justify-content: center">Connecting to GitHub</h1>
+      <p>GitHub will show the new App's settings. Check the name, then choose <strong>Create GitHub App</strong>.</p>
+      <form id="manifest-form" action="<%= @action %>" method="post">
+        <input type="hidden" name="manifest" value="<%= @manifest.to_json %>">
+        <button type="submit" class="button-primary">Continue to GitHub</button>
+      </form>
+    </div>
+    <script>document.getElementById("manifest-form").submit();</script>
+  </body>
+</html>

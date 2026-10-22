@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_22_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_22_160000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.string "name", null: false
     t.string "record_type", null: false
@@ -69,6 +69,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_22_120000) do
     t.datetime "updated_at", null: false
     t.index ["project_id", "name"], name: "index_contexts_on_project_id_and_name", unique: true
     t.index ["project_id"], name: "index_contexts_on_project_id"
+  end
+
+  create_table "github_app_credentials", force: :cascade do |t|
+    t.string "app_id", null: false
+    t.string "slug", null: false
+    t.string "name"
+    t.string "html_url"
+    t.string "owner_login"
+    t.string "client_id"
+    t.text "client_secret"
+    t.text "webhook_secret", null: false
+    t.text "private_key", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
   end
 
   create_table "github_installations", force: :cascade do |t|

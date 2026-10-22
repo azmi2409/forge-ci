@@ -9,6 +9,9 @@ module ForgeCIRunner
   #                        server's FORGE_CI_RUNNER_TOKEN (pick any strong
   #                        random string, e.g. `openssl rand -hex 32`)
   #
+  #   (or RUNNER_TOKEN_FILE  a file holding it, e.g. the control plane's
+  #                        runner-token on a shared volume)
+  #
   # Optional:
   #   RESOURCE_CLASS       resource class this runner serves (default: token's class)
   #   POLL_INTERVAL        seconds between claim polls when idle (default: 5)
@@ -42,8 +45,8 @@ module ForgeCIRunner
     def self.from_env(env = ENV)
       new(
         control_plane_url: fetch_required(env, "CONTROL_PLANE_URL").sub(%r{/+\z}, ""),
-        runner_token: fetch_required(env, "RUNNER_TOKEN"),
-        resource_class: env["RESOURCE_CLASS"],
+        runner_token: runner_token_from(env),
+        resource_class: env["RESOURCE_CLASS"].to_s.empty? ? nil : env["RESOURCE_CLASS"],
         poll_interval: (env["POLL_INTERVAL"] || 5).to_f,
         max_idle_interval: (env["MAX_IDLE_INTERVAL"] || 60).to_f,
         heartbeat_interval: (env["HEARTBEAT_INTERVAL"] || 15).to_f,
@@ -57,6 +60,18 @@ module ForgeCIRunner
         idle_shutdown_command: env["IDLE_SHUTDOWN_COMMAND"]
       )
     end
+
+    def self.runner_token_from(env)
+      return env["RUNNER_TOKEN"] unless env["RUNNER_TOKEN"].to_s.empty?
+
+      path = env["RUNNER_TOKEN_FILE"].to_s
+      return fetch_required(env, "RUNNER_TOKEN") if path.empty?
+
+      File.read(path).strip
+    rescue SystemCallError => e
+      raise Error, "RUNNER_TOKEN_FILE #{path}: #{e.message}"
+    end
+    private_class_method :runner_token_from
 
     def self.fetch_required(env, key)
       env.fetch(key) { raise Error, "#{key} is required" }

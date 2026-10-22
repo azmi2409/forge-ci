@@ -1,0 +1,101 @@
+#!/bin/sh
+# Installs a ForgeCI runner on this machine as a systemd service.
+# Served by <%= @base_url %>; copy the full command from its Runners page:
+#
+#   curl -fsSL <%= @base_url %>/install-runner | sudo sh -s -- --token TOKEN [--class spot]
+#
+# Options:
+#   --token TOKEN        the shared runner token (required)
+#   --class NAME         resource class this runner serves (default: any)
+#   --idle-shutdown SEC  stop after SEC seconds without a job (default: never)
+#   --asg                with --idle-shutdown: remove this EC2 instance from its
+#                        Auto Scaling Group when idle (installs the AWS CLI)
+#
+# Supports Debian/Ubuntu (apt) and Amazon Linux/Fedora/RHEL (dnf or yum).
+set -eu
+
+CONTROL_PLANE_URL="<%= @base_url %>"
+TOKEN=""
+RESOURCE_CLASS=""
+IDLE_SHUTDOWN_AFTER=0
+ASG=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --token) TOKEN="${2:?--token needs a value}"; shift 2 ;;
+    --class) RESOURCE_CLASS="${2:?--class needs a value}"; shift 2 ;;
+    --idle-shutdown) IDLE_SHUTDOWN_AFTER="${2:?--idle-shutdown needs seconds}"; shift 2 ;;
+    --asg) ASG=1; shift ;;
+    *) echo "forge-ci: unknown option $1" >&2; exit 2 ;;
+  esac
+done
+
+say() { echo "forge-ci: $*"; }
+[ "$(id -u)" -eq 0 ] || { echo "forge-ci: run as root (pipe to 'sudo sh')" >&2; exit 1; }
+[ -n "$TOKEN" ] || { echo "forge-ci: --token is required (copy the command from the Runners page)" >&2; exit 2; }
+command -v systemctl >/dev/null || { echo "forge-ci: systemd is required" >&2; exit 1; }
+
+say "installing Docker and Ruby"
+if command -v apt-get >/dev/null; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -q
+  apt-get install -y -q docker.io ruby curl ca-certificates tar unzip
+elif command -v dnf >/dev/null; then
+  dnf install -y -q docker ruby curl tar unzip
+elif command -v yum >/dev/null; then
+  yum install -y -q docker ruby curl tar unzip
+else
+  echo "forge-ci: no apt-get, dnf or yum; install Docker and Ruby 3.0+ yourself and re-run" >&2
+  exit 1
+fi
+systemctl enable --now docker
+
+if [ "$ASG" -eq 1 ] && ! command -v aws >/dev/null; then
+  say "installing the AWS CLI"
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscli.zip
+  rm -rf /tmp/aws && unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install --update
+fi
+
+say "downloading the runner from $CONTROL_PLANE_URL"
+rm -rf /opt/forge-ci-runner.new
+mkdir -p /opt/forge-ci-runner.new
+curl -fsSL "$CONTROL_PLANE_URL/runner.tar.gz" | tar -xz -C /opt/forge-ci-runner.new
+rm -rf /opt/forge-ci-runner
+mv /opt/forge-ci-runner.new /opt/forge-ci-runner
+
+umask 077
+{
+  echo "CONTROL_PLANE_URL=$CONTROL_PLANE_URL"
+  echo "RUNNER_TOKEN=$TOKEN"
+  [ -n "$RESOURCE_CLASS" ] && echo "RESOURCE_CLASS=$RESOURCE_CLASS"
+  [ "$IDLE_SHUTDOWN_AFTER" != "0" ] && echo "IDLE_SHUTDOWN_AFTER=$IDLE_SHUTDOWN_AFTER"
+  [ "$ASG" -eq 1 ] && echo "IDLE_SHUTDOWN_COMMAND=/opt/forge-ci-runner/bin/forge-ci-asg-terminate-self"
+  true
+} > /etc/forge-ci-runner.env
+umask 022
+
+cat > /etc/systemd/system/forge-ci-runner.service <<'UNIT'
+[Unit]
+Description=ForgeCI runner
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/forge-ci-runner.env
+WorkingDirectory=/opt/forge-ci-runner
+ExecStart=/usr/bin/env ruby /opt/forge-ci-runner/bin/forge-ci-runner
+# on-failure, not always: an idle shutdown exits 0 and must stay stopped.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable forge-ci-runner >/dev/null
+systemctl restart forge-ci-runner
+say "runner installed and started (resource class: ${RESOURCE_CLASS:-any})"
+say "watch it with: journalctl -u forge-ci-runner -f"

@@ -1,56 +1,17 @@
-# ForgeCI full stack — one command to run everything locally.
+# ForgeCI: the control plane and its Postgres, plus an optional local runner.
 #
-#   cp .env.example .env   # then fill in: secrets + AWS S3 bucket
-#   docker compose up --build -d
+#   docker compose up -d                    # http://localhost:3000
+#   docker compose logs web | grep password # the first admin's password
+#   docker compose --profile runner up -d   # also run a runner on this machine
 #
-# Pick a runner secret first (any strong random value):
+# Nothing needs configuring for a local try-out. Secrets are generated on
+# first boot and kept in the forge-ci-data volume, along with logs, caches
+# and artifacts. Back that volume up together with pgdata.
 #
-#   openssl rand -hex 32   # put it in .env as RUNNER_TOKEN
-#
-# The server accepts the same value as FORGE_CI_RUNNER_TOKEN, so the runner
-# connects with no further setup — no tokens to copy out of logs.
-#
-# Web UI: http://localhost:3000 (admin / password from .env)
-#
-# Object storage (job logs, artifacts, cache tarballs) is AWS S3 — create
-# the bucket first (the app does not create it for you):
-#
-#   aws s3 mb s3://<your-bucket> --region <your-region>
-#
-# Push to a repo with the GitHub App installed (or POST a pipeline to the
-# API — see docs/api.md) and watch jobs get claimed and run.
+# For a real deploy set APP_HOST (and FORCE_SSL=true behind HTTPS) in .env;
+# everything else in .env is optional (see .env.example and DEPLOY.md).
 
 name: forge-ci
-
-x-web-env: &web-env
-  DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/forge_ci
-  QUEUE_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/forge_ci_queue
-  CACHE_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/forge_ci_cache
-  SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE in .env}
-  ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY: ${ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY:?set in .env}
-  ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: ${ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY:?set in .env}
-  ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: ${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT:?set in .env}
-  FORGE_CI_UI_USER: ${FORGE_CI_UI_USER:-admin}
-  FORGE_CI_UI_PASSWORD: ${FORGE_CI_UI_PASSWORD:-password}
-  FORCE_SSL: ${FORCE_SSL:-false}
-  # Shared runner secret (Drone-style): set RUNNER_TOKEN to any strong random
-  # value (e.g. `openssl rand -hex 32`). The server accepts it as the
-  # "static-runner" token; the runner presents it as RUNNER_TOKEN. No need
-  # to copy tokens out of logs.
-  FORGE_CI_RUNNER_TOKEN: ${RUNNER_TOKEN:-}
-  # Admin API token (create projects/contexts, start/cancel pipelines via
-  # `forge-ci trigger`). The admin API answers 503 while this is empty.
-  FORGE_CI_ADMIN_TOKEN: ${FORGE_CI_ADMIN_TOKEN:-}
-  # GitHub App (optional — only needed for push/PR webhooks + commit statuses)
-  GITHUB_APP_ID: ${GITHUB_APP_ID:-}
-  GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
-  GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-  ACTIVE_STORAGE_SERVICE: amazon
-  AWS_S3_BUCKET: "${AWS_S3_BUCKET:?set AWS_S3_BUCKET in .env}"
-  AWS_REGION: ${AWS_REGION:-us-east-1}
-  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID in .env}
-  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY in .env}
-  APP_HOST: ${APP_HOST:-http://localhost:3000}
 
 services:
   postgres:
@@ -68,6 +29,9 @@ services:
     networks:
       - forge-ci
 
+  # Web UI, API and background jobs in one container (SOLID_QUEUE_IN_PUMA).
+  # The queue and cache databases are derived from DATABASE_URL
+  # (forge_ci_queue, forge_ci_cache) and created on first boot.
   web:
     build:
       context: .
@@ -78,35 +42,27 @@ services:
         condition: service_healthy
     ports:
       - "${WEB_PORT:-3000}:80"
-    environment: *web-env
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/forge_ci
+      APP_HOST: ${APP_HOST:-http://localhost:3000}
+    volumes:
+      - forge-ci-data:/rails/storage
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/up || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 180s # db:prepare creates 3 DBs + loads schemas on first boot
+      start_period: 180s # first boot creates the databases and loads their schemas
     networks:
       - forge-ci
 
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    depends_on:
-      web:
-        condition: service_healthy # ensures db:prepare (all 3 DBs) ran first
-    command: ["./bin/jobs"]
-    environment: *web-env
-    networks:
-      - forge-ci
-
+  # A runner on this machine, reading the generated token from the shared
+  # volume. It needs the host's Docker socket, which some platforms (Coolify)
+  # don't allow; there, install runners with the command on the Runners page.
   runner:
-    # The containerized runner needs the host's Docker socket, which some
-    # platforms (e.g. Coolify) don't pass through. For those, run the
-    # runner directly on the host via systemd instead — see
-    # runner/forge-ci-runner.service. The profile keeps `docker compose up`
-    # from starting it by default; `docker compose up -d runner` still works.
     profiles: ["runner"]
     build:
       context: ./runner
@@ -116,12 +72,11 @@ services:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - forge-ci-data:/forge-ci-data:ro
     environment:
       CONTROL_PLANE_URL: http://web:80
-      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
-      RESOURCE_CLASS: ${RUNNER_RESOURCE_CLASS:-medium}
-    # Fails fast with a clear message when RUNNER_TOKEN is empty —
-    # generate one (see header) and `docker compose up -d runner`.
+      RUNNER_TOKEN_FILE: /forge-ci-data/runner-token
+      RESOURCE_CLASS: ${RUNNER_RESOURCE_CLASS:-}
     networks:
       - forge-ci
 
@@ -131,3 +86,4 @@ networks:
 
 volumes:
   pgdata:
+  forge-ci-data:

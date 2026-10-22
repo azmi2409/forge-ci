@@ -21,3 +21,17 @@ namespace :forge_ci do
     puts "#{user.previously_new_record? ? 'created' : 'updated'} #{role} #{user.username}"
   end
 end
+
+namespace :forge_ci do
+  desc "First boot: create the first admin if there are no users (prints a generated password once)"
+  task bootstrap: :environment do
+    user, generated = User.bootstrap_admin_from_env!
+    next unless user
+
+    puts "forge-ci: created the first admin user '#{user.username}'"
+    if generated
+      puts "forge-ci:   password: #{generated}"
+      puts "forge-ci:   (also saved to #{User.initial_password_path}; change it under Account after signing in)"
+    end
+  end
+end

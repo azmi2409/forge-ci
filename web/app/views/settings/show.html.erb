@@ -1,0 +1,143 @@
+<% content_for(:title, "Settings — ForgeCI") %>
+<% content_for(:crumb, "Settings") %>
+<% content_for(:head) do %>
+  <style>
+    .copy-row { display: flex; gap: 8px; align-items: stretch; }
+    .copy-row pre { flex: 1; min-width: 0; margin: 0; white-space: pre-wrap; word-break: break-all; }
+    .copy-row .button-secondary { height: auto; }
+    .settings-grid { display: grid; gap: 24px; max-width: 880px; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; font-size: 14px; }
+    .kv dt { color: var(--muted); }
+    .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+    .inline-fields { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+    .inline-fields .form-row { flex: 1; min-width: 200px; }
+    .warn { color: var(--warn); }
+  </style>
+<% end %>
+
+<div class="page-header">
+  <div>
+    <h1 class="page-heading">Settings</h1>
+    <p>Connect GitHub, add runners and get the API token for scripts.</p>
+  </div>
+</div>
+<%= render "shared/flash" %>
+
+<div class="settings-grid">
+  <section class="card" aria-labelledby="github-title">
+    <div class="card-header">
+      <div>
+        <h2 id="github-title" class="card-title"><%= icon "github" %>GitHub</h2>
+        <p class="card-desc">Pipelines start on every push and pull request, private repositories clone automatically, and results show up as commit statuses.</p>
+      </div>
+      <% if Github.configured? %><span class="status-badge"><span class="status-dot" data-state="success"></span>Connected</span><% end %>
+    </div>
+    <div class="card-body">
+      <% if @github_from_env %>
+        <p class="text-muted">Configured with <code>GITHUB_APP_ID</code> and <code>GITHUB_APP_PRIVATE_KEY</code> in the environment. Remove them to manage the App here.</p>
+      <% elsif @github %>
+        <dl class="kv">
+          <dt>App</dt><dd><a class="text-link" href="<%= @github.html_url %>"><%= @github.name || @github.slug %></a></dd>
+          <% if @github.owner_login %><dt>Owner</dt><dd class="mono"><%= @github.owner_login %></dd><% end %>
+          <dt>Connected</dt><dd><%= time_ago_tag(@github.created_at) %></dd>
+        </dl>
+        <div class="form-actions">
+          <a class="button-primary" href="<%= @github.install_url %>"><%= icon "plus" %>Install on repositories</a>
+        </div>
+      <% else %>
+        <% unless @public_url %>
+          <p class="warn" style="margin-bottom: 16px">GitHub can't reach <span class="mono"><%= @base_url %></span>. Set <code>APP_HOST</code> to this server's public HTTPS address first, or webhooks won't arrive.</p>
+        <% end %>
+        <%= form_with url: github_settings_path, method: :post, data: { turbo: false } do %>
+          <div class="inline-fields">
+            <div class="form-row">
+              <label class="field-label" for="org">GitHub organization (optional)</label>
+              <input class="field" type="text" id="org" name="org" placeholder="Leave empty for your personal account" autocapitalize="none" spellcheck="false">
+            </div>
+            <button type="submit" class="button-primary"><%= icon "github" %>Connect GitHub</button>
+          </div>
+          <p class="field-hint">Creates a private GitHub App for this server with the right permissions, then asks which repositories to install it on.</p>
+        <% end %>
+      <% end %>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="runners-title">
+    <div class="card-header">
+      <div>
+        <h2 id="runners-title" class="card-title"><%= icon "server" %>Runners</h2>
+        <p class="card-desc">Run this on any Linux machine with systemd (Ubuntu, Debian, Amazon Linux). It installs Docker and Ruby, then starts a runner as a service.</p>
+      </div>
+    </div>
+    <div class="card-body">
+      <% if @runner_token.blank? %>
+        <p class="warn">No runner token is configured. Set <code>FORGE_CI_RUNNER_TOKEN</code> on the control plane.</p>
+      <% else %>
+        <div class="inline-fields" style="margin-bottom: 12px">
+          <div class="form-row">
+            <label class="field-label" for="runner-class">Resource class (optional)</label>
+            <input class="field" type="text" id="runner-class" placeholder="e.g. spot or deploy; empty serves jobs without one" autocapitalize="none" spellcheck="false">
+          </div>
+          <div class="form-row">
+            <label class="field-label" for="runner-idle">Stop when idle for (seconds, optional)</label>
+            <input class="field" type="number" id="runner-idle" min="0" placeholder="e.g. 600 for scale to zero">
+          </div>
+        </div>
+        <div class="copy-row">
+          <pre class="code-block" id="install-command" data-base="curl -fsSL <%= @base_url %>/install-runner | sudo sh -s -- --token <%= @runner_token %>">curl -fsSL <%= @base_url %>/install-runner | sudo sh -s -- --token <%= @runner_token %></pre>
+          <button type="button" class="button-secondary" data-copy="install-command">Copy</button>
+        </div>
+        <p class="field-hint">Contains the runner token: anyone with it can run your jobs. Scaling to zero on AWS is in the <a class="text-link" href="https://github.com/azmi2409/forge-ci/blob/main/DEPLOY.md#scale-runners-to-zero-aws">deploy guide</a>.</p>
+      <% end %>
+    </div>
+    <% if @queue.any? %>
+      <div class="card-footer">
+        <span>Waiting or running: <%= safe_join(@queue.map { |klass, n| tag.span("#{klass || "any"} #{n}", class: "chip") }, " ") %></span>
+      </div>
+    <% end %>
+  </section>
+
+  <section class="card" aria-labelledby="api-title">
+    <div class="card-header">
+      <div>
+        <h2 id="api-title" class="card-title"><%= icon "terminal" %>API token</h2>
+        <p class="card-desc">For <code>forge-ci trigger</code>, <code>forge-ci cancel</code> and the admin API. Keep it secret.</p>
+      </div>
+    </div>
+    <div class="card-body">
+      <% if @admin_token.blank? %>
+        <p class="warn">No API token is configured. Set <code>FORGE_CI_ADMIN_TOKEN</code> on the control plane.</p>
+      <% else %>
+        <div class="copy-row">
+          <pre class="code-block" id="api-env">export FORGE_CI_URL=<%= @base_url %> FORGE_CI_ADMIN_TOKEN=<%= @admin_token %></pre>
+          <button type="button" class="button-secondary" data-copy="api-env">Copy</button>
+        </div>
+      <% end %>
+    </div>
+  </section>
+</div>
+
+<script>
+  (function() {
+    var cmd = document.getElementById("install-command");
+    var cls = document.getElementById("runner-class");
+    var idle = document.getElementById("runner-idle");
+    function update() {
+      if (!cmd) return;
+      var text = cmd.dataset.base;
+      var c = (cls.value || "").trim().replace(/[^A-Za-z0-9_.-]/g, "");
+      var i = parseInt(idle.value, 10);
+      if (c) text += " --class " + c;
+      if (i > 0) text += " --idle-shutdown " + i;
+      cmd.textContent = text;
+    }
+    [cls, idle].forEach(function(el) { if (el) el.addEventListener("input", update); });
+    document.querySelectorAll("[data-copy]").forEach(function(btn) {
+      btn.addEventListener("click", function() {
+        var text = document.getElementById(btn.dataset.copy).textContent;
+        var done = function() { btn.textContent = "Copied"; setTimeout(function() { btn.textContent = "Copy"; }, 1500); };
+        if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function() {}); else done();
+      });
+    });
+  })();
+</script>

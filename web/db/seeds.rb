@@ -5,6 +5,14 @@
 # on first boot.
 #
 # The raw runner token is printed to stdout (it is shown ONCE and never stored).
+#
+# Development only: `db:prepare` runs seeds when it creates a database, and a
+# real install must not start with a demo project, runner token and pipeline.
+# Set FORGE_CI_SEED_DEMO=1 to seed anyway.
+if Rails.env.production? && ENV["FORGE_CI_SEED_DEMO"] != "1"
+  puts "Skipping demo seed data in production (set FORGE_CI_SEED_DEMO=1 to load it)."
+  return
+end
 
 project = Project.find_or_create_by!(name: "demo") do |p|
   p.repo_url = "https://github.com/example/demo"

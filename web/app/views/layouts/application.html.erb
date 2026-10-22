@@ -87,7 +87,10 @@
             <p class="sidebar-label">Account</p>
             <ul>
               <li><%= sidebar_link "Account", account_path, "user", active: controller_name == "accounts" %></li>
-              <% if current_user.admin? %><li><%= sidebar_link "Users", users_path, "users", active: controller_name == "users" %></li><% end %>
+              <% if current_user.admin? %>
+                <li><%= sidebar_link "Settings", settings_path, "settings", active: controller_name == "settings" %></li>
+                <li><%= sidebar_link "Users", users_path, "users", active: controller_name == "users" %></li>
+              <% end %>
               <li><%= sidebar_link "Documentation", "https://github.com/azmi2409/forge-ci#readme", "info", active: false %></li>
             </ul>
           </nav>
