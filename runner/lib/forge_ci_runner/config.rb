@@ -33,6 +33,11 @@ module ForgeCIRunner
   #                        (default: 0, never). For scale-to-zero groups.
   #   IDLE_SHUTDOWN_COMMAND shell command run once on idle shutdown, e.g.
   #                        bin/forge-ci-asg-terminate-self (optional)
+  #   REQUEUE_ON_SHUTDOWN  1 = on SIGTERM/SIGINT mid-job, stop the running step
+  #                        and hand the job back to the queue instead of
+  #                        reporting it canceled (default: off). For Spot or
+  #                        preemptible runners whose jobs are safe to retry;
+  #                        never on deploy runners.
   class Config
     class Error < StandardError; end
 
@@ -41,7 +46,7 @@ module ForgeCIRunner
                 :log_chunk_size, :log_flush_interval, :checkout_repo_url, :redact_min_length,
                 :docker_bin, :step_no_output_timeout, :job_timeout,
                 :idle_shutdown_after, :idle_shutdown_command,
-                :allow_docker_socket, :docker_socket_path
+                :allow_docker_socket, :docker_socket_path, :requeue_on_shutdown
 
     def self.from_env(env = ENV)
       new(
@@ -61,7 +66,8 @@ module ForgeCIRunner
         idle_shutdown_after: (env["IDLE_SHUTDOWN_AFTER"] || 0).to_f,
         idle_shutdown_command: env["IDLE_SHUTDOWN_COMMAND"],
         allow_docker_socket: %w[1 true yes].include?(env["ALLOW_DOCKER_SOCKET"].to_s.strip.downcase),
-        docker_socket_path: env["DOCKER_SOCKET_PATH"].to_s.empty? ? "/var/run/docker.sock" : env["DOCKER_SOCKET_PATH"]
+        docker_socket_path: env["DOCKER_SOCKET_PATH"].to_s.empty? ? "/var/run/docker.sock" : env["DOCKER_SOCKET_PATH"],
+        requeue_on_shutdown: %w[1 true yes].include?(env["REQUEUE_ON_SHUTDOWN"].to_s.strip.downcase)
       )
     end
 
@@ -89,7 +95,7 @@ module ForgeCIRunner
                    docker_bin: "docker", step_no_output_timeout: 600.0,
                    job_timeout: 3600.0, idle_shutdown_after: 0.0,
                    idle_shutdown_command: nil, allow_docker_socket: false,
-                   docker_socket_path: "/var/run/docker.sock")
+                   docker_socket_path: "/var/run/docker.sock", requeue_on_shutdown: false)
       raise Error, "CONTROL_PLANE_URL is required" if control_plane_url.to_s.empty?
       if runner_token.to_s.empty?
         raise Error, "RUNNER_TOKEN is required — set it to the same secret as " \
@@ -113,6 +119,7 @@ module ForgeCIRunner
       @idle_shutdown_command = idle_shutdown_command
       @allow_docker_socket = allow_docker_socket
       @docker_socket_path = docker_socket_path
+      @requeue_on_shutdown = requeue_on_shutdown
     end
   end
 end

@@ -54,6 +54,7 @@ first boot and kept in `secrets.yml` in the data directory.
 | `IDLE_SHUTDOWN_AFTER` | no | `0` (never) | Seconds without a job after which the runner stops claiming, runs `IDLE_SHUTDOWN_COMMAND` and exits |
 | `IDLE_SHUTDOWN_COMMAND` | no | — | Shell command run once on idle shutdown, e.g. `bin/forge-ci-asg-terminate-self` |
 | `ALLOW_DOCKER_SOCKET` | no | off | `1` lets jobs with `setup_remote_docker` use this machine's Docker socket. Such a job controls the machine, so set it only on runners trusted with that (the deploy runner); fork pull requests are always refused. The install command's `--allow-docker` sets it |
+| `REQUEUE_ON_SHUTDOWN` | no | off | `1`: on SIGTERM/SIGINT mid-job, stop the running step and put the job back in the queue instead of reporting it canceled (at most twice per job). For Spot/preemptible runners whose jobs are safe to retry; never on deploy runners. The install command's `--requeue-on-shutdown` sets it |
 | `DOCKER_SOCKET_PATH` | no | `/var/run/docker.sock` | The socket mounted for `setup_remote_docker` |
 
 ## Compiler gem / CLI

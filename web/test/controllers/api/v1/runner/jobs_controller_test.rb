@@ -256,6 +256,48 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
   end
 
+  # --- release --------------------------------------------------------------------
+
+  test "release puts the owner's running job back in the queue" do
+    post "/api/v1/runner/jobs/claim", headers: auth
+    build_id = json_body["id"]
+    post "/api/v1/runner/jobs/#{build_id}/start", headers: auth
+
+    post "/api/v1/runner/jobs/#{build_id}/release", params: { reason: "runner shutting down (SIGTERM)" },
+                                                     headers: auth, as: :json
+    assert_response :ok
+    assert_equal({ "id" => build_id, "status" => "queued" }, json_body)
+    build = job_named("build").reload
+    assert build.queued?
+    assert_nil build.claimed_by
+    assert_equal 1, build.releases
+
+    # Another runner picks it up again.
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_equal build_id, json_body["id"]
+  end
+
+  test "release by a non-owning token returns 403" do
+    post "/api/v1/runner/jobs/claim", headers: auth
+    build_id = json_body["id"]
+    _rec, other_raw = RunnerToken.generate!(name: "runner-2", resource_class: "medium")
+    post "/api/v1/runner/jobs/#{build_id}/release", params: { reason: "x" },
+                                                     headers: bearer_headers(other_raw), as: :json
+    assert_response :forbidden
+    assert job_named("build").reload.claimed?
+  end
+
+  test "release returns 409 once the job was released too often" do
+    post "/api/v1/runner/jobs/claim", headers: auth
+    build_id = json_body["id"]
+    job_named("build").update_column(:releases, JobRun::MAX_RELEASES)
+
+    post "/api/v1/runner/jobs/#{build_id}/release", params: { reason: "x" }, headers: auth, as: :json
+    assert_response :conflict
+    assert_match "released", json_body["error"]
+    assert job_named("build").reload.claimed?, "the runner completes it as canceled instead"
+  end
+
   # --- repository info (integration fix) --------------------------------------
 
   test "claim payload includes repository from the GitHub repo mapping" do

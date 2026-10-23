@@ -72,6 +72,20 @@ class ClientTest < Minitest::Test
     assert_equal({ "seq" => 3, "chunk" => "hello\n" }, body)
   end
 
+  def test_release_posts_the_reason
+    @server.stub("POST", "/api/v1/runner/jobs/9/release", "200", { "id" => 9, "status" => "queued" })
+    @client.release_job(9, "runner shutting down (SIGTERM)")
+    req = @server.last_request
+    assert_equal "/api/v1/runner/jobs/9/release", req[:path]
+    assert_equal({ "reason" => "runner shutting down (SIGTERM)" }, JSON.parse(req[:body]))
+  end
+
+  def test_release_raises_on_409
+    @server.stub("POST", "/api/v1/runner/jobs/9/release", "409", { "error" => "released too often" })
+    err = assert_raises(ForgeCIRunner::Client::HTTPError) { @client.release_job(9, "x") }
+    assert_equal "409", err.code
+  end
+
   def test_start_and_heartbeat_paths
     @server.stub("POST", "/api/v1/runner/jobs/9/start", "200", { "id" => 9 })
     @server.stub("POST", "/api/v1/runner/jobs/9/heartbeat", "200",

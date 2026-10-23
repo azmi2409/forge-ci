@@ -114,6 +114,15 @@ whose `requires` are now **all** successful move `pending → queued`. On
 (`failed` if any job failed → `canceled` → `running` while anything is in
 flight → `success`) and rolls up to the pipeline.
 
+- `POST /api/v1/runner/jobs/:id/release` — `{ "reason": "runner shutting down (SIGTERM)" }`
+
+A runner with `REQUEUE_ON_SHUTDOWN` that is shutting down mid-job hands the
+job back: `claimed|running → queued` (`200 { id, status }`), as if never
+run (logs, artifacts and step results cleared, no runner), for another
+runner to claim. Only the owning token (`403` otherwise). `409 { error }`
+once the job has been released `MAX_RELEASES` (2) times; the runner then
+completes it as `canceled`. `422` from any other state.
+
 ### Logs
 
 - `POST /api/v1/jobs/:id/log_chunks` — `{ "seq": 3, "chunk": "…log text…" }`.
@@ -202,6 +211,7 @@ only** — values are never echoed back:
 7. Cache: `PUT /api/v1/projects/:project_id/cache` (multipart `key` +
    `file`); `GET …/cache?keys[]=k1&keys[]=k2`.
 8. Finish: `POST …/complete` with `status` + `step_results` (`name` must
-   match the claim payload's step names).
+   match the claim payload's step names). A runner that is shutting down
+   may `POST …/release` instead, if its jobs are safe to retry.
 9. Never invent job IDs, never touch another token's jobs (`403`), never
    expect raw context values outside the claim payload's merged `environment`.
