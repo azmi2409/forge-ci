@@ -82,8 +82,8 @@ Most important first.
       `docker_layer_caching: true` + `FORGE_CI_BUILD_CACHE_REGISTRY` give jobs
       a registry-backed layer cache (buildx `--cache-from/--cache-to`,
       `forge-ci-build` wrapper, ECR token minting; docs/configuration.md,
-      "Docker layer caching"). Kamal: `builder: cache: type=registry` reading
-      `ENV["FORGE_CI_BUILD_CACHE_TO"]`.
+      "Docker layer caching"). Kamal: `builder: cache: type=registry` with
+      `image: <%= ENV["FORGE_CI_BUILD_CACHE_TO"] %>`.
 - [ ] **AMI builder in the repo:** the runner image (Docker, Ruby, AWS CLI,
       pre-pulled job images) is built with a pasted script; ship it as
       `runner/aws/build-ami.sh` (and arm64), and the Spot group setup as a

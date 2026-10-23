@@ -129,15 +129,21 @@ jobs:
 `forge-ci-build` is installed into the job container by the runner; it is
 `docker buildx build` with the cache flags filled in (`--load` included
 unless you pass `--push`/`--output`). Builds that manage their own buildx
-invocation (Kamal, bake) use the environment instead:
+invocation (Kamal, bake) use the environment instead. Kamal's default build
+driver is already `docker-container`, so its registry cache just works with
+the ref forge-ci exports — in `deploy.yml`:
 
 ```yaml
-# Kamal's deploy.yml reads the ref forge-ci exported:
 builder:
   cache:
     type: registry
-    ref: <%= ENV["FORGE_CI_BUILD_CACHE_TO"] %>
+    image: <%= ENV["FORGE_CI_BUILD_CACHE_TO"] %>   # full ref, tag included; Kamal passes it through verbatim
+    options: mode=max
 ```
+
+`FORGE_CI_BUILD_CACHE_TO` is only set inside forge-ci jobs; if you also run
+`kamal deploy` from your laptop, fall back with
+`<%= ENV["FORGE_CI_BUILD_CACHE_TO"] || "registry/app-build-cache" %>`.
 
 Every step sees `FORGE_CI_BUILD_CACHE_FROM` / `_TO` (the ref),
 `FORGE_CI_BUILD_BUILDER` (a per-job buildx builder, already created) and the
