@@ -78,9 +78,12 @@ Most important first.
 - [ ] **Autoscaling beyond AWS:** `RunnerAutoscaler` only drives EC2 Auto
       Scaling Groups. Add a provider interface (OCI instance pools, GCP MIGs,
       Hetzner) or document `GET /api/v1/queue` for custom scalers.
-- [ ] **Build cache for `setup_remote_docker`:** each fresh runner builds
-      images from scratch; document or wire up a registry cache (Kamal
-      `builder: cache: type: registry`).
+- [x] **Build cache for `setup_remote_docker`:** done 2026-10-23 —
+      `docker_layer_caching: true` + `FORGE_CI_BUILD_CACHE_REGISTRY` give jobs
+      a registry-backed layer cache (buildx `--cache-from/--cache-to`,
+      `forge-ci-build` wrapper, ECR token minting; docs/configuration.md,
+      "Docker layer caching"). Kamal: `builder: cache: type=registry` reading
+      `ENV["FORGE_CI_BUILD_CACHE_TO"]`.
 - [ ] **AMI builder in the repo:** the runner image (Docker, Ruby, AWS CLI,
       pre-pulled job images) is built with a pasted script; ship it as
       `runner/aws/build-ami.sh` (and arm64), and the Spot group setup as a
@@ -114,7 +117,8 @@ Most important first.
 - [x] Rerun failed jobs / rerun all (pipeline page) — 2026-10-22
 - [ ] SSH re-run
 - [ ] Approval jobs (`type: approval`)
-- [ ] Docker layer caching
+- [x] Docker layer caching — 2026-10-23, registry-backed via
+      `docker_layer_caching: true` (see docs/configuration.md)
 
 ## Known limitations (accepted for v1)
 

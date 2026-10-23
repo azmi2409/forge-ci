@@ -23,6 +23,10 @@ module ForgeCIRunner
   #                        https://x-access-token:TOKEN@github.com/org/repo.git
   #   REDACT_MIN_LENGTH    env values shorter than this are not redacted (default: 8)
   #   DOCKER_BIN           path to the docker CLI (default: "docker")
+#   BUILDX_BIN           path to a buildx binary (e.g. /opt/forge-ci-runner/bin/buildx,
+#                        installed by the installer) that gets copied into job
+#                        containers lacking one, for docker_layer_caching builds
+#                        (unset: such jobs warn and build without a shared cache)
   #   STEP_NO_OUTPUT_TIMEOUT  seconds a `run` step may stay silent before it is
   #                        killed (default: 600, like CircleCI; a step's own
   #                        `no_output_timeout:` overrides it; 0 disables)
@@ -44,7 +48,7 @@ module ForgeCIRunner
     attr_reader :control_plane_url, :runner_token, :resource_class,
                 :poll_interval, :max_idle_interval, :heartbeat_interval,
                 :log_chunk_size, :log_flush_interval, :checkout_repo_url, :redact_min_length,
-                :docker_bin, :step_no_output_timeout, :job_timeout,
+                :docker_bin, :buildx_bin, :step_no_output_timeout, :job_timeout,
                 :idle_shutdown_after, :idle_shutdown_command,
                 :allow_docker_socket, :docker_socket_path, :requeue_on_shutdown
 
@@ -61,6 +65,7 @@ module ForgeCIRunner
         checkout_repo_url: env["CHECKOUT_REPO_URL"],
         redact_min_length: (env["REDACT_MIN_LENGTH"] || 8).to_i,
         docker_bin: env["DOCKER_BIN"] || "docker",
+        buildx_bin: env["BUILDX_BIN"].to_s.empty? ? nil : env["BUILDX_BIN"],
         step_no_output_timeout: (env["STEP_NO_OUTPUT_TIMEOUT"] || 600).to_f,
         job_timeout: (env["JOB_TIMEOUT"] || 3600).to_f,
         idle_shutdown_after: (env["IDLE_SHUTDOWN_AFTER"] || 0).to_f,
@@ -92,7 +97,7 @@ module ForgeCIRunner
                    poll_interval: 5.0, max_idle_interval: 60.0,
                    heartbeat_interval: 15.0, log_chunk_size: 65_536, log_flush_interval: 1.0,
                    checkout_repo_url: nil, redact_min_length: 8,
-                   docker_bin: "docker", step_no_output_timeout: 600.0,
+                   docker_bin: "docker", buildx_bin: nil, step_no_output_timeout: 600.0,
                    job_timeout: 3600.0, idle_shutdown_after: 0.0,
                    idle_shutdown_command: nil, allow_docker_socket: false,
                    docker_socket_path: "/var/run/docker.sock", requeue_on_shutdown: false)
@@ -113,6 +118,7 @@ module ForgeCIRunner
       @checkout_repo_url = checkout_repo_url
       @redact_min_length = redact_min_length
       @docker_bin = docker_bin
+      @buildx_bin = buildx_bin
       @step_no_output_timeout = step_no_output_timeout
       @job_timeout = job_timeout
       @idle_shutdown_after = idle_shutdown_after

@@ -114,7 +114,10 @@ module Api
             trusted: !pipeline.forked?,
             workflow_run_id: job.workflow_run_id,
             project_id: job.project.id,
-            repository: repository_info(job)
+            repository: repository_info(job),
+            # Registry-backed layer cache for setup_remote_docker jobs; nil
+            # (omitted) unless FORGE_CI_BUILD_CACHE_REGISTRY is configured.
+            docker_build_cache: BuildCacheConfig.for_job(job)
           }.compact
         end
 

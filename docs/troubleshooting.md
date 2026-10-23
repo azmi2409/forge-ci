@@ -55,6 +55,19 @@ control plane.
 - Restore tries keys in order; the server falls back to longest-prefix. A
   `404` on all keys is a clean miss, not an error.
 
+## Docker layer cache stays cold (every build from scratch)
+
+That's the local layer cache dying with the machine — expected on Spot /
+scale-to-zero runners. Turn on the registry-backed cache
+(`FORGE_CI_BUILD_CACHE_REGISTRY` on the server +
+`docker_layer_caching: true` in the job) and build with `forge-ci-build`
+(see docs/configuration.md, "Docker layer caching"). If it is on but still
+cold: the job log shows the runner's warnings — "no FORGE_CI_BUILD_CACHE_REGISTRY",
+a failed `docker login`, or missing buildx (`BUILDX_BIN` unset and the job
+image ships none). `forge-ci-build` also only reuses layers for unchanged
+Dockerfile steps; a changed dependency file legitimately rebuilds from there
+down.
+
 ## Fork PR has no secrets
 
 By design: fork pipelines forcibly receive zero contexts

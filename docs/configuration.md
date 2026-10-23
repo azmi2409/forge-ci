@@ -30,6 +30,8 @@ first boot and kept in `secrets.yml` in the data directory.
 | `FORGE_CI_AUTOSCALE` | — | Scale runner Auto Scaling Groups up when jobs queue: `class=asg-name[:max[:jobs_per_instance]],…` (see DEPLOY.md, "Scale runners to zero") |
 | `FORGE_CI_AUTOSCALE_REGION` | `AWS_REGION` | Region of those Auto Scaling Groups |
 | `FORGE_CI_AUTOSCALE_WARM` | — | Classes (comma-separated, e.g. `deploy`) whose runner starts as soon as a pipeline has a job of that class waiting on earlier jobs, instead of once it's queued. The runner stays up until the job arrives, and idles out as usual if the job is canceled |
+| `FORGE_CI_BUILD_CACHE_REGISTRY` | — | Full repository reference (no tag) of the registry-backed Docker layer cache for `setup_remote_docker` jobs, e.g. `123456789012.dkr.ecr.ap-southeast-3.amazonaws.com/forge-ci-cache`. See "Docker layer caching" below |
+| `FORGE_CI_BUILD_CACHE_REGISTRY_USERNAME` / `FORGE_CI_BUILD_CACHE_REGISTRY_PASSWORD` | — | Static credentials for a non-ECR cache registry (a machine user with push access to that one repository). ECR hosts are authorized automatically and ignore these |
 | `SOLID_QUEUE_IN_PUMA` | `1` in the image, `0` in docker-compose.yml | Run the background jobs inside the web process. `0` (or empty) turns it off; then run `bin/jobs` separately, as the compose `worker` service does |
 | `FORGE_CI_RUNNER_PATH` | `/forge-ci/runner` in the image, `../runner` otherwise | The runner files served as `/runner.tar.gz` |
 | `FORGE_CI_SEED_DEMO` | — | `1` loads the demo project and pipelines in production (`db:prepare` skips them otherwise) |
@@ -51,6 +53,7 @@ first boot and kept in `secrets.yml` in the data directory.
 | `CHECKOUT_REPO_URL` | no | — | Fallback git URL for `checkout` (the claim payload's `repository.url` is preferred) |
 | `REDACT_MIN_LENGTH` | no | `8` | Env values shorter than this are not redacted from logs |
 | `DOCKER_BIN` | no | `docker` | Path to the docker CLI |
+| `BUILDX_BIN` | no | — | Path to a buildx binary the runner copies into job images that lack one, for `docker_layer_caching` builds. Set automatically by the install command's `--allow-docker` and the runner image |
 | `IDLE_SHUTDOWN_AFTER` | no | `0` (never) | Seconds without a job after which the runner stops claiming, runs `IDLE_SHUTDOWN_COMMAND` and exits |
 | `IDLE_SHUTDOWN_COMMAND` | no | — | Shell command run once on idle shutdown, e.g. `bin/forge-ci-asg-terminate-self` |
 | `ALLOW_DOCKER_SOCKET` | no | off | `1` lets jobs with `setup_remote_docker` use this machine's Docker socket. Such a job controls the machine, so set it only on runners trusted with that (the deploy runner); fork pull requests are always refused. The install command's `--allow-docker` sets it |
@@ -61,3 +64,82 @@ first boot and kept in `secrets.yml` in the data directory.
 
 No configuration. `forge-ci validate|compile` takes flags (`--branch`,
 `--sha`, `--number`, `--json`); the library takes `pipeline_params:`.
+
+## Docker layer caching
+
+Docker's layer cache lives in `/var/lib/docker` on the runner machine, so on
+ephemeral (Spot, scale-to-zero) runners every fresh instance rebuilds every
+layer. Setting this up moves the cache into a registry instead: builds export
+their layers during the build (`--cache-to`) and the next runner pulls them
+back (`--cache-from`), so a Spot reclamation never costs more than the build
+it was interrupting.
+
+**Server**: set `FORGE_CI_BUILD_CACHE_REGISTRY` to a full repository
+reference without a tag. Cache images are tags on that one repository,
+per project and branch: `<registry>:p<project_id>-<branch>`.
+
+For ECR (any `*.dkr.ecr.<region>.amazonaws.com` host) the control plane
+mints 12-hour authorization tokens itself, using the same AWS credentials
+as the autoscaler (`aws-sdk-ecr`, `require: false` at load). Give that IAM
+principal exactly:
+
+```json
+{"Version": "2012-10-17", "Statement": [
+  {"Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*"},
+  {"Effect": "Allow", "Action": ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage",
+     "ecr:CompleteLayerUpload", "ecr:InitiateLayerUpload", "ecr:PutImage",
+     "ecr:UploadLayerPart", "ecr:GetDownloadUrlForLayer"],
+   "Resource": "arn:aws:ecr:<region>:<account>:repository/forge-ci-cache"}
+]}
+```
+
+ECR repositories don't auto-create — make it once, with a lifecycle policy so
+old cache layers don't accumulate forever:
+
+```sh
+aws ecr create-repository --repository-name forge-ci-cache
+aws ecr put-lifecycle-policy --repository-name forge-ci-cache --lifecycle-policy-text \
+  '{"rules":[{"rulePriority":1,"description":"expire cache images","selection":{"tagStatus":"any","countType":"sinceImagePushed","countUnit":"days","countNumber":30},"action":{"type":"expire"}}]}'
+```
+
+Any other registry (GHCR, Docker Hub, a local one): set
+`FORGE_CI_BUILD_CACHE_REGISTRY_USERNAME` / `_PASSWORD` to a machine user with
+push access to that one repository. Leave all three unset for an
+unauthenticated registry. Fork pull requests never receive cache
+credentials (they are refused the Docker socket anyway).
+
+**Runner**: nothing to configure. The install command's `--allow-docker`
+downloads a pinned buildx into `/opt/forge-ci-runner/bin/buildx` and sets
+`BUILDX_BIN`; the runner copies it into job images that don't ship one.
+
+**Pipeline**: ask for the cache on the job that builds images —
+
+```yaml
+jobs:
+  deploy:
+    docker: [{ image: cimg/ruby:3.3 }]
+    resource_class: deploy
+    steps:
+      - checkout
+      - setup_remote_docker:
+          docker_layer_caching: true      # version: is accepted and ignored
+      - run: forge-ci-build -t registry/app:$SHA .   # then push as usual
+```
+
+`forge-ci-build` is installed into the job container by the runner; it is
+`docker buildx build` with the cache flags filled in (`--load` included
+unless you pass `--push`/`--output`). Builds that manage their own buildx
+invocation (Kamal, bake) use the environment instead:
+
+```yaml
+# Kamal's deploy.yml reads the ref forge-ci exported:
+builder:
+  cache:
+    type: registry
+    ref: <%= ENV["FORGE_CI_BUILD_CACHE_TO"] %>
+```
+
+Every step sees `FORGE_CI_BUILD_CACHE_FROM` / `_TO` (the ref),
+`FORGE_CI_BUILD_BUILDER` (a per-job buildx builder, already created) and the
+login credentials. A job with `docker_layer_caching: true` on a server
+without `FORGE_CI_BUILD_CACHE_REGISTRY` logs a warning and builds uncached.

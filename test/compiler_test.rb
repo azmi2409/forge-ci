@@ -223,6 +223,44 @@ class CompilerTest < Minitest::Test
     assert_equal %w[checkout setup_remote_docker setup_remote_docker run], types
   end
 
+  def test_setup_remote_docker_layer_caching_flag_is_carried_into_the_ir
+    ir, errors = compile_yaml(<<~YAML)
+      version: 2.1
+      jobs:
+        build:
+          docker: [{ image: cimg/ruby:3.3 }]
+          steps:
+            - setup_remote_docker:
+                docker_layer_caching: true
+            - setup_remote_docker:
+                version: 20.10.14
+      workflows:
+        ci:
+          jobs: [build]
+    YAML
+    assert_empty errors
+    steps = job_by_name(ir, "build")[:steps]
+    assert_equal true, steps[0][:layer_caching]
+    refute steps[1].key?(:layer_caching), "version-only setup_remote_docker must not set layer_caching"
+  end
+
+  def test_setup_remote_docker_layer_caching_must_be_a_boolean
+    _ir, errors = compile_yaml(<<~YAML)
+      version: 2.1
+      jobs:
+        build:
+          docker: [{ image: cimg/ruby:3.3 }]
+          steps:
+            - setup_remote_docker:
+                docker_layer_caching: sometimes
+      workflows:
+        ci:
+          jobs: [build]
+    YAML
+    assert(errors.map(&:to_s).join.include?("docker_layer_caching"),
+           "expected a docker_layer_caching validation error, got: #{errors.inspect}")
+  end
+
   # --- matrix ---------------------------------------------------------------
 
   def test_matrix_desugars_into_numbered_jobs
