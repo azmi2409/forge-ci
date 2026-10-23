@@ -72,6 +72,61 @@ class JobRunTest < ActiveSupport::TestCase
     assert_raises(JobRun::IllegalTransition) { job.complete_with_results!(status: "success") }
   end
 
+  # --- release ----------------------------------------------------------------
+
+  test "release! puts a running job back in the queue as if never run" do
+    job = build_job(status: "running")
+    job.update_columns(claimed_by: "spot-runner", claimed_at: 1.minute.ago, heartbeat_at: Time.current)
+    job.step_runs.create!(name: "test", status: "failed", exit_code: 130, started_at: 1.minute.ago, finished_at: Time.current)
+    job.log_chunks.create!(seq: 0, chunk: "running tests...\n")
+    job.artifacts.create!(path: "coverage.html", storage_key: "k")
+
+    assert job.release!(reason: "runner shutting down (SIGTERM)")
+
+    job.reload
+    assert job.queued?
+    assert_nil job.claimed_by
+    assert_nil job.claimed_at
+    assert_nil job.heartbeat_at
+    assert_equal 1, job.releases
+    step = job.step_runs.sole
+    assert step.pending?
+    assert_nil step.exit_code
+    assert_nil step.started_at
+    assert_empty job.log_chunks
+    assert_empty job.artifacts
+    assert_equal "running", job.workflow_run.reload.status
+    assert_equal "running", job.workflow_run.pipeline.reload.status
+  end
+
+  test "release! works from claimed too" do
+    job = build_job(status: "claimed")
+    assert job.release!
+    assert job.reload.queued?
+  end
+
+  test "release! returns false and changes nothing at the limit" do
+    job = build_job(status: "running")
+    job.update_columns(releases: JobRun::MAX_RELEASES, claimed_by: "spot-runner")
+    job.log_chunks.create!(seq: 0, chunk: "half done\n")
+
+    assert_equal false, job.release!(reason: "again")
+
+    job.reload
+    assert job.running?
+    assert_equal "spot-runner", job.claimed_by
+    assert_equal JobRun::MAX_RELEASES, job.releases
+    assert_equal "half done\n", job.log_text
+  end
+
+  test "release! from a queued or finished job raises" do
+    %w[queued pending success failed canceled].each do |status|
+      job = build_job(status: status)
+      job.update_column(:name, "build-#{status}")
+      assert_raises(JobRun::IllegalTransition, status) { job.release! }
+    end
+  end
+
   # --- reclaim -----------------------------------------------------------------
 
   test "reclaim_stale! returns stale claimed/running jobs to queued" do

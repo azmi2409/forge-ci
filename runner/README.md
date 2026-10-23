@@ -71,6 +71,13 @@ in-flight step, skip the rest, report `canceled`, exit cleanly (no new
 claims). A crashed runner simply stops heartbeating and the server reclaims
 the job after 120s.
 
+With `REQUEUE_ON_SHUTDOWN=1` (Spot runners), SIGTERM/SIGINT instead stops
+the in-flight step at once and releases the job (`POST …/release`): it goes
+back to the queue and another runner runs it from the start. After
+`MAX_RELEASES` (2) releases, or if the release fails, the job is reported
+`canceled` as above. Only turn it on where every job is safe to run twice:
+never on deploy runners.
+
 ## Setup
 
 The easy way is the install command under **Settings → Runners** on the
@@ -108,6 +115,7 @@ if `docker info` fails.
 | `IDLE_SHUTDOWN_AFTER` | no | `0` (never) | Seconds without a job after which the runner stops claiming, runs `IDLE_SHUTDOWN_COMMAND` and exits (scale to zero) |
 | `IDLE_SHUTDOWN_COMMAND` | no | — | Shell command run once on idle shutdown; `bin/forge-ci-asg-terminate-self` removes this EC2 instance from its Auto Scaling Group |
 | `ALLOW_DOCKER_SOCKET` | no | off | `1` lets jobs with `setup_remote_docker` use this machine's Docker socket. Such a job controls the machine, so set it only on runners trusted with that (the deploy runner); fork pull requests are always refused. The install command's `--allow-docker` sets it |
+| `REQUEUE_ON_SHUTDOWN` | no | off | `1`: on SIGTERM/SIGINT mid-job, stop the running step and put the job back in the queue instead of reporting it canceled (at most twice per job). For Spot/preemptible runners whose jobs are safe to retry; never on deploy runners. The install command's `--requeue-on-shutdown` sets it |
 | `DOCKER_SOCKET_PATH` | no | `/var/run/docker.sock` | The socket mounted for `setup_remote_docker` |
 
 ## Control-plane contract

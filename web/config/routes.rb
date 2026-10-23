@@ -68,6 +68,7 @@ Rails.application.routes.draw do
             post :heartbeat
             post :start
             post :complete
+            post :release
           end
         end
       end

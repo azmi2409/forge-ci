@@ -5,7 +5,8 @@
 # Lifecycle (no state-machine gem — transitions are guarded explicitly):
 #   pending -> queued -> claimed -> running -> success | failed | canceled
 #   claimed -> success | failed | canceled   (runner reports without start)
-#   claimed -> queued                        (stale-heartbeat reclaim)
+#   claimed -> queued                        (stale-heartbeat reclaim, release)
+#   running -> queued                        (release)
 #   pending|queued|claimed -> canceled
 #
 # Illegal transitions raise JobRun::IllegalTransition.
@@ -18,13 +19,18 @@ class JobRun < ApplicationRecord
   STALE_HEARTBEAT_AFTER = 120.seconds
   RECLAIM_INTERVAL = 60.seconds
 
+  # How many times runners may hand one job back to the queue (release!)
+  # before it has to finish where it is.
+  MAX_RELEASES = 2
+
   ALLOWED_TRANSITIONS = {
     "pending" => %w[queued canceled],
     "queued" => %w[claimed canceled],
     # claimed -> terminal: the runner may report success/failure even if the
     # container never started (start call never happened).
     "claimed" => %w[running queued success failed canceled],
-    "running" => %w[success failed canceled],
+    # running -> queued only through release! (opt-in, see there).
+    "running" => %w[success failed canceled queued],
     "success" => [],
     "failed" => [],
     "canceled" => []
@@ -182,6 +188,41 @@ class JobRun < ApplicationRecord
     step_runs.update_all(status: StepRun.statuses.fetch("pending"), exit_code: nil,
                          started_at: nil, finished_at: nil, updated_at: Time.current)
     update_columns(status: "pending", claimed_by: nil, claimed_at: nil, heartbeat_at: nil, updated_at: Time.current)
+  end
+
+  # --- release ------------------------------------------------------------------
+
+  # A runner that is shutting down (e.g. a Spot instance being reclaimed)
+  # hands its job back: the job goes to queued, as if never run, for another
+  # runner to start over. Only runners with REQUEUE_ON_SHUTDOWN call this.
+  # It is opt-in because a running job that dies is otherwise failed, never
+  # retried: its steps may have done part of their work (half a deploy).
+  # Only runners whose jobs are safe to run twice opt in.
+  #
+  # Returns false, changing nothing, once the job has been released
+  # MAX_RELEASES times. Only valid from claimed/running; anything else
+  # raises IllegalTransition.
+  def release!(reason: nil)
+    unless ACTIVE_STATUSES.include?(status)
+      raise IllegalTransition, "cannot release job #{id} (#{name}) from #{status}"
+    end
+    return false if releases >= MAX_RELEASES
+
+    transaction do
+      log_chunks.delete_all
+      artifacts.destroy_all
+      log_blob.purge if log_blob.attached?
+      step_runs.update_all(status: StepRun.statuses.fetch("pending"), exit_code: nil,
+                           started_at: nil, finished_at: nil, updated_at: Time.current)
+      transition_to!("queued", claimed_by: nil, claimed_at: nil, heartbeat_at: nil, releases: releases + 1)
+      workflow_run.recompute_status!
+      workflow_run.pipeline.recompute_status!
+    end
+    Rails.logger.info("[release] job #{id} (#{display_name}) back to the queue " \
+                      "(release #{releases} of #{MAX_RELEASES}): #{reason.presence || "no reason given"}")
+    # The job page starts its log over.
+    JobLogChannel.notify(id, event: "requeued")
+    true
   end
 
   # --- helpers ---------------------------------------------------------------

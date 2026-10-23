@@ -12,6 +12,14 @@
 #                        Auto Scaling Group when idle (installs the AWS CLI)
 #   --allow-docker       let jobs with setup_remote_docker use this machine's
 #                        Docker (they then control it: deploy runners only)
+#   --requeue-on-shutdown
+#                        when the machine shuts down mid-job, stop the job and
+#                        put it back in the queue instead of canceling it: for
+#                        Spot/preemptible runners running retry-safe jobs;
+#                        never on deploy runners
+#
+# Skips installing packages when Docker and Ruby are already there (a baked
+# image), and waits for the dpkg lock (e.g. unattended-upgrades at boot).
 #
 # Supports Debian/Ubuntu (apt) and Amazon Linux/Fedora/RHEL (dnf or yum).
 set -eu
@@ -22,6 +30,7 @@ RESOURCE_CLASS=""
 IDLE_SHUTDOWN_AFTER=0
 ASG=0
 ALLOW_DOCKER=0
+REQUEUE_ON_SHUTDOWN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -30,6 +39,7 @@ while [ $# -gt 0 ]; do
     --idle-shutdown) IDLE_SHUTDOWN_AFTER="${2:?--idle-shutdown needs seconds}"; shift 2 ;;
     --asg) ASG=1; shift ;;
     --allow-docker) ALLOW_DOCKER=1; shift ;;
+    --requeue-on-shutdown) REQUEUE_ON_SHUTDOWN=1; shift ;;
     *) echo "forge-ci: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -39,14 +49,19 @@ say() { echo "forge-ci: $*"; }
 [ -n "$TOKEN" ] || { echo "forge-ci: --token is required (copy the command from the Runners page)" >&2; exit 2; }
 command -v systemctl >/dev/null || { echo "forge-ci: systemd is required" >&2; exit 1; }
 
-say "installing Docker and Ruby"
-if command -v apt-get >/dev/null; then
+if command -v docker >/dev/null && command -v ruby >/dev/null; then
+  say "Docker and Ruby already installed"
+elif command -v apt-get >/dev/null; then
+  say "installing Docker and Ruby"
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -q
-  apt-get install -y -q docker.io ruby curl ca-certificates tar unzip
+  # At boot unattended-upgrades may hold the dpkg lock: wait for it.
+  apt-get -o DPkg::Lock::Timeout=300 update -q
+  apt-get -o DPkg::Lock::Timeout=300 install -y -q docker.io ruby curl ca-certificates tar unzip
 elif command -v dnf >/dev/null; then
+  say "installing Docker and Ruby"
   dnf install -y -q docker ruby curl tar unzip
 elif command -v yum >/dev/null; then
+  say "installing Docker and Ruby"
   yum install -y -q docker ruby curl tar unzip
 else
   echo "forge-ci: no apt-get, dnf or yum; install Docker and Ruby 3.0+ yourself and re-run" >&2
@@ -75,6 +90,7 @@ umask 077
   [ "$IDLE_SHUTDOWN_AFTER" != "0" ] && echo "IDLE_SHUTDOWN_AFTER=$IDLE_SHUTDOWN_AFTER"
   [ "$ASG" -eq 1 ] && echo "IDLE_SHUTDOWN_COMMAND=/opt/forge-ci-runner/bin/forge-ci-asg-terminate-self"
   [ "$ALLOW_DOCKER" -eq 1 ] && echo "ALLOW_DOCKER_SOCKET=1"
+  [ "$REQUEUE_ON_SHUTDOWN" -eq 1 ] && echo "REQUEUE_ON_SHUTDOWN=1"
   true
 } > /etc/forge-ci-runner.env
 umask 022

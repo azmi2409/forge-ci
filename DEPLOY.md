@@ -67,7 +67,8 @@ Debian, Amazon Linux or Fedora with systemd):
 curl -fsSL https://ci.example.com/install-runner | sudo sh -s -- --token <token> --class spot
 ```
 
-The command installs Docker and Ruby, downloads the runner from your server,
+The command installs Docker and Ruby (skipped when both are already there, as
+on a prepared image), downloads the runner from your server,
 and starts it as the `forge-ci-runner` service. Use
 `journalctl -u forge-ci-runner -f` to watch it.
 
@@ -75,6 +76,18 @@ A runner claims jobs whose `resource_class` matches its `--class`, plus jobs
 with no class. A runner installed without `--class` claims any job.
 For example, run checks on Spot machines (`--class spot`) and deploys on an
 on-demand machine (`--class deploy`).
+
+When AWS reclaims a Spot machine mid-job, the job is canceled by default. If
+every job on that class is safe to run twice (tests, not deploys), add
+`--requeue-on-shutdown` to its install command and the job goes back to the
+queue for another runner instead (at most twice):
+
+```sh
+curl -fsSL https://ci.example.com/install-runner | sudo sh -s -- --token <token> --class spot --requeue-on-shutdown
+```
+
+Never use it on deploy runners: a deploy cut off halfway must not run again
+by itself.
 
 ### Or run jobs on the server itself
 
@@ -173,7 +186,9 @@ its own instance, so a scale-in never cuts a job short.
    `aws ssm put-parameter --name /forge-ci/runner-token --type SecureString --value <token>`.
 2. **Create a launch template** for each group. Use Ubuntu, an instance
    profile and [`runner/aws/user-data.sh`](runner/aws/user-data.sh) as user
-   data, with its settings at the top edited.
+   data, with its settings at the top edited. Set `REQUEUE_ON_SHUTDOWN=1`
+   for the Spot group only (it adds `--requeue-on-shutdown`), never for the
+   deploy group.
 
    The instance profile needs:
    - `ssm:GetParameter` on the parameter, plus `kms:Decrypt` for its key;

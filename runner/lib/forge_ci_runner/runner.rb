@@ -5,7 +5,9 @@ module ForgeCIRunner
   #
   # SIGTERM/SIGINT: stop claiming new jobs; the current job finishes its
   # in-flight step, remaining steps are skipped, and the job is reported
-  # as "canceled". Exits cleanly.
+  # as "canceled". Exits cleanly. With REQUEUE_ON_SHUTDOWN (Spot runners)
+  # the in-flight step is stopped too and the job is released back to the
+  # queue for another runner; if the release is refused it is canceled.
   #
   # Idle polls back off from POLL_INTERVAL up to MAX_IDLE_INTERVAL. With
   # IDLE_SHUTDOWN_AFTER set, a runner that has had no job for that long stops
@@ -90,18 +92,26 @@ module ForgeCIRunner
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
 
+    def build_executor(payload)
+      Executor.new(@config, @client, payload)
+    end
+
     def run_job(payload)
       job_id = payload["id"]
       log("claimed job ##{job_id} (#{payload["name"]})")
 
-      executor = Executor.new(@config, @client, payload)
+      executor = build_executor(payload)
       @client.start_job(job_id)
 
       heartbeat = start_heartbeat(job_id)
       begin
         status, step_results = executor.execute(-> { @shutdown }, cancel_check: -> { @job_canceled })
-        @client.complete_job(job_id, status, step_results)
-        log("job ##{job_id} #{status}")
+        if status == "requeue"
+          release_job(job_id, step_results)
+        else
+          @client.complete_job(job_id, status, step_results)
+          log("job ##{job_id} #{status}")
+        end
       rescue Client::HTTPError => e
         # e.g. 403 because the job was reclaimed after our heartbeats died.
         log("could not report job ##{job_id}: HTTP #{e.code}")
@@ -115,6 +125,18 @@ module ForgeCIRunner
       ensure
         stop_heartbeat(heartbeat)
       end
+    end
+
+    # Back to the queue, so another runner runs it from the start. When the
+    # control plane refuses (release limit, older server) or can't be
+    # reached, report it canceled as a runner without the flag would.
+    def release_job(job_id, step_results)
+      @client.release_job(job_id, "runner shutting down (#{@shutdown_signal || "signal"})")
+      log("job ##{job_id} released back to the queue")
+    rescue StandardError => e
+      log("could not release job ##{job_id} (#{e.message}); reporting it canceled")
+      @client.complete_job(job_id, "canceled", step_results)
+      log("job ##{job_id} canceled")
     end
 
     def start_heartbeat(job_id)
@@ -148,7 +170,9 @@ module ForgeCIRunner
     def trap_signals
       %w[INT TERM].each do |sig|
         Signal.trap(sig) do
-          log("received #{sig}; finishing current job, no new claims")
+          plan = @config.requeue_on_shutdown ? "releasing current job" : "finishing current job"
+          log("received #{sig}; #{plan}, no new claims")
+          @shutdown_signal = "SIG#{sig}"
           @shutdown = true
         end
       end

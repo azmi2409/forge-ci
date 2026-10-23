@@ -5,6 +5,7 @@ module Api
     module Runner
       # The polling API the Docker runner (component 5) drives:
       #   claim -> start -> heartbeat (every ~30s) -> log_chunks -> complete
+      #   (or release, when a REQUEUE_ON_SHUTDOWN runner shuts down mid-job)
       class JobsController < BaseController
         # POST /api/v1/runner/jobs/claim { resource_class: "medium" }
         # Atomically claims the oldest queued job matching the token's
@@ -55,6 +56,25 @@ module Api
 
           begin
             job.complete_with_results!(status: params[:status], step_results: params[:step_results])
+          rescue JobRun::IllegalTransition => e
+            return render json: { error: e.message }, status: :unprocessable_entity
+          end
+          render json: { id: job.id, status: job.status }, status: :ok
+        end
+
+        # POST /api/v1/runner/jobs/:id/release { reason: "..." }
+        # A runner shutting down (REQUEUE_ON_SHUTDOWN) hands the job back to
+        # the queue. 409 once the job was released JobRun::MAX_RELEASES times;
+        # the runner then completes it as canceled.
+        def release
+          job = find_owned_job
+          return unless job
+
+          begin
+            unless job.release!(reason: params[:reason].to_s)
+              return render json: { error: "job released #{JobRun::MAX_RELEASES} times already; not requeued" },
+                            status: :conflict
+            end
           rescue JobRun::IllegalTransition => e
             return render json: { error: e.message }, status: :unprocessable_entity
           end

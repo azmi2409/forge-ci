@@ -15,6 +15,9 @@ Environment=POLL_INTERVAL=5
 # Auto Scaling Group (see DEPLOY.md, "Scale runners to zero").
 #Environment=IDLE_SHUTDOWN_AFTER=600
 #Environment=IDLE_SHUTDOWN_COMMAND=/opt/forge-ci-runner/bin/forge-ci-asg-terminate-self
+# Spot runners with retry-safe jobs only (never deploy runners): on shutdown,
+# stop the running job and put it back in the queue instead of canceling it.
+#Environment=REQUEUE_ON_SHUTDOWN=1
 WorkingDirectory=/opt/forge-ci-runner
 ExecStart=/usr/bin/ruby /opt/forge-ci-runner/bin/forge-ci-runner
 # on-failure, not always: an idle shutdown exits 0 and must stay stopped.

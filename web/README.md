@@ -228,7 +228,8 @@ dependents. Fixed additively in the repo root (commit `ca9f633`):
   status (`pending → queued → claimed → running → success/failed/canceled`,
   guarded transitions on the model — illegal ones raise
   `JobRun::IllegalTransition`; no state-machine gem),
-  claimed_by/at, heartbeat_at
+  claimed_by/at, heartbeat_at, releases (times a shutting-down runner put it
+  back in the queue, at most `JobRun::MAX_RELEASES`)
 - `StepRun` — job_run, name, status, exit_code, started_at, finished_at
 - `LogChunk` — job_run, seq, chunk (unique `(job_run_id, seq)` for idempotent upserts).
   Write-ahead ingestion buffer: rows are purged when the job goes terminal and

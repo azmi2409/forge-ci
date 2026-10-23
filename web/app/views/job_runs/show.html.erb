@@ -151,7 +151,11 @@
       var msg = JSON.parse(e.data);
       if (msg.type === "confirm_subscription") { failures = 0; setStatus("Streaming live."); fetchNew(); }
       else if (msg.type === "reject_subscription") { ws.close(); }
-      else if (msg.identifier === identifier && msg.message) { fetchNew(); }
+      else if (msg.identifier === identifier && msg.message) {
+        // A released job starts over: replace the log instead of appending.
+        if (msg.message.event === "requeued") lastSeq = null;
+        fetchNew();
+      }
     };
     ws.onclose = function() {
       if (finished) return;

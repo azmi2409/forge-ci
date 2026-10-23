@@ -89,12 +89,16 @@ module ForgeCIRunner
     # Runs the job. Returns [status, step_results] where status is one of
     # "success" | "failed" | "canceled" and step_results matches the
     # control plane's complete contract (names follow the server's
-    # `step["name"] || step["type"]` convention).
+    # `step["name"] || step["type"]` convention). With REQUEUE_ON_SHUTDOWN a
+    # shutdown also stops the running step, and an unfinished job returns
+    # "requeue" (internal: the runner releases it rather than completing it).
     def execute(shutdown_check = -> { false }, cancel_check: -> { false })
       results = []
       failed = false
       shutting_down = false
       @cancel_check = cancel_check
+      @requeue_check = @config.requeue_on_shutdown ? shutdown_check : -> { false }
+      @stopped_for_requeue = false
       @job_deadline = @config.job_timeout.to_f.positive? ? monotonic + @config.job_timeout : nil
 
       @streamer.start
@@ -128,8 +132,15 @@ module ForgeCIRunner
         cleanup_containers
       end
 
-      shutting_down ||= @cancel_check.call
-      status = shutting_down ? "canceled" : (failed ? "failed" : "success")
+      canceled = @cancel_check.call
+      status =
+        if !canceled && @config.requeue_on_shutdown && (shutting_down || @stopped_for_requeue)
+          "requeue"
+        elsif shutting_down || canceled
+          "canceled"
+        else
+          failed ? "failed" : "success"
+        end
       [status, results.map(&:to_h)]
     end
 
@@ -269,7 +280,8 @@ module ForgeCIRunner
 
     # Streams a command's output to the job log. Kills it (and returns 124)
     # when it is silent for longer than +no_output_timeout+ seconds or the job
-    # deadline passes, and (returning 130) when the job is canceled.
+    # deadline passes, and (returning 130) when the job is canceled or, with
+    # REQUEUE_ON_SHUTDOWN, the runner is shutting down.
     # The `docker exec` client is what gets killed; the process inside the
     # container dies with the job container at cleanup.
     def stream_exec(argv, no_output_timeout: @config.step_no_output_timeout)
@@ -295,6 +307,8 @@ module ForgeCIRunner
           now = monotonic
           if @cancel_check&.call
             reason = :canceled
+          elsif @requeue_check&.call
+            reason = :requeue
           elsif no_output_timeout.to_f.positive? && now - last_output > no_output_timeout
             reason = :no_output
           elsif @job_deadline && now > @job_deadline
@@ -314,6 +328,10 @@ module ForgeCIRunner
         case reason
         when :canceled
           log_line("[forge-ci] step stopped: job was canceled")
+          exit_code = CANCEL_EXIT
+        when :requeue
+          log_line("[forge-ci] step stopped: runner shutting down; the job goes back to the queue")
+          @stopped_for_requeue = true
           exit_code = CANCEL_EXIT
         when :no_output
           log_line("[forge-ci] step killed: no output for #{no_output_timeout.to_i}s (no_output_timeout)")

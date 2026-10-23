@@ -62,6 +62,13 @@ module ForgeCIRunner
            { "status" => status, "step_results" => step_results })
     end
 
+    # POST /api/v1/runner/jobs/:id/release { reason } — hand a claimed or
+    # running job back to the queue (REQUEUE_ON_SHUTDOWN). Raises HTTPError
+    # 409 once the job has been released too often.
+    def release_job(job_id, reason)
+      post("/api/v1/runner/jobs/#{job_id}/release", { "reason" => reason })
+    end
+
     # POST /api/v1/jobs/:id/log_chunks — idempotent upsert on (job, seq).
     def post_log_chunk(job_id, seq, chunk)
       post("/api/v1/jobs/#{job_id}/log_chunks", { "seq" => seq, "chunk" => chunk })
