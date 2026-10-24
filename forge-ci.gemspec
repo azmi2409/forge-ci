@@ -14,12 +14,17 @@ Gem::Specification.new do |spec|
                      "Component 1 of the ForgeCI open-source CI project."
   spec.homepage = "https://github.com/azmi2409/forge-ci"
   spec.license = "MIT"
+  spec.metadata = {
+    "source_code_uri" => "https://github.com/azmi2409/forge-ci",
+    "changelog_uri" => "https://github.com/azmi2409/forge-ci/blob/main/CHANGELOG.md",
+    "rubygems_mfa_required" => "true"
+  }
 
   spec.required_ruby_version = ">= 3.0"
 
   spec.bindir = "exe"
   spec.executables = ["forge-ci"]
 
-  spec.files = Dir["lib/**/*.rb", "exe/forge-ci", "skills/**/*.md", "MIT-LICENSE", "README.md"]
+  spec.files = Dir["lib/**/*.rb", "exe/forge-ci", "skills/**/*.md", "MIT-LICENSE", "README.md", "CHANGELOG.md"]
   spec.require_paths = ["lib"]
 end

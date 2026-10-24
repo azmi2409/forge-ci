@@ -11,6 +11,7 @@ builds.
 repository gets it, and commit it:
 
 ```sh
+gem install forge-ci                      # once, if the CLI isn't installed
 forge-ci skill install                    # writes .claude/skills/forge-ci/SKILL.md
 git add .claude/skills/forge-ci && git commit -m "Add the forge-ci agent skill"
 ```

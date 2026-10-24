@@ -7,17 +7,20 @@ dependencies. Tested on Ruby 3.2.3+ (requires >= 3.0).
 
 ## Install
 
+```sh
+gem install forge-ci   # the `forge-ci` CLI lands on your PATH
+```
+
+Or as a library:
+
 ```ruby
 # Gemfile
 gem "forge-ci"
 ```
 
-Or build locally:
-
-```sh
-gem build forge-ci.gemspec
-gem install ./forge-ci-0.2.0.gem
-```
+From a checkout of this repo, `rake install` builds and installs the gem from
+source (`rake build` just produces the `.gem`; `rake release` pushes a new
+version to RubyGems).
 
 ## Usage
 
