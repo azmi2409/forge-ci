@@ -373,7 +373,72 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_not json_body.key?("repository")
   end
 
+  # --- docker build cache ------------------------------------------------------
+
+  test "claim payload includes docker_build_cache for remote-docker jobs when configured" do
+    job_named("build").update!(steps: [{ "type" => "setup_remote_docker", "layer_caching" => true }])
+    with_build_cache_registry("ghcr.io/acme/forge-ci-cache") do
+      ENV["FORGE_CI_BUILD_CACHE_REGISTRY_USERNAME"] = "acme-bot"
+      ENV["FORGE_CI_BUILD_CACHE_REGISTRY_PASSWORD"] = "ghp-registry-pass"
+      post "/api/v1/runner/jobs/claim", headers: auth
+    end
+    assert_response :ok
+    cache = json_body["docker_build_cache"]
+    assert_equal "ghcr.io/acme/forge-ci-cache", cache["registry"]
+    assert_equal "ghcr.io/acme/forge-ci-cache:p#{@project.id}-main", cache["ref"]
+    assert_equal "acme-bot", cache["username"]
+    assert_equal "ghp-registry-pass", cache["password"]
+  end
+
+  test "claim payload omits docker_build_cache when no registry is configured" do
+    job_named("build").update!(steps: [{ "type" => "setup_remote_docker" }])
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    assert_not json_body.key?("docker_build_cache")
+  end
+
+  test "claim payload omits docker_build_cache when the job didn't ask for the cache" do
+    ENV["FORGE_CI_BUILD_CACHE_REGISTRY"] = "ghcr.io/acme/forge-ci-cache"
+    job_named("build").update!(steps: [{ "type" => "setup_remote_docker" }])
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    assert_not json_body.key?("docker_build_cache")
+  ensure
+    ENV.delete("FORGE_CI_BUILD_CACHE_REGISTRY")
+  end
+
+  test "claim payload omits docker_build_cache for jobs without setup_remote_docker" do
+    with_build_cache_registry("ghcr.io/acme/forge-ci-cache") do
+      post "/api/v1/runner/jobs/claim", headers: auth
+    end
+    assert_response :ok
+    assert_not json_body.key?("docker_build_cache")
+  end
+
+  test "claim payload omits docker_build_cache for fork pull requests" do
+    job_named("build").update!(steps: [{ "type" => "setup_remote_docker", "layer_caching" => true }])
+    @pipeline.update!(forked: true)
+    with_build_cache_registry("ghcr.io/acme/forge-ci-cache") do
+      post "/api/v1/runner/jobs/claim", headers: auth
+    end
+    assert_response :ok
+    assert_not json_body.key?("docker_build_cache")
+  end
+
   private
+
+  def with_build_cache_registry(value)
+    old = ENV.to_h.slice("FORGE_CI_BUILD_CACHE_REGISTRY",
+                         "FORGE_CI_BUILD_CACHE_REGISTRY_USERNAME",
+                         "FORGE_CI_BUILD_CACHE_REGISTRY_PASSWORD")
+    ENV["FORGE_CI_BUILD_CACHE_REGISTRY"] = value
+    yield
+  ensure
+    %w[FORGE_CI_BUILD_CACHE_REGISTRY FORGE_CI_BUILD_CACHE_REGISTRY_USERNAME
+       FORGE_CI_BUILD_CACHE_REGISTRY_PASSWORD].each do |k|
+      old.key?(k) ? ENV[k] = old[k] : ENV.delete(k)
+    end
+  end
 
   def with_github_app(factory)
     old_factory = Github.client_factory

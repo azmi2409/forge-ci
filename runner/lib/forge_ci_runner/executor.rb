@@ -44,6 +44,13 @@ module ForgeCIRunner
     CIRCLECI_CLI_SOURCE = File.expand_path("circleci_cli.sh", __dir__)
     CIRCLECI_CLI_PATH = "/usr/local/bin/circleci"
     WORKSPACE_MANIFEST_NAME = "manifest.json"
+    # `forge-ci-build`, copied into the container the same way, for
+    # docker_layer_caching builds (see prepare_build_cache).
+    DOCKER_BUILD_WRAPPER_SOURCE = File.expand_path("docker_build_wrapper.sh", __dir__)
+    FORGE_CI_BUILD_PATH = "/usr/local/bin/forge-ci-build"
+    # A buildx binary the runner copies in when the job image has none; a
+    # path the docker CLI itself searches for CLI plugins.
+    BUILDX_PLUGIN_PATH = "/usr/local/lib/docker/cli-plugins/docker-buildx"
 
     Result = Struct.new(:name, :exit_code, :started_at, :finished_at, :note,
                         keyword_init: true) do
@@ -64,9 +71,16 @@ module ForgeCIRunner
       @services = []
       @environment = payload["environment"] || {}
       @checkout_token = payload.dig("repository", "token").to_s if payload["repository"].is_a?(Hash)
+      @build_cache = payload["docker_build_cache"]
+      @buildx_created = false
       # The checkout token never enters @environment (steps must not see
-      # it), but it is still redacted from logs like any secret.
-      @redactor = Redactor.new(@environment.merge("__checkout_token" => @checkout_token.to_s),
+      # it), but it is still redacted from logs like any secret; so is the
+      # build-cache registry password (steps DO see it — they log in with it
+      # — but it must never surface in the log).
+      @redactor = Redactor.new(@environment.merge(
+                                 "__checkout_token" => @checkout_token.to_s,
+                                 "__build_cache_password" => build_cache_password
+                               ),
                                min_length: config.redact_min_length)
       @streamer = LogStreamer.new(client, @job_id, @redactor,
                                   chunk_size: config.log_chunk_size,
@@ -184,7 +198,7 @@ module ForgeCIRunner
     end
 
     def job_environment
-      builtin_environment.merge(@environment)
+      builtin_environment.merge(build_cache_environment).merge(@environment)
     end
 
     def primary_run_args
@@ -211,6 +225,42 @@ module ForgeCIRunner
       Array(@payload["steps"]).any? { |s| s.is_a?(Hash) && s["type"] == "setup_remote_docker" }
     end
 
+    # Whether any setup_remote_docker step asked for the shared layer cache
+    # (CircleCI's docker_layer_caching: true).
+    def layer_caching?
+      Array(@payload["steps"]).any? { |s| s.is_a?(Hash) && s["type"] == "setup_remote_docker" && s["layer_caching"] }
+    end
+
+    def build_cache_password
+      @build_cache.is_a?(Hash) ? @build_cache["password"].to_s : ""
+    end
+
+    # The per-job buildx builder (created in prepare_build_cache). Named
+    # after the job like @container/@network, so parallel jobs on one daemon
+    # don't collide.
+    def buildx_builder_name
+      "forge-ci-bx-#{@job_id}-#{@suffix}"
+    end
+
+    # Env every step (and forge-ci-build) sees for layer-cached builds: the
+    # cache refs plus the registry login. FROM/TO are the same ref — a build
+    # reads the branch's cache and overwrites it with its own layers.
+    def build_cache_environment
+      return {} unless layer_caching? && @build_cache.is_a?(Hash)
+
+      {
+        "FORGE_CI_BUILD_CACHE_REGISTRY" => @build_cache["registry"],
+        "FORGE_CI_BUILD_CACHE_FROM" => @build_cache["ref"],
+        "FORGE_CI_BUILD_CACHE_TO" => @build_cache["ref"],
+        # The ref without its registry host, for tools that put their own
+        # registry in front (Kamal's builder: cache: image:).
+        "FORGE_CI_BUILD_CACHE_IMAGE" => @build_cache["ref"].to_s.split("/", 2).last,
+        "FORGE_CI_BUILD_BUILDER" => buildx_builder_name,
+        "FORGE_CI_BUILD_CACHE_USERNAME" => @build_cache["username"],
+        "FORGE_CI_BUILD_CACHE_PASSWORD" => @build_cache["password"]
+      }.compact
+    end
+
     # The host's Docker socket in the job container, plus its group so a
     # non-root image user (cimg's `circleci`) can use it. Whoever has this
     # socket controls the runner machine, hence the checks in
@@ -233,6 +283,64 @@ module ForgeCIRunner
       return unless @payload["trusted"] == false
 
       raise "setup_remote_docker isn't available to pull requests from forks"
+    end
+
+    # --- layer cache (pure argv builders; unit-tested) ---------------------
+
+    # `docker login` runs INSIDE the job container: login is client-side
+    # state (the invoking user's ~/.docker/config.json), so a host-side login
+    # would never reach the container's docker CLI. The password travels via
+    # the environment (already injected by job_environment), never in argv.
+    def cache_login_argv
+      args = [@config.docker_bin, "exec"]
+      args += env_args(build_cache_environment)
+      args << @container
+      args + ["/bin/sh", "-c",
+              'printf %s "$FORGE_CI_BUILD_CACHE_PASSWORD" | docker login --password-stdin ' \
+              '-u "$FORGE_CI_BUILD_CACHE_USERNAME" "$FORGE_CI_BUILD_CACHE_REGISTRY"']
+    end
+
+    def buildx_check_argv
+      [@config.docker_bin, "exec", @container, "docker", "buildx", "version"]
+    end
+
+    # Copies the runner's buildx into the container's CLI-plugin search path
+    # (after mkdir'ing it); followed by buildx_chmod_argv.
+    def buildx_mkdir_argv
+      [@config.docker_bin, "exec", "-u", "root", @container,
+       "mkdir", "-p", File.dirname(BUILDX_PLUGIN_PATH)]
+    end
+
+    def buildx_cp_argv
+      [@config.docker_bin, "cp", @config.buildx_bin, "#{@container}:#{BUILDX_PLUGIN_PATH}"]
+    end
+
+    def buildx_chmod_argv
+      [@config.docker_bin, "exec", "-u", "root", @container,
+       "chmod", "+x", BUILDX_PLUGIN_PATH]
+    end
+
+    # The builder is NOT `--use`: a docker-container-driver builder without
+    # --load keeps images out of the daemon, which would break plain
+    # `docker build -t x . && docker push x`. Steps opt in per build via
+    # forge-ci-build / --builder "$FORGE_CI_BUILD_BUILDER".
+    def buildx_create_argv
+      [@config.docker_bin, "exec", @container, "docker", "buildx",
+       "create", "--name", buildx_builder_name, "--driver", "docker-container"]
+    end
+
+    def wrapper_cp_argv
+      [@config.docker_bin, "cp", DOCKER_BUILD_WRAPPER_SOURCE, "#{@container}:#{FORGE_CI_BUILD_PATH}"]
+    end
+
+    def wrapper_chmod_argv
+      [@config.docker_bin, "exec", "-u", "root", @container, "chmod", "+x", FORGE_CI_BUILD_PATH]
+    end
+
+    # buildx names the builder's BuildKit container
+    # buildx_buildkit_<name>0; removed with the job in cleanup_containers.
+    def buildx_builder_container
+      "buildx_buildkit_#{buildx_builder_name}0"
     end
 
     # Returns [service_name, argv].
@@ -421,6 +529,13 @@ module ForgeCIRunner
       rescue StandardError => e
         $stderr.puts "[forge-ci-runner] cleanup: rm -f #{name} failed: #{e.message}"
       end
+      if @buildx_created
+        begin
+          run_docker(@config.docker_bin, "rm", "-f", buildx_builder_container)
+        rescue StandardError => e
+          $stderr.puts "[forge-ci-runner] cleanup: rm -f #{buildx_builder_container} failed: #{e.message}"
+        end
+      end
       run_docker(@config.docker_bin, "network", "rm", @network)
     rescue StandardError => e
       $stderr.puts "[forge-ci-runner] cleanup: network rm failed: #{e.message}"
@@ -440,7 +555,7 @@ module ForgeCIRunner
         when "store_artifacts" then execute_store_artifacts(step)
         when "persist_to_workspace" then execute_persist_workspace(step)
         when "attach_workspace" then execute_attach_workspace(step)
-        when "setup_remote_docker" then execute_setup_remote_docker
+        when "setup_remote_docker" then execute_setup_remote_docker(step)
         when *DEFERRED_STEPS then deferred_skip(step)
         else
           log_line("[forge-ci] WARNING: unknown step type #{step["type"].inspect}; skipping")
@@ -806,10 +921,84 @@ module ForgeCIRunner
       warn_zero("attach_workspace failed: #{e.class}: #{e.message}")
     end
 
-    # The socket was mounted when the container started; this only reports it.
-    def execute_setup_remote_docker
+    # The socket was mounted when the container started; this reports it and,
+    # for `docker_layer_caching: true` with a configured cache registry,
+    # prepares the registry-backed layer cache (see prepare_build_cache).
+    def execute_setup_remote_docker(step)
       log_line("[forge-ci] setup_remote_docker: docker commands in this job use the runner's Docker daemon")
+
+      if step["layer_caching"] && !@build_cache.is_a?(Hash)
+        return warn_zero("docker_layer_caching: true but this forge-ci server has no " \
+                         "FORGE_CI_BUILD_CACHE_REGISTRY configured — building without a shared layer cache")
+      end
+      return 0 unless step["layer_caching"]
+
+      log_line("[forge-ci] layer cache: #{@build_cache["ref"]} — layers are exported " \
+               "during builds and restored on the next runner")
+      prepare_build_cache
       0
+    end
+
+    # Registry login + buildx + a per-job builder + the forge-ci-build
+    # wrapper, in that order. Every failure warns and gives up on the cache
+    # for this job (the build itself still runs, uncached); the build command
+    # then fails on its own if the cache refs are unreachable.
+    def prepare_build_cache
+      unless login_build_cache_registry
+        return warn_zero("layer cache: docker login failed; skipping cache setup")
+      end
+
+      unless ensure_buildx
+        return warn_zero("layer cache: no usable buildx in the job image and no BUILDX_BIN on " \
+                         "the runner — set docker_layer_caching: false or use an image with buildx")
+      end
+
+      _out, code = run_docker(*buildx_create_argv)
+      if code.zero?
+        @buildx_created = true
+      else
+        return warn_zero("layer cache: docker buildx create failed (exit #{code})")
+      end
+
+      _out, code = run_docker(*wrapper_cp_argv)
+      return warn_zero("layer cache: could not install #{FORGE_CI_BUILD_PATH} (exit #{code})") unless code.zero?
+
+      _out, code = run_docker(*wrapper_chmod_argv)
+      return warn_zero("layer cache: could not make #{FORGE_CI_BUILD_PATH} executable (exit #{code})") unless code.zero?
+
+      log_line("[forge-ci] layer cache ready: build with `forge-ci-build` (or docker buildx " \
+               "build --builder #{buildx_builder_name} --cache-from type=registry,ref=$FORGE_CI_BUILD_CACHE_FROM " \
+               "--cache-to type=registry,ref=$FORGE_CI_BUILD_CACHE_TO,mode=max)")
+    end
+
+    # True when logged in (or no credentials to log in with — an
+    # unauthenticated registry), false when the login failed.
+    def login_build_cache_registry
+      return true if build_cache_environment["FORGE_CI_BUILD_CACHE_USERNAME"].nil?
+
+      _out, code = run_docker(*cache_login_argv)
+      code.zero?
+    end
+
+    # True when the container can run `docker buildx` (natively or via the
+    # runner's BUILDX_BIN copy), false otherwise.
+    def ensure_buildx
+      _out, code = run_docker(*buildx_check_argv)
+      return true if code.zero?
+
+      return false if @config.buildx_bin.nil?
+
+      _out, code = run_docker(*buildx_mkdir_argv)
+      return false unless code.zero?
+
+      _out, code = run_docker(*buildx_cp_argv)
+      return false unless code.zero?
+
+      _out, code = run_docker(*buildx_chmod_argv)
+      return false unless code.zero?
+
+      _out, code = run_docker(*buildx_check_argv)
+      code.zero?
     end
 
     def deferred_skip(step)

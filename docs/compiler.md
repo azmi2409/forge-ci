@@ -145,8 +145,8 @@ Jobs inside each workflow are emitted in **topological order** of their
 | Dynamic config (`setup:` workflows) | ❌ not yet supported |
 | `parallelism: N` (N nodes, `CIRCLE_NODE_INDEX`/`TOTAL`, dependents wait for all) | ✅ |
 | `circleci tests glob` / `split --split-by=name\|filesize` / `run` | ✅ (built-in helper in every job container; `timings` falls back to `filesize`) |
-| `setup_remote_docker` | ✅ the job uses the runner machine's Docker daemon. Only runners with `ALLOW_DOCKER_SOCKET=1` accept it, and never for fork pull requests; `version`/`docker_layer_caching` are ignored |
-| Docker layer caching | ⚠️ not as a setting; with `setup_remote_docker`, layers stay on the runner's daemon until the machine goes |
+| `setup_remote_docker` | ✅ the job uses the runner machine's Docker daemon. Only runners with `ALLOW_DOCKER_SOCKET=1` accept it, and never for fork pull requests; `version` is ignored |
+| Docker layer caching | ✅ `docker_layer_caching: true` under `setup_remote_docker` opts into the registry-backed layer cache (`FORGE_CI_BUILD_CACHE_REGISTRY` on the server; see docs/configuration.md) — without it, layers stay on the runner's daemon until the machine goes |
 | `filters: tags:` | ⚠️ parsed, ignored with a warning |
 | Missing `workflows:` | ⚠️ implicit `default` workflow with a warning |
 

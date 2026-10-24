@@ -46,6 +46,10 @@ control plane.
 - **Scale to zero.** Idle runners remove themselves; the control plane scales
   them back up when jobs queue. Only tested with AWS EC2 Spot runners so far
   (see [TODO.md](TODO.md#tested-so-far)).
+- **Registry-backed Docker layer caching.** `docker_layer_caching: true`
+  exports image layers to your registry during a build and restores them on
+  the next runner, so Spot reclamation never costs a full rebuild
+  (see [configuration](docs/configuration.md#docker-layer-caching)).
 - **Secrets done carefully.** Contexts are encrypted, masked in logs and never
   given to pull requests from forks.
 - **GitHub native.** Pipelines on push and pull request, private repos and

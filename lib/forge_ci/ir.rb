@@ -111,9 +111,13 @@ module ForgeCI
           { type: "add_ssh_keys", fingerprints: cfg["fingerprints"] || [] }
         when "setup_remote_docker"
           # The runner gives the job its own Docker daemon (see the runner's
-          # ALLOW_DOCKER_SOCKET). `version` and `docker_layer_caching` don't
-          # apply: the runner's daemon and its layer cache are used as is.
-          { type: "setup_remote_docker" }
+          # ALLOW_DOCKER_SOCKET). `version` is ignored (the runner's daemon is
+          # what it is); `docker_layer_caching` asks for the registry-backed
+          # layer cache (FORGE_CI_BUILD_CACHE_REGISTRY on the server) so builds
+          # survive ephemeral runners.
+          step = { type: "setup_remote_docker" }
+          step[:layer_caching] = true if cfg["docker_layer_caching"] == true
+          step
         else
           raise Error, "internal error: unknown step type #{type.inspect} reached IR normalization"
         end

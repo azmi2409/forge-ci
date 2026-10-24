@@ -313,9 +313,14 @@ module ForgeCI
       errors.add(path, "\"store_test_results:\" needs a \"path:\" to the JUnit XML results directory")
     end
 
-    # `version:` and `docker_layer_caching:` are accepted and ignored: the
-    # runner's own Docker daemon is used.
-    def validate_setup_remote_docker(_cfg, _path, _errors); end
+    # `version:` is ignored (the runner's daemon is what it is).
+    # `docker_layer_caching:` turns on the registry-backed layer cache.
+    def validate_setup_remote_docker(cfg, path, errors)
+      dlc = cfg["docker_layer_caching"]
+      return unless cfg.key?("docker_layer_caching") && ![true, false].include?(dlc)
+
+      errors.add(path + ["docker_layer_caching"], "\"docker_layer_caching:\" must be true or false")
+    end
 
     def validate_add_ssh_keys(cfg, path, errors)
       return unless cfg.key?("fingerprints") && !cfg["fingerprints"].is_a?(Array)
