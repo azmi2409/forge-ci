@@ -83,13 +83,15 @@ steps:
 
 ## Validate before you commit
 
-The CLI needs only Ruby 3.0+. If `forge-ci` isn't installed, run it from a
-checkout:
+The CLI needs only Ruby 3.0+. If `forge-ci` isn't installed, install it with
+`gem install forge-ci`. If you can't install gems, run it from a checkout:
 
 ```sh
 git clone --depth 1 https://github.com/azmi2409/forge-ci.git /tmp/forge-ci
 alias forge-ci="ruby -I/tmp/forge-ci/lib /tmp/forge-ci/exe/forge-ci"
+```
 
+```sh
 forge-ci validate .circleci/config.yml                    # must print "valid"
 forge-ci compile .circleci/config.yml --branch main       # the jobs that will run on main
 forge-ci compile .circleci/config.yml --branch my-feature # ...and on a branch
