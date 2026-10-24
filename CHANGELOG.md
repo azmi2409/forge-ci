@@ -6,6 +6,8 @@ separately.
 
 ## Unreleased
 
+## 0.3.0 (2026-10-24)
+
 - `setup_remote_docker` takes `docker_layer_caching: true`: the compiler
   passes it to the IR (`layer_caching: true`) and rejects non-boolean values.
   With `FORGE_CI_BUILD_CACHE_REGISTRY` on the server, such jobs get a
@@ -14,6 +16,8 @@ separately.
 - `gem install forge-ci` is the documented install; `rake build`,
   `rake install` and `rake release` work from a checkout.
 - Gemspec metadata: source and changelog links, MFA required to publish.
+- The bundled agent skill installs the CLI with `gem install forge-ci`, and
+  covers `docker_layer_caching`.
 
 ## 0.2.0 (2026-10-22)
 
