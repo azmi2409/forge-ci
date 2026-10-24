@@ -252,6 +252,9 @@ module ForgeCIRunner
         "FORGE_CI_BUILD_CACHE_REGISTRY" => @build_cache["registry"],
         "FORGE_CI_BUILD_CACHE_FROM" => @build_cache["ref"],
         "FORGE_CI_BUILD_CACHE_TO" => @build_cache["ref"],
+        # The ref without its registry host, for tools that put their own
+        # registry in front (Kamal's builder: cache: image:).
+        "FORGE_CI_BUILD_CACHE_IMAGE" => @build_cache["ref"].to_s.split("/", 2).last,
         "FORGE_CI_BUILD_BUILDER" => buildx_builder_name,
         "FORGE_CI_BUILD_CACHE_USERNAME" => @build_cache["username"],
         "FORGE_CI_BUILD_CACHE_PASSWORD" => @build_cache["password"]

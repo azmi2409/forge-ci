@@ -397,6 +397,16 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_not json_body.key?("docker_build_cache")
   end
 
+  test "claim payload omits docker_build_cache when the job didn't ask for the cache" do
+    ENV["FORGE_CI_BUILD_CACHE_REGISTRY"] = "ghcr.io/acme/forge-ci-cache"
+    job_named("build").update!(steps: [{ "type" => "setup_remote_docker" }])
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    assert_not json_body.key?("docker_build_cache")
+  ensure
+    ENV.delete("FORGE_CI_BUILD_CACHE_REGISTRY")
+  end
+
   test "claim payload omits docker_build_cache for jobs without setup_remote_docker" do
     with_build_cache_registry("ghcr.io/acme/forge-ci-cache") do
       post "/api/v1/runner/jobs/claim", headers: auth

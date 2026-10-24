@@ -22,7 +22,8 @@ require "base64"
 # to the cache repository).
 #
 # Fork pull requests never get a section (they are refused the Docker socket
-# already), and neither do jobs without a setup_remote_docker step.
+# already), and neither do jobs that didn't ask for the cache
+# (setup_remote_docker with docker_layer_caching: true).
 class BuildCacheConfig
   ECR_HOST = /\A(\d{12})\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com(\.cn)?\z/
 
@@ -35,7 +36,7 @@ class BuildCacheConfig
       registry = ENV["FORGE_CI_BUILD_CACHE_REGISTRY"].to_s.strip
       return nil if registry.empty?
       return nil if job.pipeline.forked?
-      return nil unless Array(job.steps).any? { |s| s.is_a?(Hash) && s["type"] == "setup_remote_docker" }
+      return nil unless Array(job.steps).any? { |s| s.is_a?(Hash) && s["type"] == "setup_remote_docker" && s["layer_caching"] }
 
       user, password = registry_credentials(registry)
       { registry: registry, ref: "#{registry}:#{cache_tag(job)}",
@@ -56,7 +57,7 @@ class BuildCacheConfig
 
     # Drops a cached ECR token (tests; also correct after a credential swap).
     def reset_ecr_token!
-      @ecr_mutex.synchronize { @ecr_token = nil }
+      @ecr_mutex.synchronize { @ecr_tokens = {} }
     end
 
     # Factory seam: tests swap in a fake client.
@@ -88,14 +89,16 @@ class BuildCacheConfig
     # GetAuthorizationToken returns base64("AWS:<token>"), valid 12h. Minted
     # with the control plane's own IAM principal and cached in-process, so a
     # claim costs an API call roughly twice a day, not per job.
+    # Cached per region: a token is only valid for its own region's registry.
     def ecr_credentials(region)
       @ecr_mutex.synchronize do
-        if @ecr_token.nil? || @ecr_token[:expires_at] <= Time.now + 1.hour
+        token = @ecr_tokens[region]
+        if token.nil? || token[:expires_at] <= Time.now + 1.hour
           datum = ecr_factory.call(region).get_authorization_token.authorization_data.first
           user, password = Base64.decode64(datum.authorization_token).split(":", 2)
-          @ecr_token = { user: user, password: password, expires_at: datum.expires_at }
+          token = @ecr_tokens[region] = { user: user, password: password, expires_at: datum.expires_at }
         end
-        [@ecr_token[:user], @ecr_token[:password]]
+        [token[:user], token[:password]]
       end
     rescue StandardError => e
       Rails.logger.warn("[build-cache] ECR authorization token failed: #{e.class}: #{e.message}")
@@ -104,5 +107,5 @@ class BuildCacheConfig
   end
 
   @ecr_mutex = Mutex.new
-  @ecr_token = nil
+  @ecr_tokens = {}
 end

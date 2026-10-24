@@ -58,6 +58,15 @@ class DockerLayerCacheTest < Minitest::Test
     assert_includes args, "FORGE_CI_BUILD_CACHE_TO=#{CACHE["ref"]}"
   end
 
+  def test_cache_image_is_the_ref_without_its_registry_host
+    # Kamal puts its own registry server in front of builder: cache: image:.
+    env = executor.job_environment
+    host, image = CACHE["ref"].split("/", 2)
+    assert_includes host, "."
+    assert_equal image, env["FORGE_CI_BUILD_CACHE_IMAGE"]
+    refute_includes env["FORGE_CI_BUILD_CACHE_IMAGE"], host
+  end
+
   def test_builder_name_matches_the_job
     ex = executor
     assert_includes ex.build_cache_environment["FORGE_CI_BUILD_BUILDER"], "forge-ci-bx-11-"

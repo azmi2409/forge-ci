@@ -123,4 +123,25 @@ class BuildCacheConfigTest < ActiveSupport::TestCase
     assert_nil BuildCacheConfig.for_job(remote_docker_job(forked: true))
     assert_nil BuildCacheConfig.for_job(plain_job)
   end
+
+  test "setup_remote_docker without docker_layer_caching gets no credentials" do
+    with_registry("123456789012.dkr.ecr.ap-southeast-3.amazonaws.com/forge-ci-cache")
+    fake = FakeEcr.new
+    BuildCacheConfig.ecr_factory = ->(_region) { fake }
+    job = remote_docker_job
+    job.update!(steps: [{ "type" => "setup_remote_docker" }])
+    assert_nil BuildCacheConfig.for_job(job)
+    assert_equal 0, fake.calls, "no token minted for a job that didn't opt in"
+  end
+
+  test "ECR tokens are cached per region" do
+    fake = FakeEcr.new
+    regions = []
+    BuildCacheConfig.ecr_factory = ->(region) { regions << region; fake }
+    with_registry("123456789012.dkr.ecr.ap-southeast-3.amazonaws.com/forge-ci-cache")
+    BuildCacheConfig.for_job(remote_docker_job)
+    with_registry("123456789012.dkr.ecr.us-east-1.amazonaws.com/forge-ci-cache")
+    BuildCacheConfig.for_job(remote_docker_job)
+    assert_equal %w[ap-southeast-3 us-east-1], regions, "a new region mints its own token"
+  end
 end

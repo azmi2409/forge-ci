@@ -111,6 +111,9 @@ credentials (they are refused the Docker socket anyway).
 **Runner**: nothing to configure. The install command's `--allow-docker`
 downloads a pinned buildx into `/opt/forge-ci-runner/bin/buildx` and sets
 `BUILDX_BIN`; the runner copies it into job images that don't ship one.
+Runners started some other way (a custom AMI boot script, for one) don't get
+`BUILDX_BIN`: that only matters for job images without buildx (`cimg/*`
+images include it), and setting `BUILDX_BIN` to a buildx binary fixes it.
 
 **Pipeline**: ask for the cache on the job that builds images —
 
@@ -130,22 +133,26 @@ jobs:
 `docker buildx build` with the cache flags filled in (`--load` included
 unless you pass `--push`/`--output`). Builds that manage their own buildx
 invocation (Kamal, bake) use the environment instead. Kamal's default build
-driver is already `docker-container`, so its registry cache just works with
-the ref forge-ci exports — in `deploy.yml`:
+driver is already `docker-container`, so its registry cache works with the
+ref forge-ci exports. Kamal puts its own `registry: server:` in front of
+`builder: cache: image:`, so give it `FORGE_CI_BUILD_CACHE_IMAGE` (the ref
+without the registry host), and keep the cache repository on the same
+registry as the app image (for ECR: same account and region). In
+`deploy.yml`:
 
 ```yaml
 builder:
   cache:
     type: registry
-    image: <%= ENV["FORGE_CI_BUILD_CACHE_TO"] %>   # full ref, tag included; Kamal passes it through verbatim
+    image: <%= ENV.fetch("FORGE_CI_BUILD_CACHE_IMAGE", "app-build-cache") %>
     options: mode=max
 ```
 
-`FORGE_CI_BUILD_CACHE_TO` is only set inside forge-ci jobs; if you also run
-`kamal deploy` from your laptop, fall back with
-`<%= ENV["FORGE_CI_BUILD_CACHE_TO"] || "registry/app-build-cache" %>`.
+`FORGE_CI_BUILD_CACHE_IMAGE` is only set inside forge-ci jobs; the fallback
+keeps `kamal deploy` from your laptop working (with its own cache image).
 
 Every step sees `FORGE_CI_BUILD_CACHE_FROM` / `_TO` (the ref),
+`FORGE_CI_BUILD_CACHE_IMAGE` (the ref without its registry host),
 `FORGE_CI_BUILD_BUILDER` (a per-job buildx builder, already created) and the
 login credentials. A job with `docker_layer_caching: true` on a server
 without `FORGE_CI_BUILD_CACHE_REGISTRY` logs a warning and builds uncached.
