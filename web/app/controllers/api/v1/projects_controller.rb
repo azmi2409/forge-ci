@@ -2,10 +2,13 @@
 
 module Api
   module V1
-    # Project administration (admin-token authed) so a fresh install can be
-    # set up without a Rails console.
+    # Project listing/creation so a fresh install can be set up without a
+    # Rails console. ApiAuthentication: listing is open to any authenticated
+    # token (the CLI resolves --project names with it), creating needs an
+    # admin.
     class ProjectsController < ActionController::API
-      include AdminAuthentication
+      include ApiAuthentication
+      before_action :require_admin!, only: %i[create]
 
       def index
         render json: { projects: Project.order(:name).map { |p| project_json(p) } }

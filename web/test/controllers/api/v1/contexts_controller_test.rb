@@ -64,7 +64,8 @@ class Api::V1::ContextsControllerTest < ActionDispatch::IntegrationTest
     ENV["FORGE_CI_ADMIN_TOKEN"] = nil
     post "/api/v1/contexts/#{@context.id}/rotate",
          params: { payload: { "A" => "b" } }, headers: admin_headers, as: :json
-    assert_response :service_unavailable
+    assert_response :unauthorized
+    assert_match(/forge-ci login/, json_body["hint"])
   ensure
     ENV["FORGE_CI_ADMIN_TOKEN"] = TEST_ADMIN_TOKEN
   end

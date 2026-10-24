@@ -331,4 +331,173 @@ class CLITest < Minitest::Test
     assert_equal 2, run_cli("skill").first
     assert_equal 2, run_cli("skill", "nope").first
   end
+
+  # -- login / logout ------------------------------------------------------------
+
+  def with_credentials_file
+    Dir.mktmpdir do |dir|
+      original = ENV["FORGE_CI_CREDENTIALS"]
+      ENV["FORGE_CI_CREDENTIALS"] = File.join(dir, "credentials.json")
+      yield
+    ensure
+      ENV["FORGE_CI_CREDENTIALS"] = original
+    end
+  end
+
+  def run_cli_with_input(input, *args)
+    out = StringIO.new
+    err = StringIO.new
+    status = ForgeCI::CLI.run(args, out: out, err: err, input: StringIO.new(input))
+    [status, out.string, err.string]
+  end
+
+  def form_body(body)
+    URI.decode_www_form(body.to_s).to_h
+  end
+
+  def test_login_manual_flow_stores_the_session
+    routes = {
+      "POST /oauth/token" => [200, { access_token: "at", refresh_token: "rt", token_type: "Bearer", expires_in: 3600 }],
+      "GET /api/v1/me" => [200, { username: "alice", role: "admin" }]
+    }
+    with_fake_server(routes) do |url, requests|
+      with_credentials_file do
+        status, out, err = run_cli_with_input("thecode\n", "login", "--url", url, "--manual")
+        assert_equal 0, status, err
+        assert_match(%r{/oauth/authorize\?}, out)
+        assert_match(/logged in as alice/, out)
+
+        entry = ForgeCI::Auth.read_server(url)
+        assert_equal "alice", entry["username"]
+        assert_equal "at", entry["access_token"]
+        assert_equal "rt", entry["refresh_token"]
+        assert_includes (Time.now.to_i + 3600)..(Time.now.to_i + 3660), entry["expires_at"]
+
+        form = form_body(requests.find { |r| r[:path] == "/oauth/token" }[:body])
+        assert_equal "authorization_code", form["grant_type"]
+        assert_equal "thecode", form["code"]
+        assert_equal "forge-ci-cli", form["client_id"]
+        assert_equal "urn:ietf:wg:oauth:2.0:oob", form["redirect_uri"]
+        assert_match(/\A[A-Za-z0-9_-]{43,128}\z/, form["code_verifier"], "PKCE verifier travels")
+
+        auth = requests.find { |r| r[:path] == "/api/v1/me" }[:headers]["authorization"]
+        assert_equal "Bearer at", auth
+      end
+    end
+  end
+
+  def test_login_reports_server_side_oauth_errors
+    routes = { "POST /oauth/token" => [400, { error: "invalid_grant", error_description: "bad code" }] }
+    with_fake_server(routes) do |url, _requests|
+      with_credentials_file do
+        status, _out, err = run_cli_with_input("badcode\n", "login", "--url", url, "--manual")
+        assert_equal 1, status
+        assert_match(/bad code/, err)
+        assert_nil ForgeCI::Auth.read_server(url)
+      end
+    end
+  end
+
+  def test_logout_revokes_and_forgets_the_session
+    routes = { "POST /oauth/revoke" => [200, {}] }
+    with_fake_server(routes) do |url, requests|
+      with_credentials_file do
+        ForgeCI::Auth.write_server(url, "username" => "alice", "access_token" => "at",
+                                        "refresh_token" => "rt", "expires_at" => Time.now.to_i + 9999)
+
+        status, out, = run_cli("logout", "--url", url)
+        assert_equal 0, status
+        assert_match(/logged out/, out)
+        assert_nil ForgeCI::Auth.read_server(url)
+
+        form = form_body(requests.first[:body])
+        assert_equal "at", form["token"]
+        assert_equal "forge-ci-cli", form["client_id"]
+      end
+    end
+  end
+
+  def test_logout_without_a_session_is_fine
+    with_fake_server({}) do |url, _requests|
+      with_credentials_file do
+        status, out, = run_cli("logout", "--url", url)
+        assert_equal 0, status
+        assert_match(/not logged in/, out)
+      end
+    end
+  end
+
+  def test_trigger_uses_the_stored_session_when_no_token_is_given
+    routes = { "POST /api/v1/projects/7/pipelines" => [201, { id: 42, status: "running" }] }
+    with_fake_server(routes) do |url, requests|
+      with_credentials_file do
+        ForgeCI::Auth.write_server(url, "access_token" => "stored", "expires_at" => Time.now.to_i + 9999)
+        status, out, err = run_cli("trigger", fixture_path("full.yml"), "--project", "7",
+                                   "--url", url, "--branch", "b", "--sha", "s")
+        assert_equal 0, status, err
+        assert_equal "Bearer stored", requests.first[:headers]["authorization"]
+      end
+    end
+  end
+
+  def test_trigger_refreshes_an_expired_session_before_posting
+    routes = {
+      "POST /oauth/token" => [200, { access_token: "new-at", refresh_token: "new-rt", expires_in: 3600 }],
+      "POST /api/v1/projects/7/pipelines" => [201, { id: 42, status: "running" }]
+    }
+    with_fake_server(routes) do |url, requests|
+      with_credentials_file do
+        ForgeCI::Auth.write_server(url, "access_token" => "old-at", "refresh_token" => "old-rt",
+                                        "expires_at" => Time.now.to_i - 10)
+        status, out, err = run_cli("trigger", fixture_path("full.yml"), "--project", "7",
+                                   "--url", url, "--branch", "b", "--sha", "s")
+        assert_equal 0, status, err
+
+        refresh = form_body(requests.find { |r| r[:path] == "/oauth/token" }[:body])
+        assert_equal "refresh_token", refresh["grant_type"]
+        assert_equal "old-rt", refresh["refresh_token"]
+        assert_equal "Bearer new-at", requests.find { |r| r[:path].include?("/pipelines") }[:headers]["authorization"]
+
+        entry = ForgeCI::Auth.read_server(url)
+        assert_equal "new-at", entry["access_token"]
+        assert_equal "new-rt", entry["refresh_token"]
+      end
+    end
+  end
+
+  def test_an_explicit_token_wins_over_the_stored_session
+    routes = { "POST /api/v1/projects/7/pipelines" => [201, { id: 42 }] }
+    with_fake_server(routes) do |url, requests|
+      with_credentials_file do
+        ForgeCI::Auth.write_server(url, "access_token" => "stored", "expires_at" => Time.now.to_i + 9999)
+        status, = run_cli("trigger", fixture_path("full.yml"), "--project", "7",
+                          "--url", url, "--token", "explicit", "--branch", "b", "--sha", "s")
+        assert_equal 0, status
+        assert_equal "Bearer explicit", requests.first[:headers]["authorization"]
+      end
+    end
+  end
+
+  def test_trigger_with_no_token_anywhere_points_at_login
+    with_credentials_file do
+      original = ENV["FORGE_CI_ADMIN_TOKEN"]
+      ENV["FORGE_CI_ADMIN_TOKEN"] = nil
+      status, _out, err = run_cli("trigger", fixture_path("full.yml"), "--project", "1",
+                                  "--url", "http://127.0.0.1:1", "--branch", "b", "--sha", "s")
+      assert_equal 2, status
+      assert_match(/forge-ci login/, err)
+    ensure
+      ENV["FORGE_CI_ADMIN_TOKEN"] = original
+    end
+  end
+
+  def test_login_requires_a_url
+    original = ENV["FORGE_CI_URL"]
+    ENV["FORGE_CI_URL"] = nil
+    status, _out, err = run_cli("login")
+    assert_equal 2, status
+    assert_match(/--url/, err)
+  ensure
+    ENV["FORGE_CI_URL"] = original
+  end
 end

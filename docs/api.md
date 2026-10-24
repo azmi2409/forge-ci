@@ -3,11 +3,27 @@
 All request/response bodies are JSON unless noted (artifact/cache uploads are
 multipart). Base path: `/api/v1`.
 
+## Authentication
+
+The JSON API accepts two kinds of Bearer credentials:
+
+- the shared **admin token** (`FORGE_CI_ADMIN_TOKEN`, shown on the Settings
+  page) — full access, for scripts and CI;
+- a **personal OAuth token** from `forge-ci login` — the request acts as the
+  signed-in web-UI user. Members can view and cancel; admins can do
+  everything (intake, project creation, contexts, queue). Tokens are
+  authorization-code + PKCE, issued by the server's Doorkeeper endpoints
+  (`/oauth/authorize`, `/oauth/token`, `/oauth/revoke`), expire after 24h
+  and are refreshed automatically by the CLI.
+
+`GET /api/v1/me` reports who the presented token acts as
+(`{ username, role }` or `{ admin_token: true, role: "admin" }`) — `forge-ci
+login` verifies with it. Anything else unauthenticated → `401`.
+
 ## Pipeline intake
 
-`POST /api/v1/projects/:project_id/pipelines` — requires
-`Authorization: Bearer <FORGE_CI_ADMIN_TOKEN>` (`401` otherwise, `503` while
-the admin token is not configured). The GitHub flow goes through the
+`POST /api/v1/projects/:project_id/pipelines` — requires an admin (see
+above). The GitHub flow goes through the
 HMAC-verified webhook instead. The easiest client is the CLI:
 `forge-ci trigger .circleci/config.yml --project NAME --wait`.
 
@@ -37,7 +53,10 @@ HMAC-verified webhook instead. The easiest client is the CLI:
              { "id": 2, "name": "test", "status": "pending", "requires": ["build"] }] }] }
 ```
 
-## Admin API — `Authorization: Bearer <FORGE_CI_ADMIN_TOKEN>`
+## Admin API — admin token, or an admin user's OAuth token
+
+The whole table below needs an admin. Project **listing** (`GET /projects`)
+and pipeline **status/cancel** also accept a member's OAuth token.
 
 | Call | Purpose |
 |---|---|

@@ -1,6 +1,13 @@
 # frozen_string_literal: true
 
 Rails.application.routes.draw do
+  # --- OAuth provider for the CLI (config/initializers/doorkeeper.rb) --------
+  # /oauth/authorize | /oauth/token | /oauth/revoke. The applications
+  # management UI is also mounted but answers 403 to everyone: no
+  # admin_authenticator is configured (the CLI client is seeded, see
+  # CliOauthApp).
+  use_doorkeeper
+
   # --- Public landing page (no auth) -----------------------------------------
   root "landing#show"
   get "/dashboard", to: redirect("/projects")
@@ -38,6 +45,10 @@ Rails.application.routes.draw do
   # --- API v1 ----------------------------------------------------------------
   namespace :api do
     namespace :v1 do
+      # Who the presented token authenticates as (`forge-ci login` verifies
+      # with this and prints it).
+      get "me", to: "me#show"
+
       # Pipeline intake — the seam the GitHub App (component 3) calls.
       # Cache API (component 7) — scoped to the project; the Bearer token
       # must own a claimed/running job in that project.

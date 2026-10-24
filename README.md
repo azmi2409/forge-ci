@@ -76,8 +76,12 @@ Coolify, S3, scaling to zero) see **[DEPLOY.md](DEPLOY.md)**.
 
 - **With the GitHub App:** connect it under Settings, install it and push.
   The first push creates the project.
-- **From any script, without the App:** `forge-ci trigger .circleci/config.yml --project myapp --wait`
+- **From your terminal, without the App:** `forge-ci login` (opens the
+  browser, you sign in with your web-UI account) and then
+  `forge-ci trigger .circleci/config.yml --project myapp --wait`
   ([setup](DEPLOY.md#use-it-without-the-github-app)).
+- **From any script or CI:** the same `forge-ci trigger` with the
+  `FORGE_CI_URL` / `FORGE_CI_ADMIN_TOKEN` environment variables.
 
 Check a config locally first; the compiler needs only Ruby 3.0+. `gem install`
 puts the `forge-ci` CLI on your PATH:

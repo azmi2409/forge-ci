@@ -3,11 +3,14 @@
 module Api
   module V1
     # Pipeline intake (`forge-ci trigger` / curl) plus status and cancel.
-    # Admin-token authed (FORGE_CI_ADMIN_TOKEN); the GitHub flow does not use
-    # this controller — it goes through the HMAC-verified webhook. Accepts the
-    # compiler IR as JSON.
+    # ApiAuthentication: the shared admin token, or an OAuth token from
+    # `forge-ci login` (starting a pipeline needs an admin; status and cancel
+    # are open to members). The GitHub flow does not use this controller —
+    # it goes through the HMAC-verified webhook. Accepts the compiler IR as
+    # JSON.
     class PipelinesController < ActionController::API
-      include AdminAuthentication
+      include ApiAuthentication
+      before_action :require_admin!, only: %i[create]
 
       def show
         render json: pipeline_json(Pipeline.find(params[:id]))

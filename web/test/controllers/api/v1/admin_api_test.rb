@@ -30,7 +30,8 @@ class Api::V1::AdminApiTest < ActionDispatch::IntegrationTest
     ENV["FORGE_CI_ADMIN_TOKEN"] = nil
     post "/api/v1/projects/#{@project.id}/pipelines",
          params: { sha: "abc", branch: "main", ir: compile_test_ir }, as: :json
-    assert_response :service_unavailable
+    assert_response :unauthorized
+    assert_match(/forge-ci login/, json_body["hint"], "points at the two auth paths")
   ensure
     ENV["FORGE_CI_ADMIN_TOKEN"] = TEST_ADMIN_TOKEN
   end

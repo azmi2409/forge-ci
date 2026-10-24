@@ -154,15 +154,31 @@ Every variable is listed in [docs/configuration.md](docs/configuration.md).
 
 ### Use it without the GitHub App
 
-Settings shows an `export FORGE_CI_URL=… FORGE_CI_ADMIN_TOKEN=…` line for the
-admin API and the `forge-ci` CLI:
+Sign the CLI in with your web-UI account — it opens a browser, you log in,
+done:
+
+```sh
+forge-ci login --url https://ci.example.com
+
+# Start a pipeline for the current branch and commit; --wait exits non-zero on failure.
+forge-ci trigger .circleci/config.yml --project myapp --wait
+```
+
+The session is stored per server in `~/.config/forge-ci/credentials.json`
+(0600), refreshed automatically, and acts as your user: members can view and
+cancel pipelines, admins can also trigger them, create projects and rotate
+contexts. Over SSH (or anywhere without a browser) use `forge-ci login
+--manual` and paste the code it asks for. `forge-ci logout` revokes the
+token.
+
+For scripts and CI, keep the shared admin token instead — Settings shows the
+`export FORGE_CI_URL=… FORGE_CI_ADMIN_TOKEN=…` line:
 
 ```sh
 curl -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" -H 'Content-Type: application/json' \
      -d '{"name":"myapp","repo_url":"https://github.com/me/myapp.git"}' $FORGE_CI_URL/api/v1/projects
 
-# Start a pipeline for the current branch and commit; --wait exits non-zero on failure.
-forge-ci trigger .circleci/config.yml --project myapp --wait
+forge-ci trigger .circleci/config.yml --project myapp --wait   # picks the env var up
 ```
 
 For a private repository without the App, set `CHECKOUT_REPO_URL` on the

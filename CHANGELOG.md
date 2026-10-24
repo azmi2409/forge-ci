@@ -6,6 +6,17 @@ separately.
 
 ## Unreleased
 
+- `forge-ci login [--url URL]` / `forge-ci logout`: OAuth sign-in for the
+  CLI. The browser opens at the server, you sign in with your web-UI
+  account, and the token (authorization-code + PKCE, stored per server in
+  `~/.config/forge-ci/credentials.json`, 0600) is picked up automatically by
+  `trigger`/`cancel` — `--token` and `FORGE_CI_ADMIN_TOKEN` still win.
+  `--manual` trades the browser for a pasted code over SSH. Sessions refresh
+  automatically and act as the signed-in user (members view/cancel, admins
+  trigger). Server side this is Doorkeeper (`/oauth/*`), plus a new
+  `GET /api/v1/me`; the JSON API now accepts personal OAuth tokens next to
+  the shared admin token.
+
 ## 0.3.0 (2026-10-24)
 
 - `setup_remote_docker` takes `docker_layer_caching: true`: the compiler

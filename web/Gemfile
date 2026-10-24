@@ -15,6 +15,10 @@ gem "forge-ci", path: ENV.fetch("FORGE_CI_GEM_PATH", ".."), require: "forge_ci"
 # GitHub App auth: RS256 JWTs for installation-token exchange (component 3)
 gem "jwt"
 
+# OAuth provider for the forge-ci CLI (`forge-ci login`): authorization-code
+# + PKCE against the web UI's own session login.
+gem "doorkeeper", "~> 5.8"
+
 # S3-compatible object storage for ActiveStorage (logs, artifacts, caches).
 # Only loaded when ACTIVE_STORAGE_SERVICE=amazon; local disk is the default.
 gem "aws-sdk-s3", require: false
