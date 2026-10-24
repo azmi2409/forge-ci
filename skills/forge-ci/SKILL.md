@@ -30,7 +30,12 @@ Write standard CircleCI 2.1. These are the differences that matter:
   runners set up with `ALLOW_DOCKER_SOCKET=1` accept it, normally just the
   deploy runner, so use it only on jobs with that runner's `resource_class`;
   elsewhere the job fails with an error. Pull requests from forks never get
-  it. `version:` and `docker_layer_caching:` are accepted and ignored.
+  it. `version:` is accepted and ignored. `docker_layer_caching: true` keeps
+  the image layer cache in a registry, if the server has
+  `FORGE_CI_BUILD_CACHE_REGISTRY`: build with `forge-ci-build` (it takes
+  `docker build` arguments), or point Kamal's `builder: cache: image:` at
+  `FORGE_CI_BUILD_CACHE_IMAGE`. Without the server setting the job logs a
+  warning and builds uncached.
 - **Lists, not strings:** `branches: only: [main]`, not `only: main`.
 - **Absolute paths:** the runner expands `~` to `/root`, but `cimg/*` images
   run as the `circleci` user. Use `/home/circleci/project` for

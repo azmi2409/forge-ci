@@ -54,7 +54,7 @@ rough edges there and please report them.
 - [x] Agent skill (`skills/forge-ci/SKILL.md`, `forge-ci skill install`) — 2026-10-22
 - [ ] Runner: container CPU/memory limits
 - [ ] Runner: `store_test_results` (JUnit → timing DB) and `add_ssh_keys`
-- [x] Publish the `forge-ci` gem to RubyGems (0.1.0; 0.2.0 ready to push) — 2026-10-22
+- [x] Publish the `forge-ci` gem to RubyGems (0.1.0, 0.2.0; 0.3.0 ready to push) — 2026-10-24
 - [ ] Let `web/` depend on the released gem instead of the path gem (also
       unblocks clean Docker builds)
 
