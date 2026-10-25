@@ -89,6 +89,26 @@ curl -fsSL https://ci.example.com/install-runner | sudo sh -s -- --token <token>
 Never use it on deploy runners: a deploy cut off halfway must not run again
 by itself.
 
+### Isolate fork pull requests
+
+Run fork pull requests on dedicated, disposable runner hosts with no deploy
+credentials, host Docker socket access, or access to privileged internal
+services. Resource classes alone are not a security boundary: fork config
+can choose a class or omit it.
+
+Runner tokens default to trusted repository jobs only. Provision a dedicated
+fork-only token in **Settings → Runners** for an isolated fork runner.
+Fork-only tokens never claim trusted jobs; ordinary tokens never claim fork
+jobs, even when resource classes match. Fork jobs receive neither project
+variables nor context secrets. Without a fork-only runner, fork jobs remain
+queued rather than falling back to a privileged host.
+Fork caches are separate from trusted caches. Fork checkout is anonymous and
+never receives a GitHub App installation token or an operator-configured
+repository URL. Private fork checkout cannot use privileged credentials and
+will fail unless its GitHub repository is anonymously accessible.
+
+Do not reuse a host that ran untrusted jobs for deployments. Rebuild it first.
+
 ### Or run jobs on the server itself
 
 For a single machine, skip the install command: add `RUNNERS=1` to `.env`
@@ -151,6 +171,24 @@ Likewise:
   replace Connect GitHub with an App you registered yourself.
 
 Every variable is listed in [docs/configuration.md](docs/configuration.md).
+
+### Upgrade job context encryption
+
+The job-context migration encrypts existing snapshots using the same
+`ACTIVE_RECORD_ENCRYPTION_*` keys as contexts. Keep those keys unchanged.
+
+1. Back up the database and the `forge-ci-data` volume containing `secrets.yml`
+   (or securely back up the configured encryption keys).
+2. Pause runner services and stop web/worker processes so no old process reads
+   or writes job rows during the schema cutover.
+3. Run `bin/rails db:migrate` with the new release and the existing encryption
+   keys. Do not start the old release against the migrated schema.
+4. Start the new web/worker processes, then runners. Verify a trusted job can
+   still read its context and fork jobs only run on dedicated fork runners.
+
+Old backups, database WAL, and replicas may still contain historical plaintext.
+Handle them as secrets under your retention policy; encryption migration does
+not erase historical copies. Restore requires the matching encryption keys.
 
 ### Use it without the GitHub App
 

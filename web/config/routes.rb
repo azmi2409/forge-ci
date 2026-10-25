@@ -25,6 +25,8 @@ Rails.application.routes.draw do
   end
   resources :users, except: %i[show]
   resource :settings, only: %i[show] do
+    post :create_fork_runner
+    delete "fork_runners/:id", action: :destroy_fork_runner, as: :destroy_fork_runner
     post :github
     get "github/callback", action: :github_callback, as: :github_callback
   end

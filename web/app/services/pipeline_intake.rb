@@ -36,7 +36,7 @@ class PipelineIntake
     # pass the gem's symbol-keyed IR or a plain string-keyed hash.
     plain = ir.respond_to?(:to_unsafe_h) ? ir.to_unsafe_h : (ir || {})
     @ir = ::JSON.parse(::JSON.dump(plain))
-    @context_names = Array(context_names).map(&:to_s).uniq
+    @context_names = ActiveModel::Type::Boolean.new.cast(forked) ? [] : Array(context_names).map(&:to_s).uniq
     @pipeline_number = pipeline_number
     @forked = forked
     @github_repository = github_repository

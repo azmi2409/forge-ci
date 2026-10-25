@@ -83,7 +83,7 @@
         <div class="inline-fields" style="margin-bottom: 12px">
           <div class="form-row">
             <label class="field-label" for="runner-class">Resource class (optional)</label>
-            <input class="field" type="text" id="runner-class" placeholder="e.g. spot or deploy; empty claims any job" autocapitalize="none" spellcheck="false">
+            <input class="field" type="text" id="runner-class" placeholder="e.g. spot or deploy; empty claims any trusted job" autocapitalize="none" spellcheck="false">
           </div>
           <div class="form-row">
             <label class="field-label" for="runner-idle">Stop when idle for (seconds, optional)</label>
@@ -96,6 +96,30 @@
         </div>
         <p class="field-hint">Contains the runner token: anyone with it can run your jobs. Scaling to zero on AWS is in the <a class="text-link" href="https://github.com/azmi2409/forge-ci/blob/main/DEPLOY.md#scale-runners-to-zero-aws">deploy guide</a>.</p>
         <p class="field-hint">To run jobs on this server instead, set <code>RUNNERS=1</code> in its environment and restart it with <code>docker compose up -d</code>.</p>
+      <% end %>
+      <hr>
+      <h3>Fork-only runners</h3>
+      <p class="field-hint">Default runners never run fork jobs. Fork-only runners never run trusted jobs, even with a matching resource class. Install each on a fresh, isolated host without credentials, privileged access or shared storage. Never reuse that host for trusted jobs.</p>
+      <% if @fork_runner_secret %>
+        <p class="warn">Save this install command now. This dedicated token is shown only once.</p>
+        <pre class="code-block">curl -fsSL <%= @base_url %>/install-runner | sudo sh -s -- --token <%= @fork_runner_secret %></pre>
+      <% end %>
+      <%= form_with url: create_fork_runner_settings_path, class: "inline-fields" do |form| %>
+        <div class="form-row">
+          <%= form.label :name, "Fork runner name", class: "field-label" %>
+          <%= form.text_field :name, required: true, class: "field" %>
+        </div>
+        <div class="form-row">
+          <%= form.label :resource_class, "Resource class (optional)", class: "field-label" %>
+          <%= form.text_field :resource_class, class: "field" %>
+        </div>
+        <%= form.submit "Create fork-only token", class: "button-primary" %>
+      <% end %>
+      <% @fork_runner_tokens.each do |token| %>
+        <div class="form-actions">
+          <span><%= token.name %> — <%= token.resource_class || "any class" %>, fork-only</span>
+          <%= button_to "Revoke", destroy_fork_runner_settings_path(id: token.id), method: :delete, class: "button-secondary" %>
+        </div>
       <% end %>
     </div>
     <% if @queue.any? %>

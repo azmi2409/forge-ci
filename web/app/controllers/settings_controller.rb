@@ -13,7 +13,25 @@ class SettingsController < ApplicationController
     @runner_token = ForgeCISecrets.fetch("runner_token")
     @admin_token = ForgeCISecrets.fetch("admin_token")
     @queue = JobRun.where(status: %w[queued claimed running]).group(:resource_class).count
+    @fork_runner_tokens = RunnerToken.where(fork_only: true).order(:name)
     @public_url = !URI.parse(@base_url).host.to_s.match?(/\A(localhost|127\.|0\.0\.0\.0|\[::1\])/)
+  end
+
+  def create_fork_runner
+    _record, @fork_runner_secret = RunnerToken.generate!(
+      name: params[:name].to_s.strip,
+      resource_class: params[:resource_class].to_s.strip.presence,
+      fork_only: true
+    )
+    show
+    render :show, status: :created
+  rescue ActiveRecord::RecordInvalid => e
+    redirect_to settings_path, alert: e.record.errors.full_messages.to_sentence
+  end
+
+  def destroy_fork_runner
+    RunnerToken.where(fork_only: true).find(params[:id]).destroy!
+    redirect_to settings_path, notice: "Fork runner token revoked. Destroy its host; do not reuse it for trusted jobs."
   end
 
   # Starts "Connect GitHub": renders a form that posts the manifest to GitHub.

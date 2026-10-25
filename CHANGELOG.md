@@ -22,6 +22,12 @@ separately.
 - Save credentials atomically without overwriting malformed files. Logout
   revokes refresh tokens even after access-token expiry; API use of a refreshed
   access token invalidates its previous refresh token.
+- Separate fork and trusted runner pools with immutable `fork_only` tokens.
+  Existing/shared tokens remain trusted-only; admins provision dedicated fork
+  runners in Settings. Fork jobs cannot receive project/context secrets,
+  including direct intake and legacy job snapshots.
+- Encrypt persisted job context snapshots and migrate existing plaintext
+  values. Back up encryption keys and stop web/worker writers during upgrade.
 
 ## 0.3.0 (2026-10-24)
 

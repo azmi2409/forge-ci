@@ -85,10 +85,12 @@ no job is still in flight.
 
 ## Runner API — `Authorization: Bearer <raw-runner-token>` on every call
 
-Tokens are created with `RunnerToken.generate!(name:, resource_class:)` →
+Tokens are created with `RunnerToken.generate!(name:, resource_class:, fork_only: false)` →
 `[record, raw_token]`; only the SHA256 hex digest is stored, compared with
 `secure_compare`. Missing/wrong token → `401`. Acting on a job owned by
-another token → `403`.
+another token → `403`. Default tokens claim trusted repository jobs only;
+`fork_only: true` tokens claim fork jobs only. The shared runner token is
+always trusted-only. Trust cannot be overridden by claim request parameters.
 
 ### Claim
 
@@ -99,6 +101,14 @@ full job payload (`200`), or `422` when nothing is claimable. Matching: job
 `executor.resource_class` == token `resource_class`, **or either side is
 NULL** (NULL matches anything); the job's project must have a free
 `max_concurrency` slot (counted across `claimed` + `running` jobs).
+
+Trust pools are exclusive, including classless jobs: fork-only tokens never
+claim trusted jobs and trusted-only tokens never claim fork jobs. Fork jobs
+receive no project variables or context secrets. Provision fork-only runners
+on separate disposable hosts, never on deployment infrastructure.
+Fork checkout excludes GitHub App credentials and operator repository URLs;
+only anonymous GitHub checkout is supported for fork jobs. Cache reads and
+writes use separate trusted/fork namespaces, including prefix lookup.
 
 On Postgres the candidate scan takes `FOR UPDATE SKIP LOCKED` inside a
 transaction (concurrent runners resolve the race atomically); other adapters

@@ -31,6 +31,39 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     assert_match "Connect GitHub", response.body
   end
 
+  test "admin can create and revoke a dedicated fork-only token" do
+    sign_in_as_admin
+    post create_fork_runner_settings_path, params: { name: "isolated-forks", resource_class: "fork" }
+    assert_response :created
+    token = RunnerToken.find_by!(name: "isolated-forks")
+    assert token.fork_only?
+    assert_equal "fork", token.resource_class
+    raw = response.body.match(/--token ([a-f0-9]{64})/)[1]
+    assert_equal token, RunnerToken.authenticate(raw)
+    get settings_path
+    assert_response :ok
+    assert_not_includes response.body, raw
+    delete destroy_fork_runner_settings_path(id: token.id)
+    assert_redirected_to settings_path
+    assert_nil RunnerToken.authenticate(raw)
+  end
+
+  test "members cannot provision fork runner tokens" do
+    sign_in_as("member", role: :member)
+    assert_no_difference "RunnerToken.count" do
+      post create_fork_runner_settings_path, params: { name: "forbidden" }
+    end
+    assert_not_equal 201, response.status
+  end
+
+  test "fork runner revoke cannot delete trusted tokens" do
+    token, = RunnerToken.generate!(name: "trusted-runner")
+    sign_in_as_admin
+    delete destroy_fork_runner_settings_path(id: token.id)
+    assert_response :not_found
+    assert RunnerToken.exists?(token.id)
+  end
+
   test "Connect GitHub posts a manifest to GitHub with this server's URLs" do
     sign_in_as_admin
     post "/settings/github", params: { org: "acme" }

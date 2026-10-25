@@ -90,6 +90,43 @@ class Api::V1::CacheControllerTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
   end
 
+  test "fork caches cannot read or replace trusted caches including prefix lookup" do
+    put "/api/v1/projects/#{@project.id}/cache",
+        params: { key: "deps-main", file: tarball }, headers: auth
+    assert_response :ok
+    trusted = @project.cache_entries.find_by!(key: "deps-main", fork_only: false)
+    trusted_blob = trusted.file.blob.key
+
+    _record, fork_raw = RunnerToken.generate!(name: "fork-cache", resource_class: "medium", fork_only: true)
+    fork_pipeline = PipelineIntake.call!(project: @project, sha: "fork", branch: "pr",
+                                         ir: compile_test_ir, forked: true)
+    post "/api/v1/runner/jobs/claim", headers: bearer_headers(fork_raw)
+    assert_response :ok
+    assert_equal fork_pipeline.id, JobRun.find(json_body["id"]).pipeline.id
+
+    ["deps-main", "deps-"].each do |key|
+      get "/api/v1/projects/#{@project.id}/cache", params: { keys: [key] }, headers: bearer_headers(fork_raw)
+      assert_response :not_found
+    end
+    put "/api/v1/projects/#{@project.id}/cache",
+        params: { key: "deps-main", file: tarball }, headers: bearer_headers(fork_raw)
+    assert_response :ok
+    fork_entry = @project.cache_entries.find_by!(key: "deps-main", fork_only: true)
+    assert_equal trusted_blob, trusted.reload.file.blob.key
+    assert_not_equal trusted_blob, fork_entry.file.blob.key
+
+    [false, true].each do |fork_only|
+      headers = fork_only ? bearer_headers(fork_raw) : auth
+      get "/api/v1/projects/#{@project.id}/cache", params: { keys: ["deps-"] }, headers: headers
+      assert_response :ok
+      expected = fork_only ? fork_entry : trusted
+      assert_equal expected.file.blob.byte_size, json_body["size"]
+      encoded = URI.parse(json_body["download_url"]).path.split("/")[-2]
+      payload = ActiveStorage.verifier.verified(encoded, purpose: :blob_key)
+      assert_equal expected.file.blob.key, payload.fetch("key")
+    end
+  end
+
   test "cache endpoints require authentication" do
     put "/api/v1/projects/#{@project.id}/cache", params: { key: "k", file: tarball }
     assert_response :unauthorized

@@ -17,7 +17,7 @@ module Api
             # `upcoming`: this runner's class has jobs waiting on earlier ones;
             # a runner with idle shutdown stays up for them.
             klass = current_runner_token.resource_class || params[:resource_class].presence
-            return render json: { error: "no claimable jobs right now", upcoming: JobRun.upcoming_count(klass) },
+            return render json: { error: "no claimable jobs right now", upcoming: JobRun.upcoming_count(klass, fork_only: current_runner_token.fork_only?) },
                           status: :unprocessable_entity
           end
 
@@ -130,6 +130,9 @@ module Api
           pipeline = job.pipeline
           github_repo = pipeline.github_repository
           github_repo ||= job.project.github_repositories.first if job.project.repo_url.blank?
+          # Forks clone mapped GitHub repositories anonymously. Never expose an
+          # installation token or an operator URL that may contain credentials.
+          return nil if pipeline.forked? && github_repo.nil?
           url = if github_repo
                   "https://github.com/#{github_repo.full_name}.git"
                 elsif job.project.repo_url.present?
@@ -138,7 +141,7 @@ module Api
           return nil if url.blank?
 
           { url: url, sha: pipeline.sha, branch: pipeline.branch,
-            token: checkout_token(github_repo) }.compact
+            token: pipeline.forked? ? nil : checkout_token(github_repo) }.compact
         end
 
         # Short-lived GitHub App installation token so the runner can clone

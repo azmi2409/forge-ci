@@ -13,15 +13,17 @@ class RunnerToken < ApplicationRecord
 
   validates :name, presence: true, uniqueness: true
   validates :token_digest, presence: true, uniqueness: true
+  validates :name, exclusion: { in: [STATIC_TOKEN_NAME] }, if: :fork_only?
 
   # Create a token; returns [record, raw_token]. Print/store the raw token
   # now — it cannot be recovered later.
-  def self.generate!(name:, resource_class: nil)
+  def self.generate!(name:, resource_class: nil, fork_only: false)
     raw = SecureRandom.hex(32)
     record = create!(
       name: name,
       token_digest: Digest::SHA256.hexdigest(raw),
-      resource_class: resource_class
+      resource_class: resource_class,
+      fork_only: fork_only
     )
     [record, raw]
   end

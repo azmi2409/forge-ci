@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_24_164453) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_25_120000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.string "name", null: false
     t.string "record_type", null: false
@@ -57,7 +57,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_164453) do
     t.bigint "size"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["project_id", "key"], name: "index_cache_entries_on_project_id_and_key", unique: true
+    t.boolean "fork_only", default: false, null: false
+    t.index ["project_id", "key", "fork_only"], name: "index_cache_entries_on_project_id_and_key_and_fork_only", unique: true
     t.index ["project_id"], name: "index_cache_entries_on_project_id"
   end
 
@@ -113,7 +114,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_164453) do
     t.string "working_directory"
     t.text "requires"
     t.string "resource_class"
-    t.text "context_environment"
     t.string "concurrency_key"
     t.integer "status", default: 0, null: false
     t.string "claimed_by"
@@ -124,6 +124,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_164453) do
     t.integer "parallelism", default: 1, null: false
     t.integer "node_index", default: 0, null: false
     t.integer "releases", default: 0, null: false
+    t.text "encrypted_context_environment"
     t.index ["resource_class"], name: "index_job_runs_on_resource_class"
     t.index ["status"], name: "index_job_runs_on_status"
     t.index ["workflow_run_id", "name", "node_index"], name: "index_job_runs_on_workflow_run_id_and_name_and_node_index", unique: true
@@ -225,6 +226,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_164453) do
     t.string "resource_class"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "fork_only", default: false, null: false
     t.index ["name"], name: "index_runner_tokens_on_name", unique: true
     t.index ["token_digest"], name: "index_runner_tokens_on_token_digest", unique: true
   end

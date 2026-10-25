@@ -62,13 +62,11 @@ rough edges there and please report them.
 
 Most important first.
 
-- [ ] **Keep fork pull requests off privileged runners.** A fork PR can set
-      `resource_class: deploy` and run commands on the deploy runner (it can't
-      get `setup_remote_docker`, but the machine and anything it can reach are
-      exposed). Refuse privileged classes for forked pipelines at intake or claim.
-- [ ] **Don't store context secrets in `job_runs.context_environment` in
-      plain text.** Read them at claim time like project variables, or encrypt
-      the column.
+- [x] **Keep fork pull requests off privileged runners.** Exclusive trusted
+      and fork-only token pools, including classless jobs; isolated hosts
+      required — 2026-10-25.
+- [x] **Don't store context secrets in `job_runs.context_environment` in
+      plain text.** Encrypted snapshots with existing-row migration — 2026-10-25.
 - [ ] **Spot interruptions:** watch the 2-minute EC2 notice and hand the job
       back to the queue instead of failing it. Today an interrupted job
       shows as failed and needs a manual rerun.
