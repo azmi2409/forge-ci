@@ -28,6 +28,8 @@ separately.
   including direct intake and legacy job snapshots.
 - Encrypt persisted job context snapshots and migrate existing plaintext
   values. Back up encryption keys and stop web/worker writers during upgrade.
+- Update bundled agent skill for OAuth login, exclusive fork runner pools,
+  isolated caches/checkout credentials, and safe infrastructure retries.
 
 ## 0.3.0 (2026-10-24)
 
