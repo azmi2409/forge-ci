@@ -1,0 +1,8 @@
+{
+  "_comment": "200 bodies. start -> {id,status:running}; heartbeat running -> {id,status,heartbeat_at}; heartbeat canceled -> {id,status:canceled,...}; complete -> {id,status}; release -> {id,status:queued}.",
+  "start": { "id": 1042, "status": "running" },
+  "heartbeat_running": { "id": 1042, "status": "running", "heartbeat_at": "2026-10-25T09:30:27Z" },
+  "heartbeat_canceled": { "id": 1042, "status": "canceled", "heartbeat_at": "2026-10-25T09:30:42Z" },
+  "complete": { "id": 1042, "status": "success" },
+  "release": { "id": 1042, "status": "queued" }
+}

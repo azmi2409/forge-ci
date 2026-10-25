@@ -6,6 +6,22 @@ separately.
 
 ## Unreleased
 
+- The Docker runner is now also available as a **static Go binary** (stdlib
+  only, no Ruby on runner hosts). The web image cross-compiles
+  `linux/amd64` + `linux/arm64` and ships the binaries in `/runner.tar.gz`
+  next to the Ruby runner; the install command accepts `--implementation=go`
+  (Ruby stays the default until the soak gates pass). The installer verifies
+  the binary's SHA256, installs atomically, keeps the previous binary for
+  rollback, and never runs both implementations under the same runner
+  identity. The Go runner keeps the exact control-plane contract and
+  behavior, with deliberate hardening: secrets split across streamed
+  log-read boundaries are still redacted (retained-tail emission), log
+  chunks post strictly in seq order with bounded queueing, every subprocess
+  gets its own process group (TERM → grace → KILL) and job-level
+  interruption explicitly removes containers, and shutdown separates four
+  lifetimes (stop claiming / interrupt execution / heartbeats / final
+  reporting). Runner contract, fixtures, and test-coverage matrix:
+  `runner-go/CONTRACT.md`, `runner-go/TESTING.md`.
 - `forge-ci login [--url URL]` / `forge-ci logout`: OAuth sign-in for the
   CLI. The browser opens at the server, you sign in with your web-UI
   account, and the token (authorization-code + PKCE, stored per server in

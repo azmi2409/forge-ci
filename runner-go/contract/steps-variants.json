@@ -1,0 +1,21 @@
+{
+  "id": 1046,
+  "name": "steps-variants",
+  "executor": { "image": "cimg/base:current" },
+  "steps": [
+    { "type": "run", "command": "echo plain" },
+    { "type": "run", "name": "tagged", "command": "echo tagged" },
+    { "type": "run", "name": "bg", "command": "sleep 30", "background": true },
+    { "type": "run", "name": "cleanup", "command": "rm -rf tmp", "when": "on_fail" },
+    { "type": "run", "name": "report", "command": "echo done", "when": "always" },
+    { "type": "run", "name": "slow-ok", "command": "slowcmd", "no_output_timeout": "30s" },
+    { "type": "run", "name": "with-env", "command": "echo $STEP_VAR", "environment": { "STEP_VAR": "step-value-123456" } },
+    { "type": "run", "name": "posix-shell", "command": "echo posix", "shell": "/bin/sh" },
+    { "type": "checkout", "path": "subdir" },
+    { "type": "teleport_node", "command": "mystery" }
+  ],
+  "environment": { "GLOBAL_VAR": "global-value-654321" },
+  "pipeline": { "sha": "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6", "branch": "main" },
+  "trusted": true,
+  "project_id": 12
+}

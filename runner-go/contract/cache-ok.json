@@ -1,0 +1,11 @@
+{
+  "_comment": "Cache API bodies. PUT -> {key,size}; GET hit -> {key,size,download_url}; miss -> 404 {error}; no active job in project -> 403 {error}.",
+  "put_ok": { "key": "gems-v1-a1b2c3", "size": 52428800 },
+  "get_hit": {
+    "key": "gems-v1-a1b2c3",
+    "size": 52428800,
+    "download_url": "https://ci.example.com/rails/active_storage/disk/redirect/eyJfcmFpbHMiOnsibWVzc2FnZSI6eyJuYW1lIjoiY2FjaGUtdGVzdCIsImtleSI6ImFiYzEyMyJ9fQ--/cache-test"
+  },
+  "get_miss_404": { "error": "no matching cache entry" },
+  "get_forbidden_403": { "error": "forbidden: token has no active job in this project" }
+}

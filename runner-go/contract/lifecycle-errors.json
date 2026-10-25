@@ -1,0 +1,8 @@
+{
+  "_comment": "Error bodies with their HTTP status codes.",
+  "release_conflict_409": { "error": "job released 2 times already; not requeued" },
+  "illegal_transition_422": { "error": "cannot transition from canceled to running" },
+  "forbidden_403": { "error": "forbidden: job is owned by another token" },
+  "not_found_404": { "error": "job not found" },
+  "log_chunk_422": { "error": "seq and chunk are required" }
+}

@@ -1,0 +1,28 @@
+{
+  "id": 1047,
+  "name": "null-executor-fields",
+  "working_directory": "~/project",
+  "executor": {
+    "image": "alpine:3.20",
+    "entrypoint": null,
+    "command": null,
+    "secondary_images": null,
+    "environment": null
+  },
+  "steps": [
+    { "type": "checkout" },
+    { "type": "run", "command": "echo ok" }
+  ],
+  "environment": {
+    "STRING_NUM": "42",
+    "EMPTY": ""
+  },
+  "pipeline": { "sha": "f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1", "branch": "main" },
+  "trusted": true,
+  "workflow_run_id": 910,
+  "project_id": 12,
+  "docker_build_cache": {
+    "registry": "registry.example.com/forge-cache",
+    "ref": "registry.example.com/forge-cache:p12-main"
+  }
+}

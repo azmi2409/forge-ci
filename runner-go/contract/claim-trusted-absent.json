@@ -1,0 +1,16 @@
+{
+  "id": 1045,
+  "name": "deploy",
+  "node_index": 0,
+  "parallelism": 1,
+  "working_directory": "~/project",
+  "executor": { "image": "ruby:3.2-slim" },
+  "steps": [
+    { "type": "checkout" },
+    { "type": "run", "name": "deploy", "command": "bin/kamal deploy" },
+    { "type": "save_cache", "key": "bundle-{{ .Branch }}", "paths": ["vendor/bundle"] },
+    { "type": "persist_to_workspace", "root": ".", "paths": ["public"] }
+  ],
+  "environment": { "KAMAL_PASSWORD": "deploy-secret-9999" },
+  "pipeline": { "sha": "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5", "branch": "main" }
+}
