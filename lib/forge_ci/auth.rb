@@ -1,12 +1,15 @@
 # frozen_string_literal: true
 
 require "base64"
+require "cgi"
 require "fileutils"
 require "json"
 require "net/http"
 require "openssl"
 require "securerandom"
 require "socket"
+require "tempfile"
+require "timeout"
 require "uri"
 
 module ForgeCI
@@ -36,7 +39,13 @@ module ForgeCI
       stripped = url.to_s.strip.sub(%r{/+\z}, "")
       raise Error, "server URL required" if stripped.empty?
 
+      uri = URI.parse(stripped)
+      unless %w[http https].include?(uri.scheme) && uri.host && !uri.userinfo && !uri.query && !uri.fragment
+        raise Error, "server URL must be an HTTP(S) URL without credentials, query, or fragment"
+      end
       stripped
+    rescue URI::InvalidURIError
+      raise Error, "invalid server URL"
     end
 
     # -- PKCE (RFC 7636) -------------------------------------------------------
@@ -83,9 +92,7 @@ module ForgeCI
       data = load_credentials(env)
       data["servers"] ||= {}
       data["servers"][normalize_url(url)] = entry
-      FileUtils.mkdir_p(File.dirname(path))
-      File.open(path, File::WRONLY | File::CREAT | File::TRUNC, 0o600) { |f| f.write(JSON.pretty_generate(data)) }
-      FileUtils.chmod(0o600, path)
+      save_credentials(path, data)
     end
 
     # Removes the server's entry; true when there was one.
@@ -99,16 +106,32 @@ module ForgeCI
       if data["servers"].empty? && data.keys == %w[servers]
         FileUtils.rm_f(path)
       else
-        File.open(path, File::WRONLY | File::CREAT | File::TRUNC, 0o600) { |f| f.write(JSON.pretty_generate(data)) }
+        save_credentials(path, data)
       end
       true
     end
 
+    def save_credentials(path, data)
+      FileUtils.mkdir_p(File.dirname(path))
+      Tempfile.create([".credentials", ".json"], File.dirname(path)) do |file|
+        file.write(JSON.pretty_generate(data))
+        file.flush
+        File.rename(file.path, path)
+      end
+    rescue SystemCallError => e
+      raise Error, "could not save credentials: #{e.message}"
+    end
+
     def load_credentials(env = ENV)
       parsed = JSON.parse(File.read(credentials_path(env)))
-      parsed.is_a?(Hash) ? parsed : {}
-    rescue Errno::ENOENT, Errno::EACCES, SystemCallError, JSON::ParserError
+      unless parsed.is_a?(Hash) && (!parsed.key?("servers") || parsed["servers"].is_a?(Hash))
+        raise Error, "invalid credentials file structure"
+      end
+      parsed
+    rescue Errno::ENOENT
       {}
+    rescue SystemCallError, JSON::ParserError => e
+      raise Error, "could not read credentials: #{e.message}"
     end
 
     # -- the login flow ------------------------------------------------------------
@@ -162,6 +185,8 @@ module ForgeCI
       out.puts "forge-ci: logged in#{entry["username"] ? " as #{entry["username"]}" : ""} (#{url})"
       entry
     ensure
+      waiter&.kill
+      waiter&.join
       server&.close
     end
 
@@ -176,15 +201,19 @@ module ForgeCI
       response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https",
                                                  open_timeout: 10, read_timeout: 60) { |http| http.request(request) }
       body = begin
-        JSON.parse(response.body.to_s)
+        response.body.to_s.empty? ? {} : JSON.parse(response.body)
       rescue JSON::ParserError
+        raise Error, "server returned invalid JSON for #{verb.to_s.upcase} #{path}" if response.is_a?(Net::HTTPSuccess)
         {}
       end
-      return body if response.is_a?(Net::HTTPSuccess)
+      if response.is_a?(Net::HTTPSuccess)
+        raise Error, "server returned a non-object JSON response for #{verb.to_s.upcase} #{path}" unless body.is_a?(Hash)
+        return body
+      end
 
       detail = body.is_a?(Hash) ? (body["error_description"] || body["error"]) : nil
       raise Error, "server returned HTTP #{response.code} for #{verb.to_s.upcase} #{path}#{detail ? ": #{detail}" : ""}"
-    rescue SystemCallError, SocketError, Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError => e
+    rescue SystemCallError, SocketError, IOError, Net::HTTPBadResponse, Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError => e
       raise Error, "could not reach #{url}: #{e.message}"
     end
 
@@ -208,24 +237,29 @@ module ForgeCI
         next unless IO.select([server], nil, nil, remaining)
 
         socket = server.accept
-        params = parse_request_query(socket.gets.to_s)
-        if params["error"]
+        remaining = deadline_at - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        raise Error, "timed out waiting for the browser" if remaining <= 0
+        line = Timeout.timeout(remaining, Error, "timed out waiting for the browser") { socket.gets(8192) }
+        params = parse_request_query(line.to_s)
+        if params["error"] && params["state"] == state
           respond_once(socket, 400, "forge-ci: authorization failed: #{params["error_description"] || params["error"]}")
           raise Error, "authorization failed: #{params["error_description"] || params["error"]}"
         end
-        if params["code"] && params["state"] == state
+        if !params["code"].to_s.empty? && params["state"] == state
           respond_once(socket, 200,
                        "Signed in. You can close this window and return to the terminal.")
           return [params["code"], params["state"]]
         end
         respond_once(socket, 404, "Not found")
+      ensure
+        socket&.close unless socket&.closed?
       end
     end
 
     # "GET /callback?code=a&state=b HTTP/1.1" → { "code" => "a", "state" => "b" }
     def parse_request_query(request_line)
-      target = request_line.split(" ")[1]
-      return {} if target.nil?
+      method, target, version = request_line.split(" ")
+      return {} unless method == "GET" && target&.split("?", 2)&.first == CALLBACK_PATH && version&.start_with?("HTTP/")
 
       URI.decode_www_form(target.split("?", 2)[1].to_s).to_h
     rescue ArgumentError
@@ -234,7 +268,7 @@ module ForgeCI
 
     def respond_once(socket, status, message)
       body = "<!doctype html><title>forge-ci</title><body style=\"font-family: system-ui; " \
-             "text-align: center; margin-top: 3rem\">#{message}</body>"
+             "text-align: center; margin-top: 3rem\">#{CGI.escapeHTML(message)}</body>"
       socket.write "HTTP/1.1 #{status} #{status == 200 ? 'OK' : 'X'}\r\n" \
                    "Content-Type: text/html; charset=utf-8\r\n" \
                    "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}"
@@ -299,7 +333,7 @@ module ForgeCI
 
       begin
         request_json(url, :post, "/oauth/revoke",
-                     form: { token: entry["access_token"], client_id: CLIENT_ID })
+                     form: { token: entry["refresh_token"] || entry["access_token"], client_id: CLIENT_ID })
       rescue Error => e
         out.puts "forge-ci: could not revoke the token on the server (#{e.message}); forgetting it anyway"
       end

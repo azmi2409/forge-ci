@@ -108,6 +108,9 @@ class OAuthLoginTest < ActionDispatch::IntegrationTest
     token = exchange_code(authorization_code)
     refresh = @last_token_response["refresh_token"]
     assert_not_nil refresh
+    Doorkeeper::AccessToken.by_token(token).update!(created_at: 2.days.ago)
+    get "/api/v1/me", headers: bearer_headers(token)
+    assert_response :unauthorized
 
     post "/oauth/token", params: {
       grant_type: "refresh_token",
@@ -121,6 +124,14 @@ class OAuthLoginTest < ActionDispatch::IntegrationTest
     get "/api/v1/me", headers: bearer_headers(new_token)
     assert_response :ok
     assert_equal "dave", json_body["username"]
+
+    post "/oauth/token", params: {
+      grant_type: "refresh_token",
+      refresh_token: refresh,
+      client_id: CliOauthApp::UID
+    }
+    assert_response :bad_request
+    assert_equal "invalid_grant", json_body["error"]
   end
 
   test "revoking a token locks it out of the API" do
@@ -132,6 +143,24 @@ class OAuthLoginTest < ActionDispatch::IntegrationTest
 
     get "/api/v1/me", headers: bearer_headers(token)
     assert_response :unauthorized
+  end
+
+  test "revoking a refresh token also ends an expired access token session" do
+    sign_in_as("lee", role: :member)
+    token = exchange_code(authorization_code)
+    refresh = @last_token_response["refresh_token"]
+    Doorkeeper::AccessToken.by_token(token).update!(created_at: 2.days.ago)
+
+    post "/oauth/revoke", params: {
+      token: refresh, token_type_hint: "refresh_token", client_id: CliOauthApp::UID
+    }
+    assert_response :ok
+
+    post "/oauth/token", params: {
+      grant_type: "refresh_token", refresh_token: refresh, client_id: CliOauthApp::UID
+    }
+    assert_response :bad_request
+    assert_equal "invalid_grant", json_body["error"]
   end
 
   test "PKCE is mandatory: no code_challenge is refused" do
@@ -164,6 +193,47 @@ class OAuthLoginTest < ActionDispatch::IntegrationTest
     sign_in_as("iris", role: :admin)
     get "/oauth/authorize", params: @authorize_params.merge(redirect_uri: "https://evil.example.com/cb")
     assert_response :bad_request
+  end
+
+  test "member tokens cannot manage secrets or read the autoscaler queue" do
+    sign_in_as("jules", role: :member)
+    token = exchange_code(authorization_code)
+    context = @project.contexts.create!(name: "production", payload: { "SECRET" => "original" })
+
+    assert_no_difference -> { Context.count } do
+      post "/api/v1/projects/#{@project.id}/contexts",
+           params: { name: "blocked", payload: { "SECRET" => "new" } },
+           headers: bearer_headers(token), as: :json
+    end
+    assert_response :forbidden
+
+    post "/api/v1/contexts/#{context.id}/rotate", params: { payload: { "SECRET" => "changed" } },
+         headers: bearer_headers(token), as: :json
+    assert_response :forbidden
+    assert_equal "original", context.reload.payload["SECRET"]
+
+    get "/api/v1/queue", headers: bearer_headers(token)
+    assert_response :forbidden
+  end
+
+  test "API authorization follows the current user and requires the api scope" do
+    user = sign_in_as("kelly", role: :admin)
+    token = exchange_code(authorization_code)
+    record = Doorkeeper::AccessToken.by_token(token)
+
+    record.update!(scopes: "")
+    get "/api/v1/me", headers: bearer_headers(token)
+    assert_response :unauthorized
+
+    record.update!(scopes: "api")
+    User.create!(username: "other-admin", password: TEST_PASSWORD, role: :admin)
+    user.update!(role: :member)
+    get "/api/v1/queue", headers: bearer_headers(token)
+    assert_response :forbidden
+
+    user.destroy!
+    get "/api/v1/me", headers: bearer_headers(token)
+    assert_response :unauthorized
   end
 
   private

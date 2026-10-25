@@ -16,6 +16,12 @@ separately.
   trigger). Server side this is Doorkeeper (`/oauth/*`), plus a new
   `GET /api/v1/me`; the JSON API now accepts personal OAuth tokens next to
   the shared admin token.
+- Harden OAuth callbacks: validate error state and callback path, escape
+  browser output, and enforce the callback deadline for incomplete requests.
+  Reject invalid callback ports and malformed server URLs/responses.
+- Save credentials atomically without overwriting malformed files. Logout
+  revokes refresh tokens even after access-token expiry; API use of a refreshed
+  access token invalidates its previous refresh token.
 
 ## 0.3.0 (2026-10-24)
 

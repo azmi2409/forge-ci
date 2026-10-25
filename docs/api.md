@@ -20,6 +20,17 @@ The JSON API accepts two kinds of Bearer credentials:
 (`{ username, role }` or `{ admin_token: true, role: "admin" }`) — `forge-ci
 login` verifies with it. Anything else unauthenticated → `401`.
 
+`forge-ci logout` revokes the stored refresh token (or access token when no
+refresh token exists), including sessions whose access token has expired.
+After a refreshed access token is first used successfully, its previous
+refresh token can no longer be reused. If server revocation fails, logout
+warns and still removes local credentials; server-side access may remain valid.
+
+The CLI validates callback state on both success and OAuth errors and limits
+the browser callback wait to five minutes. Credentials are replaced atomically
+with mode `0600`; unreadable or malformed credentials files fail explicitly
+rather than silently discarding other saved sessions.
+
 ## Pipeline intake
 
 `POST /api/v1/projects/:project_id/pipelines` — requires an admin (see

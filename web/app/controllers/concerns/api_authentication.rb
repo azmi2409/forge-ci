@@ -41,7 +41,10 @@ module ApiAuthentication
       token = Doorkeeper::AccessToken.by_token(provided)
       if token&.accessible? && token.scopes.exists?("api")
         @current_api_user = User.find_by(id: token.resource_owner_id)
-        return if current_api_user
+        if current_api_user
+          token.revoke_previous_refresh_token!
+          return
+        end
       end
     end
 

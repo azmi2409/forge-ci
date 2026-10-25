@@ -256,6 +256,7 @@ module ForgeCI
       end
       return usage_error("unexpected argument #{argv.first.inspect}") if argv.any?
       return usage_error("--url (or FORGE_CI_URL) is required") if options[:url].to_s.empty?
+      return usage_error("--port must be between 0 and 65535") unless (0..65535).cover?(options[:port])
 
       begin
         ForgeCI::Auth.login(url: options[:url], out: @out, port: options[:port],

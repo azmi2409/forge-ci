@@ -411,7 +411,7 @@ class CLITest < Minitest::Test
         assert_nil ForgeCI::Auth.read_server(url)
 
         form = form_body(requests.first[:body])
-        assert_equal "at", form["token"]
+        assert_equal "rt", form["token"]
         assert_equal "forge-ci-cli", form["client_id"]
       end
     end
@@ -488,6 +488,14 @@ class CLITest < Minitest::Test
       assert_match(/forge-ci login/, err)
     ensure
       ENV["FORGE_CI_ADMIN_TOKEN"] = original
+    end
+  end
+
+  def test_login_rejects_out_of_range_callback_ports
+    [-1, 65536].each do |port|
+      status, _out, err = run_cli("login", "--url", "http://127.0.0.1:3000", "--port", port.to_s)
+      assert_equal 2, status
+      assert_match(/--port/, err)
     end
   end
 
