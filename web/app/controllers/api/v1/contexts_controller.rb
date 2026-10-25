@@ -4,12 +4,12 @@ module Api
   module V1
     # Context (secret set) administration (component 8).
     #
-    # Auth is a dedicated admin token, NOT a runner token: runner tokens
-    # must never be able to read or rewrite secrets. Set FORGE_CI_ADMIN_TOKEN
-    # in production; the endpoint refuses to serve (503) when it is blank —
-    # fail-closed, never fail-open.
+    # Admin only (shared admin token or an admin user's OAuth token), NEVER a
+    # runner token: runner tokens must never be able to read or rewrite
+    # secrets. Fail-closed, never fail-open.
     class ContextsController < ActionController::API
-      include AdminAuthentication
+      include ApiAuthentication
+      before_action :require_admin!
 
       # POST /api/v1/projects/:project_id/contexts { name:, payload: {KEY: value} }
       # Creates a context (or replaces the payload of an existing one with the

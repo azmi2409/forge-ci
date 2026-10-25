@@ -58,7 +58,16 @@ class JobRun < ApplicationRecord
   serialize :executor, coder: JSON
   serialize :steps, coder: JSON
   serialize :requires, coder: JSON
-  serialize :context_environment, coder: JSON
+  serialize :encrypted_context_environment, coder: JSON
+  encrypts :encrypted_context_environment
+  alias_attribute :context_environment, :encrypted_context_environment
+
+  self.filter_attributes += %i[context_environment encrypted_context_environment]
+
+  # Runner claims expose the merged environment explicitly, never generic serialization.
+  def serializable_hash(options = nil)
+    super.except("context_environment", "encrypted_context_environment")
+  end
 
   validates :name, presence: true, uniqueness: { scope: %i[workflow_run_id node_index] }
   validates :parallelism, numericality: { only_integer: true, greater_than_or_equal_to: 1 }
@@ -240,8 +249,9 @@ class JobRun < ApplicationRecord
   # requests), the executor environment from the config, then resolved
   # context payloads. Never the raw ProjectVariable or Context records.
   def merged_environment
-    variables = pipeline.forked? ? {} : project.variables_environment
-    variables.merge(executor_hash["environment"] || {}).merge(context_environment || {})
+    return executor_hash["environment"] || {} if pipeline.forked?
+
+    project.variables_environment.merge(executor_hash["environment"] || {}).merge(context_environment || {})
   end
 
   # --- claiming ----------------------------------------------------------------
@@ -257,6 +267,7 @@ class JobRun < ApplicationRecord
   end
 
   # Atomically claim the oldest queued job this token may run:
+  #  - fork-only tokens run only forks; all other tokens run only trusted pipelines,
   #  - executor.resource_class matches the token's resource_class, or, for
   #    a token without one (e.g. the shared FORGE_CI_RUNNER_TOKEN), the
   #    class the runner asked for (a NULL on either side matches anything), and
@@ -268,6 +279,7 @@ class JobRun < ApplicationRecord
     transaction do
       scope = queued.order(:created_at)
                     .preload(workflow_run: { pipeline: :project })
+      scope = scope.where(workflow_run_id: WorkflowRun.joins(:pipeline).where(pipelines: { forked: token.fork_only? }).select(:id))
       # NULL on either side matches anything. A NULL token class needs no
       # filter at all; binding NULL into `OR :rc IS NULL` makes Postgres
       # unable to infer the parameter type (PG::IndeterminateDatatype).
@@ -293,8 +305,11 @@ class JobRun < ApplicationRecord
   # jobs count, so a stuck old pipeline can't keep a runner up forever.
   UPCOMING_WINDOW = 2.hours
 
-  def self.upcoming_count(resource_class)
+  def self.upcoming_count(resource_class, fork_only: nil)
     scope = pending.where(created_at: UPCOMING_WINDOW.ago..)
+    unless fork_only.nil?
+      scope = scope.where(workflow_run_id: WorkflowRun.joins(:pipeline).where(pipelines: { forked: fork_only }).select(:id))
+    end
     scope = scope.where(resource_class: resource_class) unless resource_class.nil?
     scope.count
   end

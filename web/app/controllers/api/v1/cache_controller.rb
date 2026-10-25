@@ -24,7 +24,7 @@ module Api
                         status: :unprocessable_entity
         end
 
-        entry = @project.cache_entries.find_or_initialize_by(key: key)
+        entry = @project.cache_entries.find_or_initialize_by(key: key, fork_only: current_runner_token.fork_only?)
         entry.file.attach(
           io: upload.tempfile,
           filename: "#{key}.tar",
@@ -43,7 +43,7 @@ module Api
       def show
         return render_forbidden unless cache_authorized?
 
-        entry = CacheEntry.lookup(@project, params[:keys])
+        entry = CacheEntry.lookup(@project, params[:keys], fork_only: current_runner_token.fork_only?)
         return render json: { error: "no matching cache entry" }, status: :not_found unless entry&.file&.attached?
 
         render json: {

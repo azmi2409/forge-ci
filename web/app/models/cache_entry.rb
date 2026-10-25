@@ -9,18 +9,19 @@ class CacheEntry < ApplicationRecord
 
   has_one_attached :file
 
-  validates :key, presence: true, uniqueness: { scope: :project_id }
+  validates :key, presence: true, uniqueness: { scope: %i[project_id fork_only] }
 
   # Find the best entry for the requested keys (tried in order): exact match
   # first, then longest-prefix fallback per key. Returns nil on total miss.
-  def self.lookup(project, keys)
+  def self.lookup(project, keys, fork_only: false)
+    entries = project.cache_entries.where(fork_only: fork_only)
     Array(keys).map(&:to_s).each do |key|
       next if key.blank?
 
-      exact = project.cache_entries.find_by(key: key)
+      exact = entries.find_by(key: key)
       return exact if exact
 
-      prefixed = project.cache_entries
+      prefixed = entries
                         .where("key LIKE ?", "#{sanitize_sql_like(key)}%")
                         .order(created_at: :desc)
                         .first

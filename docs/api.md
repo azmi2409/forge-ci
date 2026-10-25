@@ -3,11 +3,38 @@
 All request/response bodies are JSON unless noted (artifact/cache uploads are
 multipart). Base path: `/api/v1`.
 
+## Authentication
+
+The JSON API accepts two kinds of Bearer credentials:
+
+- the shared **admin token** (`FORGE_CI_ADMIN_TOKEN`, shown on the Settings
+  page) — full access, for scripts and CI;
+- a **personal OAuth token** from `forge-ci login` — the request acts as the
+  signed-in web-UI user. Members can view and cancel; admins can do
+  everything (intake, project creation, contexts, queue). Tokens are
+  authorization-code + PKCE, issued by the server's Doorkeeper endpoints
+  (`/oauth/authorize`, `/oauth/token`, `/oauth/revoke`), expire after 24h
+  and are refreshed automatically by the CLI.
+
+`GET /api/v1/me` reports who the presented token acts as
+(`{ username, role }` or `{ admin_token: true, role: "admin" }`) — `forge-ci
+login` verifies with it. Anything else unauthenticated → `401`.
+
+`forge-ci logout` revokes the stored refresh token (or access token when no
+refresh token exists), including sessions whose access token has expired.
+After a refreshed access token is first used successfully, its previous
+refresh token can no longer be reused. If server revocation fails, logout
+warns and still removes local credentials; server-side access may remain valid.
+
+The CLI validates callback state on both success and OAuth errors and limits
+the browser callback wait to five minutes. Credentials are replaced atomically
+with mode `0600`; unreadable or malformed credentials files fail explicitly
+rather than silently discarding other saved sessions.
+
 ## Pipeline intake
 
-`POST /api/v1/projects/:project_id/pipelines` — requires
-`Authorization: Bearer <FORGE_CI_ADMIN_TOKEN>` (`401` otherwise, `503` while
-the admin token is not configured). The GitHub flow goes through the
+`POST /api/v1/projects/:project_id/pipelines` — requires an admin (see
+above). The GitHub flow goes through the
 HMAC-verified webhook instead. The easiest client is the CLI:
 `forge-ci trigger .circleci/config.yml --project NAME --wait`.
 
@@ -37,7 +64,10 @@ HMAC-verified webhook instead. The easiest client is the CLI:
              { "id": 2, "name": "test", "status": "pending", "requires": ["build"] }] }] }
 ```
 
-## Admin API — `Authorization: Bearer <FORGE_CI_ADMIN_TOKEN>`
+## Admin API — admin token, or an admin user's OAuth token
+
+The whole table below needs an admin. Project **listing** (`GET /projects`)
+and pipeline **status/cancel** also accept a member's OAuth token.
 
 | Call | Purpose |
 |---|---|
@@ -55,10 +85,12 @@ no job is still in flight.
 
 ## Runner API — `Authorization: Bearer <raw-runner-token>` on every call
 
-Tokens are created with `RunnerToken.generate!(name:, resource_class:)` →
+Tokens are created with `RunnerToken.generate!(name:, resource_class:, fork_only: false)` →
 `[record, raw_token]`; only the SHA256 hex digest is stored, compared with
 `secure_compare`. Missing/wrong token → `401`. Acting on a job owned by
-another token → `403`.
+another token → `403`. Default tokens claim trusted repository jobs only;
+`fork_only: true` tokens claim fork jobs only. The shared runner token is
+always trusted-only. Trust cannot be overridden by claim request parameters.
 
 ### Claim
 
@@ -69,6 +101,14 @@ full job payload (`200`), or `422` when nothing is claimable. Matching: job
 `executor.resource_class` == token `resource_class`, **or either side is
 NULL** (NULL matches anything); the job's project must have a free
 `max_concurrency` slot (counted across `claimed` + `running` jobs).
+
+Trust pools are exclusive, including classless jobs: fork-only tokens never
+claim trusted jobs and trusted-only tokens never claim fork jobs. Fork jobs
+receive no project variables or context secrets. Provision fork-only runners
+on separate disposable hosts, never on deployment infrastructure.
+Fork checkout excludes GitHub App credentials and operator repository URLs;
+only anonymous GitHub checkout is supported for fork jobs. Cache reads and
+writes use separate trusted/fork namespaces, including prefix lookup.
 
 On Postgres the candidate scan takes `FOR UPDATE SKIP LOCKED` inside a
 transaction (concurrent runners resolve the race atomically); other adapters

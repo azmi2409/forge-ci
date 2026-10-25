@@ -9,9 +9,22 @@ class RunnerTokenTest < ActiveSupport::TestCase
     assert record.persisted?
     assert_equal "runner-1", record.name
     assert_equal "medium", record.resource_class
+    assert_equal false, record.fork_only?
     assert_equal 64, raw.length
     assert_not_equal raw, record.token_digest
     assert_equal Digest::SHA256.hexdigest(raw), record.token_digest
+  end
+
+  test "fork-only is explicit and persisted" do
+    record, raw = RunnerToken.generate!(name: "fork-runner", fork_only: true)
+    assert record.reload.fork_only?
+    assert RunnerToken.authenticate(raw).fork_only?
+  end
+
+  test "shared static token cannot become fork-only" do
+    assert_raises(ActiveRecord::RecordInvalid) do
+      RunnerToken.generate!(name: RunnerToken::STATIC_TOKEN_NAME, fork_only: true)
+    end
   end
 
   test "authenticate returns the record for a valid raw token" do
@@ -40,6 +53,7 @@ class RunnerTokenTest < ActiveSupport::TestCase
       assert record.persisted?
       assert_equal "static-runner", record.name
       assert_nil record.resource_class
+      assert_equal false, record.fork_only?
       # Second call returns the same record (no duplicates).
       assert_equal record.id, RunnerToken.authenticate(secret).id
       assert_equal 1, RunnerToken.where(name: "static-runner").count

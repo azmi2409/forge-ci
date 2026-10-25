@@ -58,10 +58,19 @@ Write standard CircleCI 2.1. These are the differences that matter:
 
 ### Runners and `resource_class`
 
-A job's `resource_class` chooses which runners may run it: a runner claims
-jobs whose class matches its `RESOURCE_CLASS`, plus jobs with no class. Keep
-the classes this repository already uses; ask before inventing a new one,
-since a class with no runner leaves its jobs queued forever.
+A job's `resource_class` chooses which runners may run it within its trust
+pool: a runner claims matching classes plus classless jobs. Trusted tokens
+never claim fork jobs; `fork_only` tokens never claim trusted jobs, even when
+classes match or are omitted. Keep the classes this repository already uses;
+a class with no eligible runner leaves jobs queued.
+
+Fork jobs require dedicated, isolated hosts provisioned with a fork-only
+token from **Settings → Runners**. Never route them onto deploy hosts, share
+host storage, or reuse their hosts for trusted jobs without rebuilding.
+Resource classes are routing labels, not a security boundary. Fork caches
+are separate from trusted caches; fork checkout is anonymous GitHub-only,
+without installation tokens or operator-configured repository URLs. Private
+fork checkout can fail; never work around it by injecting privileged tokens.
 
 ### Splitting tests
 
@@ -110,21 +119,39 @@ commands in the job images.
 
 ## Run, watch and cancel
 
-Pipelines normally start on push. To start one by hand you need the server
-URL and an admin token from whoever runs ForgeCI. Never commit, print or log
-the token.
+Pipelines normally start on push. For manual runs, sign in with your web-UI
+account. Triggering requires an admin; members can view and cancel.
 
 ```sh
-export FORGE_CI_URL=https://ci.example.com FORGE_CI_ADMIN_TOKEN=...
+export FORGE_CI_URL=https://ci.example.com
+forge-ci login
+# Over SSH/headless: forge-ci login --manual
 
-# Starts a pipeline for the current branch and HEAD; the commit must be pushed,
-# because runners fetch it. --wait blocks and exits non-zero on failure.
+# Starts a pipeline for the current branch and HEAD; push the commit first.
+# --wait blocks and exits non-zero on failure.
 forge-ci trigger .circleci/config.yml --project owner/repo --wait
-
-curl -s -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" "$FORGE_CI_URL/api/v1/pipelines/<id>"   # status
-curl -s -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" "$FORGE_CI_URL/api/v1/projects"         # project names
-curl -s -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" "$FORGE_CI_URL/api/v1/queue"            # queued jobs per class
 forge-ci cancel <id>
+forge-ci logout
+```
+
+Login uses authorization-code + PKCE. Credentials live per server in
+`~/.config/forge-ci/credentials.json` (0600), or `FORGE_CI_CREDENTIALS`;
+`XDG_CONFIG_HOME` changes the default config directory. Tokens refresh
+automatically. Resolution is `--token` > `FORGE_CI_ADMIN_TOKEN` > stored login.
+Never print, commit, read out, or copy credentials into logs. Corrupt files
+fail explicitly: do not delete them blindly and lose other server sessions.
+Logout revokes the refresh token and removes local credentials; a revocation
+warning means server-side access may remain valid.
+
+For automation and direct API calls, obtain the shared admin token securely
+from the operator. Stored CLI login is not automatically used by `curl`.
+Do not extract it from the credentials file.
+
+```sh
+# FORGE_CI_ADMIN_TOKEN must already be injected securely.
+curl -s -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" "$FORGE_CI_URL/api/v1/pipelines/<id>"
+curl -s -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" "$FORGE_CI_URL/api/v1/projects"
+curl -s -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" "$FORGE_CI_URL/api/v1/queue"
 ```
 
 Projects created by the GitHub App are named `owner/repo`.
@@ -137,12 +164,13 @@ paste the failing step's output rather than guessing.
 
 1. Find the failing job and step in the pipeline status or the UI.
 2. Reproduce the step's command locally in the same image when you can.
-3. A job stuck in `queued` usually means no runner serves its
-   `resource_class` (or it is scaling up from zero, which takes a minute or
-   two). Check `/api/v1/queue` before changing the config.
-4. A job `canceled` without a failure usually means the pipeline was
-   cancelled or a runner shut down mid-job; re-run it rather than editing
-   code.
+3. A job stuck in `queued` can mean no runner serves its `resource_class`,
+   no runner belongs to its trust pool, project concurrency is full, or
+   capacity is starting. Fork jobs require fork-only runners; changing the
+   class must never bypass isolation. Check the queue and Settings first.
+4. For a canceled or infrastructure-interrupted job, inspect shutdown/release
+   messages before retrying. Only rerun work known safe to repeat; never
+   automatically rerun a deployment that may already have changed production.
 
 ## Repository notes
 

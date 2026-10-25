@@ -106,6 +106,59 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity
   end
 
+  test "default runners reject fork jobs including classless and forged resource classes" do
+    @pipeline.update!(forked: true)
+    _token, classless_raw = RunnerToken.generate!(name: "classless-runner")
+    ["medium", nil].each do |klass|
+      job_named("build").update!(resource_class: klass)
+      [@raw, classless_raw].each do |raw|
+        post "/api/v1/runner/jobs/claim", params: { resource_class: "medium", fork_only: true },
+             headers: bearer_headers(raw), as: :json
+        assert_response :unprocessable_entity
+        assert_equal 0, json_body["upcoming"]
+        assert job_named("build").reload.queued?
+      end
+    end
+  end
+
+  test "fork-only runners reject trusted jobs even with a forged class" do
+    _token, raw = RunnerToken.generate!(name: "fork-runner", fork_only: true)
+    post "/api/v1/runner/jobs/claim", params: { resource_class: "medium" },
+         headers: bearer_headers(raw), as: :json
+    assert_response :unprocessable_entity
+    assert_equal 0, json_body["upcoming"]
+    assert job_named("build").reload.queued?
+  end
+
+  test "fork-only runners receive fork config but never saved contexts or project variables" do
+    @pipeline.update!(forked: true)
+    @project.variables.create!(name: "PROJECT_SECRET", value: "hidden")
+    _token, raw = RunnerToken.generate!(name: "fork-runner", fork_only: true)
+    post "/api/v1/runner/jobs/claim", params: { resource_class: "medium" },
+         headers: bearer_headers(raw), as: :json
+    assert_response :ok
+    assert_equal false, json_body["trusted"]
+    assert_equal({ "RAILS_ENV" => "test" }, json_body["environment"])
+  end
+
+  test "direct fork intake discards requested contexts before copying secrets" do
+    pipeline = PipelineIntake.call!(project: @project, sha: "fork-sha", branch: "fork",
+                                   ir: compile_test_ir, context_names: ["deploy", "nonexistent"], forked: true)
+    assert pipeline.forked?
+    pipeline.job_runs.each { |job| assert_empty job.context_environment }
+  end
+
+  test "fork-only token can claim a classless fork job" do
+    @pipeline.update!(forked: true)
+    job_named("build").update!(resource_class: nil)
+    _token, raw = RunnerToken.generate!(name: "fork-runner", resource_class: "isolated", fork_only: true)
+    post "/api/v1/runner/jobs/claim", params: { resource_class: "medium" },
+         headers: bearer_headers(raw), as: :json
+    assert_response :ok
+    assert_equal job_named("build").id, json_body["id"]
+    assert_equal false, json_body["trusted"]
+  end
+
   test "claim honors the project's max_concurrency cap" do
     @project.update!(max_concurrency: 1)
     post "/api/v1/runner/jobs/claim", headers: auth
@@ -373,6 +426,29 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_not json_body.key?("repository")
   end
 
+  test "fork claims never mint or receive a GitHub installation token" do
+    inst = GithubInstallation.create!(installation_id: 99, account_login: "octo")
+    repo = inst.github_repositories.create!(full_name: "octo/hello", project: @project)
+    @pipeline.update!(forked: true, github_repository: repo)
+    _token, raw = RunnerToken.generate!(name: "fork-runner", fork_only: true)
+    with_github_app(->(_id) { flunk "fork must not request an installation token" }) do
+      post "/api/v1/runner/jobs/claim", headers: bearer_headers(raw)
+    end
+    assert_response :ok
+    assert_equal "https://github.com/octo/hello.git", json_body["repository"]["url"]
+    assert_not json_body["repository"].key?("token")
+  end
+
+  test "fork claims never receive operator repository URLs containing credentials" do
+    @project.update!(repo_url: "https://operator:secret@git.example.com/acme/app.git")
+    @pipeline.update!(forked: true)
+    _token, raw = RunnerToken.generate!(name: "fork-runner", fork_only: true)
+    post "/api/v1/runner/jobs/claim", headers: bearer_headers(raw)
+    assert_response :ok
+    assert_not json_body.key?("repository")
+    assert_not_includes response.body, "operator:secret"
+  end
+
   # --- docker build cache ------------------------------------------------------
 
   test "claim payload includes docker_build_cache for remote-docker jobs when configured" do
@@ -418,8 +494,9 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
   test "claim payload omits docker_build_cache for fork pull requests" do
     job_named("build").update!(steps: [{ "type" => "setup_remote_docker", "layer_caching" => true }])
     @pipeline.update!(forked: true)
+    _token, fork_raw = RunnerToken.generate!(name: "fork-runner", fork_only: true)
     with_build_cache_registry("ghcr.io/acme/forge-ci-cache") do
-      post "/api/v1/runner/jobs/claim", headers: auth
+      post "/api/v1/runner/jobs/claim", headers: bearer_headers(fork_raw)
     end
     assert_response :ok
     assert_not json_body.key?("docker_build_cache")

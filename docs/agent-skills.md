@@ -2,10 +2,11 @@
 
 ForgeCI ships a skill for coding agents:
 [`skills/forge-ci/SKILL.md`](../skills/forge-ci/SKILL.md). It tells an agent
-how to write `.circleci/config.yml` for ForgeCI (what's supported, absolute
-paths, resource classes, test splitting), validate it before committing, and
-start, watch and cancel pipelines. Install it in each repository that ForgeCI
-builds.
+how to write `.circleci/config.yml` for ForgeCI (supported features, absolute
+paths, resource classes, test splitting), validate it, sign in with OAuth,
+and start, watch or cancel pipelines. It also covers fork-only runner pools,
+cache/credential isolation, and safe retries. Install it in each repository
+that ForgeCI builds.
 
 **Claude Code.** Install it as a project skill, so everyone working in the
 repository gets it, and commit it:

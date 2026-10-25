@@ -136,11 +136,11 @@ A zero-dependency Ruby daemon (`net/http`, `open3` — no gems). Per claimed job
 
 | Layer | Protection |
 |---|---|
-| At rest | Context payloads encrypted (Rails `encrypts`) |
+| At rest | Context payloads and job context snapshots encrypted (Rails `encrypts`) |
 | In API responses | Raw contexts never serialized; claim payload exposes only the merged `environment`; rotation returns key *names* only; UI renders `••••••` |
 | Administration | Rotation needs a separate `FORGE_CI_ADMIN_TOKEN` (fail-closed); runner tokens can never read or rewrite secrets |
 | In logs | Runner redacts known secret values before POSTing chunks |
-| Fork PRs | Receive no contexts at all |
+| Fork PRs | Receive no context/project secrets; dedicated fork-only runner tokens cannot claim trusted jobs |
 
 ## Scaling
 
