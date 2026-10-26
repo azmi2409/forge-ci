@@ -76,6 +76,98 @@ class Api::V1::PipelinesControllerTest < ActionDispatch::IntegrationTest
     assert_not_empty json_body["details"]
   end
 
+  test "lists newest project pipelines as summaries without secrets or workflows" do
+    pipeline = PipelineIntake.call!(project: @project, **intake_params, context_names: ["deploy"])
+    newer = @project.pipelines.create!(sha: "def456", branch: "feature", status: :success, created_at: 1.day.ago)
+    other_project = Project.create!(name: "other")
+    other_project.pipelines.create!(sha: "other", branch: "main")
+
+    get "/api/v1/projects/#{@project.id}/pipelines", headers: admin_headers
+
+    assert_response :ok
+    assert_equal ["pipelines"], json_body.keys
+    assert_equal [newer.id, pipeline.id], json_body["pipelines"].map { |item| item["id"] }
+    assert_equal({ "id" => newer.id, "project_id" => @project.id, "sha" => "def456",
+                   "branch" => "feature", "status" => "success" }, json_body["pipelines"].first)
+    json_body["pipelines"].each do |item|
+      assert_equal %w[branch id project_id sha status], item.keys.sort
+    end
+    assert_not_includes response.body, "s3cr3t"
+    assert_not_includes response.body, "DEPLOY_KEY"
+
+    get "/api/v1/pipelines/#{pipeline.id}", headers: admin_headers
+    assert_response :ok
+    assert_equal 1, json_body["workflows"].size, "detail endpoint keeps workflows"
+  end
+
+  test "filters branch and sha by exact equality and combines both" do
+    match = @project.pipelines.create!(sha: "abc%_", branch: "feature/%_")
+    same_branch = @project.pipelines.create!(sha: "other", branch: match.branch)
+    same_sha = @project.pipelines.create!(sha: match.sha, branch: "other")
+    @project.pipelines.create!(sha: "abc12", branch: "feature/12")
+
+    [
+      [{ branch: match.branch }, [same_branch.id, match.id]],
+      [{ sha: match.sha }, [same_sha.id, match.id]],
+      [{ branch: match.branch, sha: match.sha }, [match.id]],
+      [{ branch: "missing" }, []],
+      [{ branch: "" }, []],
+      [{ sha: "" }, []]
+    ].each do |filters, ids|
+      get "/api/v1/projects/#{@project.id}/pipelines", params: filters, headers: admin_headers
+      assert_response :ok
+      assert_equal ids, json_body["pipelines"].map { |item| item["id"] }
+    end
+  end
+
+  test "defaults to twenty recent pipelines and accepts limits one through one hundred" do
+    ids = 101.times.map { |i| @project.pipelines.create!(sha: "sha#{i}", branch: "main").id }.reverse
+
+    [nil, 1, 100].each do |limit|
+      get "/api/v1/projects/#{@project.id}/pipelines", params: limit ? { limit: limit } : {}, headers: admin_headers
+      assert_response :ok
+      assert_equal ids.first(limit || 20), json_body["pipelines"].map { |item| item["id"] }
+    end
+  end
+
+  test "rejects invalid limits and non scalar filters" do
+    invalid = [
+      { limit: "0" }, { limit: "-1" }, { limit: "101" }, { limit: "1.5" },
+      { limit: "1junk" }, { limit: "" }, { limit: " 1" }, { limit: "+1" },
+      { limit: ["1"] }, { limit: { value: "1" } },
+      { branch: ["main"] }, { branch: { value: "main" } },
+      { sha: ["abc"] }, { sha: { value: "abc" } }
+    ]
+    invalid.each do |filters|
+      get "/api/v1/projects/#{@project.id}/pipelines", params: filters, headers: admin_headers
+      assert_response :bad_request, filters.inspect
+      assert json_body["error"].present?
+    end
+
+    [{ limit: nil }, { limit: true }, { limit: 1.5 }, { branch: nil }, { branch: 1 },
+     { branch: false }, { sha: nil }, { sha: 1 }, { sha: false }].each do |filters|
+      get "/api/v1/projects/#{@project.id}/pipelines", params: filters, headers: admin_headers, as: :json
+      assert_response :bad_request, filters.inspect
+    end
+  end
+
+  test "listing requires API authentication and rejects runner tokens" do
+    [nil, "wrong", RunnerToken.generate!(name: "runner").last].each do |token|
+      get "/api/v1/projects/#{@project.id}/pipelines", headers: token ? bearer_headers(token) : {}
+      assert_response :unauthorized
+    end
+  end
+
+  test "listing an empty project succeeds and missing project returns 404" do
+    get "/api/v1/projects/#{@project.id}/pipelines", headers: admin_headers
+    assert_response :ok
+    assert_equal({ "pipelines" => [] }, json_body)
+
+    get "/api/v1/projects/999999/pipelines", headers: admin_headers
+    assert_response :not_found
+    assert_equal "project not found", json_body["error"]
+  end
+
   test "missing project returns 404" do
     post "/api/v1/projects/999999/pipelines", params: intake_params, headers: admin_headers, as: :json
     assert_response :not_found

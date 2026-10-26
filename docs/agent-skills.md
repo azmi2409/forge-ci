@@ -4,9 +4,10 @@ ForgeCI ships a skill for coding agents:
 [`skills/forge-ci/SKILL.md`](../skills/forge-ci/SKILL.md). It tells an agent
 how to write `.circleci/config.yml` for ForgeCI (supported features, absolute
 paths, resource classes, test splitting), validate it, sign in with OAuth,
-and start, watch or cancel pipelines. It also covers fork-only runner pools,
-cache/credential isolation, safe retries, and implementation-specific timeout
-behavior. Install it in each repository that ForgeCI builds.
+and discover, inspect, watch or cancel existing pipelines, including automatic
+push/PR runs. It also covers fork-only runner pools, cache/credential isolation,
+safe retries, and implementation-specific timeout behavior. Install it in each
+repository that ForgeCI builds.
 
 For PR #28's `runner-go` branch, Ruby remains the default; Go is opt-in with
 `--implementation go`. The Rails control plane stays Ruby and switching only
@@ -19,6 +20,13 @@ settings or restore the matching `.old` tree and env/unit `.bak` files together;
 later installs replace these backups. No merged/deployed/completed-soak status
 is implied. Go skips all remaining steps, including `on_fail`/`always`, after
 timeout interruption; do not rely on those handlers for cleanup.
+
+For automatic CI, the skill uses `forge-ci pipelines --project owner/repo
+--sha SHA` to find the intended run, then `forge-ci status ID --wait` to watch
+workflow/job transitions without starting duplicate work. It documents JSON
+output, exit codes, exact SHA matching, empty-list troubleshooting and client/
+server upgrade requirements. A missing run or unsupported command must not
+cause an agent to trigger another deployment.
 
 **Claude Code.** Install it as a project skill, so everyone working in the
 repository gets it, and commit it:

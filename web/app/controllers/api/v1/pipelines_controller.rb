@@ -12,6 +12,30 @@ module Api
       include ApiAuthentication
       before_action :require_admin!, only: %i[create]
 
+      def index
+        project = Project.find(params[:project_id])
+        limit = params.fetch(:limit, "20")
+        unless (limit.is_a?(Integer) || (limit.is_a?(String) && /\A[0-9]+\z/.match?(limit))) &&
+               limit.to_i.between?(1, 100)
+          return render json: { error: "limit must be an integer between 1 and 100" }, status: :bad_request
+        end
+
+        pipelines = project.pipelines
+        %i[branch sha].each do |filter|
+          next unless params.key?(filter)
+          unless params[filter].is_a?(String)
+            return render json: { error: "#{filter} must be a string" }, status: :bad_request
+          end
+
+          pipelines = pipelines.where(filter => params[filter])
+        end
+
+        fields = %i[id project_id sha branch status]
+        render json: { pipelines: pipelines.select(*fields).order(id: :desc).limit(limit.to_i).as_json(only: fields) }
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: "project not found" }, status: :not_found
+      end
+
       def show
         render json: pipeline_json(Pipeline.find(params[:id]))
       rescue ActiveRecord::RecordNotFound

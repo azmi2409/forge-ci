@@ -25,6 +25,8 @@ class CLITest < Minitest::Test
     assert_match(/Usage: forge-ci/, out)
     assert_match(/validate/, out)
     assert_match(/compile/, out)
+    assert_match(/pipelines --project/, out)
+    assert_match(/status <pipeline-id>/, out)
     assert_empty err
   end
 
@@ -206,7 +208,8 @@ class CLITest < Minitest::Test
         body = headers["content-length"] ? sock.read(headers["content-length"].to_i) : ""
         verb, path, = request_line.split
         requests << { verb: verb, path: path, headers: headers, body: body }
-        code, payload = routes.fetch("#{verb} #{path}") { [404, { error: "nope" }] }
+        response = routes.fetch("#{verb} #{path}") { [404, { error: "nope" }] }
+        code, payload = response.respond_to?(:call) ? response.call(requests.last) : response
         json = JSON.generate(payload)
         sock.write "HTTP/1.1 #{code} X\r\nContent-Type: application/json\r\n" \
                    "Content-Length: #{json.bytesize}\r\nConnection: close\r\n\r\n#{json}"
@@ -298,6 +301,163 @@ class CLITest < Minitest::Test
       assert_match(/canceled/, out)
     end
   end
+  # -- pipelines / status ---------------------------------------------------
+
+  def test_pipelines_resolves_names_and_encodes_filters_without_triggering
+    branch = "feature/a & b?#"
+    sha = "abc+def"
+    query = URI.encode_www_form(branch: branch, sha: sha, limit: "3")
+    payload = { pipelines: [{ id: 8, project_id: 9, status: "running", branch: branch, sha: sha }] }
+    routes = {
+      "GET /api/v1/projects" => [200, { projects: [{ id: 9, name: "demo" }] }],
+      "GET /api/v1/projects/9/pipelines?#{query}" => [200, payload]
+    }
+    with_fake_server(routes) do |url, requests|
+      status, out, err = run_cli("pipelines", "--project", "demo", "--branch", branch, "--sha", sha,
+                                 "--limit", "3", "--json", "--url", url, "--token", "t")
+      assert_equal 0, status, err
+      assert_equal JSON.parse(JSON.generate(payload)), JSON.parse(out)
+      assert_equal %w[GET GET], requests.map { |request| request[:verb] }
+    end
+  end
+
+  def test_pipelines_table_and_empty_state
+    payload = { pipelines: [{ id: 8, status: "failed", branch: "main", sha: "abc" }] }
+    routes = { "GET /api/v1/projects/9/pipelines?limit=20" => [200, payload] }
+    with_fake_server(routes) do |url, requests|
+      status, out, err = run_cli("pipelines", "--project", "9", "--url", url, "--token", "t")
+      assert_equal 0, status, err
+      assert_includes out, "ID\tSTATUS\tBRANCH\tSHA"
+      assert_includes out, "8\tfailed\tmain\tabc"
+      payload[:pipelines].clear
+      status, out, err = run_cli("pipelines", "--project", "9", "--url", url, "--token", "t")
+      assert_equal 0, status, err
+      assert_match(/no pipelines found/, out)
+      assert requests.all? { |request| request[:verb] == "GET" }
+    end
+  end
+
+  def pipeline_detail(status, job_status = status)
+    { id: 5, project_id: 9, branch: "main", sha: "abc", status: status,
+      workflows: [{ id: 10, name: "ci", status: status,
+                    jobs: [{ id: 20, name: "test", node_index: 0, parallelism: 1,
+                             status: job_status, requires: [] }] }] }
+  end
+
+  def test_status_reads_running_failed_and_canceled_without_failing_or_triggering
+    %w[running failed canceled].each do |pipeline_status|
+      payload = pipeline_detail(pipeline_status)
+      with_fake_server("GET /api/v1/pipelines/5" => [200, payload]) do |url, requests|
+        status, out, err = run_cli("status", "5", "--url", url, "--token", "t")
+        assert_equal 0, status, err
+        assert_includes out, "branch main sha abc"
+        assert_includes out, "pipeline 5: #{pipeline_status}"
+        assert_includes out, "workflow 10 (ci): #{pipeline_status}"
+        assert_includes out, "job 20 (test[0]): #{pipeline_status}"
+        assert_equal ["GET"], requests.map { |request| request[:verb] }
+      end
+    end
+  end
+
+  def test_status_wait_reports_job_transitions_while_pipeline_remains_running
+    responses = [pipeline_detail("running", "pending"), pipeline_detail("running", "running"),
+                 pipeline_detail("success")]
+    routes = { "GET /api/v1/pipelines/5" => ->(_) { [200, responses.shift] } }
+    with_fake_server(routes) do |url, requests|
+      status, out, err = run_cli("status", "5", "--wait", "--poll", "0.001", "--url", url, "--token", "t")
+      assert_equal 0, status, err
+      assert_equal 1, out.scan("pipeline 5: running").length
+      assert_match(/job 20 \(test\[0\]\): pending.*job 20 \(test\[0\]\): running.*job 20 \(test\[0\]\): success/m, out)
+      assert_equal %w[GET GET GET], requests.map { |request| request[:verb] }
+    end
+  end
+
+  def test_status_json_wait_emits_only_final_response_and_terminal_exit_code
+    %w[success failed canceled].each do |terminal|
+      final = pipeline_detail(terminal)
+      responses = [pipeline_detail("running"), final]
+      routes = { "GET /api/v1/pipelines/5" => ->(_) { [200, responses.shift] } }
+      with_fake_server(routes) do |url, requests|
+        status, out, err = run_cli("status", "5", "--wait", "--poll", "0.001", "--json", "--url", url, "--token", "t")
+        assert_equal terminal == "success" ? 0 : 1, status, err
+        assert_equal JSON.parse(JSON.generate(final)), JSON.parse(out)
+        assert_equal 1, out.lines.length
+        assert_equal %w[GET GET], requests.map { |request| request[:verb] }
+      end
+    end
+  end
+
+  def test_status_json_one_shot_includes_workflows_and_jobs
+    payload = pipeline_detail("running")
+    with_fake_server("GET /api/v1/pipelines/5" => [200, payload]) do |url, _requests|
+      status, out, err = run_cli("status", "5", "--json", "--url", url, "--token", "t")
+      assert_equal 0, status, err
+      assert_equal JSON.parse(JSON.generate(payload)), JSON.parse(out)
+    end
+  end
+
+  def test_pipeline_read_commands_report_http_and_watch_errors
+    with_fake_server({}) do |url, _requests|
+      [["pipelines", "--project", "9"], ["status", "5"]].each do |args|
+        status, _out, err = run_cli(*args, "--url", url, "--token", "t")
+        assert_equal 1, status
+        assert_match(/HTTP 404/, err)
+      end
+    end
+    responses = [[200, pipeline_detail("running")], [403, { error: "forbidden" }]]
+    routes = { "GET /api/v1/pipelines/5" => ->(_) { responses.shift } }
+    with_fake_server(routes) do |url, requests|
+      status, out, err = run_cli("status", "5", "--wait", "--json", "--poll", "0.001", "--url", url, "--token", "t")
+      assert_equal 1, status
+      assert_empty out
+      assert_match(/HTTP 403.*forbidden/, err)
+      assert requests.all? { |request| request[:verb] == "GET" }
+    end
+  end
+
+  def test_pipeline_read_commands_reject_invalid_arguments_before_network_access
+    invalid = [["pipelines"], ["pipelines", "--project", "0"],
+               ["pipelines", "--project", "9", "extra"], ["status"], ["status", "5", "extra"]]
+    %w[0 -1 101 1.5 nope].each { |limit| invalid << ["pipelines", "--project", "9", "--limit", limit] }
+    %w[0 -1 1.5 nope 5/other].each { |id| invalid << ["status", id] }
+    %w[0 -1 NaN Infinity 1e309 nope].each { |poll| invalid << ["status", "5", "--poll", poll] }
+    invalid.each do |args|
+      status, _out, err = run_cli(*args, "--url", "http://127.0.0.1:1", "--token", "t")
+      assert_equal 2, status, args.inspect
+      refute_match(/could not reach/, err)
+    end
+  end
+
+  def test_pipeline_read_commands_use_and_refresh_stored_oauth_sessions
+    original = ENV["FORGE_CI_ADMIN_TOKEN"]
+    ENV["FORGE_CI_ADMIN_TOKEN"] = nil
+    [["pipelines", "--project", "9"], ["status", "5"]].each do |args|
+      routes = {
+        "POST /oauth/token" => [200, { access_token: "new-at", refresh_token: "new-rt", expires_in: 3600 }],
+        "GET /api/v1/projects/9/pipelines?limit=20" => [200, { pipelines: [] }],
+        "GET /api/v1/pipelines/5" => [200, pipeline_detail("running")]
+      }
+      with_fake_server(routes) do |url, requests|
+        with_credentials_file do
+          ForgeCI::Auth.write_server(url, "access_token" => "old", "refresh_token" => "refresh",
+                                          "expires_at" => Time.now.to_i - 10)
+          status, _out, err = run_cli(*args, "--url", url)
+          assert_equal 0, status, err
+          assert_equal "Bearer new-at", requests.last[:headers]["authorization"]
+          status, _out, err = run_cli(*args, "--url", url)
+          assert_equal 0, status, err
+          assert_equal %w[POST GET GET], requests.map { |request| request[:verb] }
+          status, _out, err = run_cli(*args, "--url", url, "--token", "explicit")
+          assert_equal 0, status, err
+          assert_equal "Bearer explicit", requests.last[:headers]["authorization"]
+          refute requests.any? { |request| request[:verb] == "POST" && request[:path].include?("pipelines") }
+        end
+      end
+    end
+  ensure
+    ENV["FORGE_CI_ADMIN_TOKEN"] = original
+  end
+
 
   # -- skill -------------------------------------------------------------------
 

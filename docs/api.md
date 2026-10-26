@@ -66,8 +66,8 @@ HMAC-verified webhook instead. The easiest client is the CLI:
 
 ## Admin API — admin token, or an admin user's OAuth token
 
-The whole table below needs an admin. Project **listing** (`GET /projects`)
-and pipeline **status/cancel** also accept a member's OAuth token.
+The whole table below needs an admin, except project/pipeline **listing** and
+pipeline **status/cancel**, which also accept a member's OAuth token.
 
 | Call | Purpose |
 |---|---|
@@ -76,12 +76,29 @@ and pipeline **status/cancel** also accept a member's OAuth token.
 | `POST /api/v1/projects/:id/contexts` `{ name, payload: { KEY: "value" } }` | create a context, or replace the payload of the same-named one. Responds with key names only |
 | `POST /api/v1/contexts/:id/rotate` `{ payload: {...} }` | replace a context's secrets |
 | `GET /api/v1/pipelines/:id` | pipeline + workflow + job statuses (same shape as the intake response) |
+| `GET /api/v1/projects/:project_id/pipelines` | newest-first pipeline summaries: `{ pipelines: [{ id, project_id, sha, branch, status }] }`; optional exact `branch` and `sha` filters, `limit` defaults to 20 (1–100). Invalid filters/limit return `400`; missing project returns `404`. No workflows or secrets in summaries. |
 | `GET /api/v1/queue` | queued and in-flight (claimed + running) job counts per resource class, for runner autoscalers: `{ resource_classes: { spot: { queued, running }, any: {...} } }` (`any` = jobs without a class) |
 | `POST /api/v1/pipelines/:id/cancel` | cancel every unfinished job. Running jobs are stopped by their runner on its next heartbeat (`status: "canceled"` in the heartbeat reply). Idempotent |
 
 When a job fails, jobs that (transitively) `require` it are canceled instead
 of being left pending, and the pipeline/workflow only becomes `failed` once
 no job is still in flight.
+
+CLI reads existing automatic or manually triggered runs without triggering work:
+
+```sh
+forge-ci pipelines --project owner/repo --branch main --limit 10
+forge-ci status 42
+forge-ci status 42 --wait --poll 5
+forge-ci status 42 --wait --json
+```
+
+Both commands use `--url`/`FORGE_CI_URL` and existing token precedence
+(`--token`, `FORGE_CI_ADMIN_TOKEN`, saved login with refresh). A successful
+one-shot read exits 0 regardless of pipeline state. Watch exits 0 only for
+success, otherwise 1; JSON watch prints only the final document. API errors
+exit 1, invalid CLI usage exits 2. Listing requires the updated server;
+status by ID uses the existing detail endpoint.
 
 ## Runner API — `Authorization: Bearer <raw-runner-token>` on every call
 

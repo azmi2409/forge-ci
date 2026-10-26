@@ -6,6 +6,12 @@ separately.
 
 ## Unreleased
 
+- Add `forge-ci pipelines --project NAME` to discover existing automatic runs
+  with branch/SHA filters, plus `forge-ci status ID [--wait]` to inspect and
+  watch workflow/job states without triggering another run. Both support
+  saved OAuth sessions and JSON output. Add member-readable bounded project
+  pipeline listing API; existing status-by-ID API remains unchanged.
+
 - Admin **Settings → Runners** shows per-process online/busy/offline presence,
   hostname, implementation, class, trust pool, last contact and current job.
   Updated Ruby and Go runners report via existing claim polls and job heartbeats;

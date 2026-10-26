@@ -148,13 +148,20 @@ commands in the job images.
 
 ## Run, watch and cancel
 
-Pipelines normally start on push. For manual runs, sign in with your web-UI
-account. Triggering requires an admin; members can view and cancel.
+Pipelines normally start on push. Inspect that existing run before considering
+`trigger`: triggering again creates duplicate work and can repeat deployments.
+Sign in with your web-UI account. Triggering requires an admin; members can
+list, inspect, watch and cancel.
 
 ```sh
 export FORGE_CI_URL=https://ci.example.com
 forge-ci login
 # Over SSH/headless: forge-ci login --manual
+
+# Inspect automatic runs; these commands never trigger a new pipeline.
+forge-ci pipelines --project owner/repo --branch main
+forge-ci status <id>
+forge-ci status <id> --wait
 
 # Starts a pipeline for the current branch and HEAD; push the commit first.
 # --wait blocks and exits non-zero on failure.
@@ -162,6 +169,32 @@ forge-ci trigger .circleci/config.yml --project owner/repo --wait
 forge-ci cancel <id>
 forge-ci logout
 ```
+
+`pipelines` lists the newest 20 runs (use `--limit 1..100`, `--branch`, or
+exact `--sha` to narrow it). `status` prints workflow/job states; `--wait`
+watches the selected ID and exits 0 on success, 1 on failure/cancellation.
+A one-shot status read exits 0 even for a failed run. `--poll SECONDS` sets
+watch interval (positive, default 5). Both commands accept `--json`; watching
+with JSON emits only the final pipeline document. Members can read these
+commands; pipeline listing requires the updated server.
+
+For a pushed commit, select the exact run rather than watching an unrelated
+latest pipeline:
+
+```sh
+forge-ci pipelines --project owner/repo --sha "$(git rev-parse HEAD)" --json
+# Choose the returned pipeline ID matching the intended branch/run.
+forge-ci status 42 --wait --poll 5
+```
+
+An empty list is not permission to trigger: check the server URL, project,
+commit push and GitHub webhook delivery first. Multiple runs can share a SHA;
+confirm the intended ID. `--sha` requires the full exact SHA, not its short form.
+Check `forge-ci --help` for `pipelines` and `status` before using them: an older
+installed gem may lack these commands even if OAuth login works. Upgrade to a
+release containing them, or run the updated checkout with
+`ruby -Ilib exe/forge-ci`. If listing returns `404`, verify the server deploy;
+status by a known ID uses the existing API. Do not substitute `trigger --wait`.
 
 Login uses authorization-code + PKCE. Credentials live per server in
 `~/.config/forge-ci/credentials.json` (0600), or `FORGE_CI_CREDENTIALS`;

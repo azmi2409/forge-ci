@@ -55,7 +55,7 @@ Rails.application.routes.draw do
       # Cache API (component 7) — scoped to the project; the Bearer token
       # must own a claimed/running job in that project.
       resources :projects, only: %i[index create] do
-        resources :pipelines, only: %i[create]
+        resources :pipelines, only: %i[index create]
         resources :contexts, only: %i[create]
         member do
           put :cache, to: "cache#upsert"
