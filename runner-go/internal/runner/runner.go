@@ -126,7 +126,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 			claimCtx, cancelClaim = context.WithDeadline(ctx, lingerUntil)
 		}
-		claim, _, err := r.client.Claim(claimCtx, r.cfg.ResourceClass)
+		claim, upcoming, err := r.client.Claim(claimCtx, r.cfg.ResourceClass)
 		if cancelClaim != nil {
 			cancelClaim()
 		}
@@ -145,6 +145,12 @@ func (r *Runner) Run(ctx context.Context) error {
 			if !errors.Is(err, api.ErrIdle) {
 				r.logf("control plane error: %v; backing off", err)
 			}
+		}
+
+		if errors.Is(err, api.ErrIdle) && upcoming > 0 {
+			// Work is coming (e.g. a deploy waiting on checks): not idle.
+			r.idleSince = time.Now()
+			lingerUntil = time.Time{}
 		}
 
 		if err != nil && r.cfg.IdleShutdownAfter > 0 && r.idleTooLong() {

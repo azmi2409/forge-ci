@@ -83,6 +83,14 @@ module ForgeCIRunner
     # are fail-closed: at base idle, an unavailable/older server means use the
     # old immediate-shutdown behavior rather than linger without evidence.
     def idle_wait_or_shutdown
+      if @client.upcoming.to_i.positive?
+        # Work is coming (e.g. a deploy waiting on checks): not idle.
+        @idle_since = monotonic
+        @linger_until = nil
+        pause(@backoff.tick)
+        return false
+      end
+
       limit = @config.idle_shutdown_after.to_f
       unless limit.positive?
         pause(@backoff.tick)

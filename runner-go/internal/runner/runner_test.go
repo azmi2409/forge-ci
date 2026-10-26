@@ -508,6 +508,33 @@ func TestIdleShutdown(t *testing.T) {
 	}
 }
 
+// Upcoming>0 must suppress the idle shutdown (work is coming).
+func TestUpcomingSuppressesIdleShutdown(t *testing.T) {
+	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{nil}, idleUpcoming: 2}
+	cfg := runnerCfg(t)
+	cfg.IdleShutdownAfter = 0.3
+	r := New(cfg, f)
+
+	done := make(chan error, 1)
+	go func() { done <- r.Run(context.Background()) }()
+	// The fake returns upcoming=2 on idle; the runner must stay up past the
+	// idle window.
+	select {
+	case err := <-done:
+		t.Fatalf("runner exited despite upcoming work: %v", err)
+	case <-time.After(1 * time.Second):
+		r.beginShutdown(nil)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("did not stop")
+	}
+}
+
 func TestOutlookWorkLingersUntilJobIsClaimed(t *testing.T) {
 	f := &fakeRunnerCP{
 		t:              t,
