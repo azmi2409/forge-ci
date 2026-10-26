@@ -3,6 +3,8 @@
 require "net/http"
 require "json"
 require "uri"
+require "securerandom"
+require "socket"
 
 module ForgeCIRunner
   # Minimal HTTP client for the control plane Runner API.
@@ -22,6 +24,13 @@ module ForgeCIRunner
     def initialize(config)
       @base = config.control_plane_url
       @token = config.runner_token
+      @runner_id = SecureRandom.uuid
+      @runner_hostname = begin
+        Socket.gethostname.b.gsub(/[^\x20-\x7e]/, "").strip[0, 255].rstrip
+      rescue SocketError, SystemCallError
+        "unknown"
+      end
+      @runner_hostname = "unknown" if @runner_hostname.empty?
     end
 
     # POST /api/v1/runner/jobs/claim — returns the job payload Hash,
@@ -178,6 +187,9 @@ module ForgeCIRunner
       request["Authorization"] = "Bearer #{@token}"
       request["Content-Type"] = "application/json"
       request["Accept"] = "application/json"
+      request["X-Forge-Runner-ID"] = @runner_id
+      request["X-Forge-Runner-Hostname"] = @runner_hostname
+      request["X-Forge-Runner-Implementation"] = "ruby"
       request.body = JSON.generate(payload)
 
       response = Net::HTTP.start(uri.host, uri.port,

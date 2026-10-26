@@ -36,7 +36,7 @@ module ForgeCI
               [--manual]                            sign in to a forge-ci server
                                                     in the browser (OAuth); the
                                                     token is stored and picked
-                                                    up by trigger/cancel
+                                                    up by server commands
                                                     (URL defaults to FORGE_CI_URL;
                                                     --manual pastes a code instead
                                                     of waiting on the browser)
@@ -54,6 +54,15 @@ module ForgeCI
                                                     checkout; --wait blocks until
                                                     it finishes and exits 1 if it
                                                     did not succeed)
+        pipelines --project P [--branch B] [--sha SHA] [--limit N]
+                  [--json] [--url URL] [--token T]   list existing pipelines
+                                                    (default limit 20, max 100)
+        status <pipeline-id> [--wait] [--poll SECONDS] [--json]
+               [--url URL] [--token T]              show pipeline/workflow/jobs;
+                                                    --wait watches changes and
+                                                    exits 1 on failure/cancel;
+                                                    --json emits one final JSON
+                                                    (poll default 5 seconds)
         cancel <pipeline-id> [--url URL] [--token T]
                                                     cancel a running pipeline
         skill install [--dir DIR] [--force]         install the forge-ci agent
@@ -91,6 +100,8 @@ module ForgeCI
       when "login" then login_command(argv)
       when "logout" then logout_command(argv)
       when "trigger" then trigger_command(argv)
+      when "pipelines" then pipelines_command(argv)
+      when "status" then status_command(argv)
       when "cancel" then cancel_command(argv)
       when "skill" then skill_command(argv)
       when "-h", "--help", nil then help
@@ -358,6 +369,119 @@ module ForgeCI
           1
         end
       end
+    end
+
+    # -- Read existing pipelines without triggering another run. --------------
+
+    def pipelines_command(argv)
+      options = { url: ENV["FORGE_CI_URL"], token: ENV["FORGE_CI_ADMIN_TOKEN"], limit: "20" }
+      parser = OptionParser.new do |opts|
+        opts.banner = "Usage: forge-ci pipelines --project P [--branch B] [--sha SHA] [--limit N] [--json] [--url URL] [--token T]"
+        opts.on("--project P", "project id or name on the server") { |v| options[:project] = v }
+        opts.on("--branch B", "filter by branch") { |v| options[:branch] = v }
+        opts.on("--sha SHA", "filter by commit sha") { |v| options[:sha] = v }
+        opts.on("--limit N", "maximum results (1-100, default 20)") { |v| options[:limit] = v }
+        opts.on("--json", "print JSON") { options[:json] = true }
+        opts.on("--url URL", "server base URL (env FORGE_CI_URL)") { |v| options[:url] = v }
+        opts.on("--token T", "bearer token (env FORGE_CI_ADMIN_TOKEN, or forge-ci login)") { |v| options[:token] = v }
+        opts.on("-h", "--help", "show this help and exit") do
+          @out.puts opts
+          return 0
+        end
+      end
+      parser.parse!(argv)
+      return usage_error("pipelines takes no positional arguments") unless argv.empty?
+      return usage_error("--project is required") if options[:project].to_s.empty?
+      if options[:project].match?(/\A\d+\z/) && options[:project].to_i.zero?
+        return usage_error("--project id must be positive")
+      end
+      unless options[:limit].match?(/\A\d+\z/) && (1..100).cover?(options[:limit].to_i)
+        return usage_error("--limit must be an integer between 1 and 100")
+      end
+      err = server_options_error(options)
+      return usage_error(err) if err
+
+      project_id = resolve_project_id(options)
+      query = URI.encode_www_form(options.slice(:branch, :sha, :limit))
+      result = api_request(options, :get, "/api/v1/projects/#{project_id}/pipelines?#{query}")
+      if options[:json]
+        @out.puts JSON.generate(result)
+      elsif result.fetch("pipelines").empty?
+        @out.puts "forge-ci: no pipelines found"
+      else
+        @out.puts "ID\tSTATUS\tBRANCH\tSHA"
+        result.fetch("pipelines").each do |pipeline|
+          @out.puts pipeline.values_at("id", "status", "branch", "sha").join("\t")
+        end
+      end
+      0
+    rescue OptionParser::ParseError => e
+      usage_error(e.message)
+    rescue ApiError => e
+      @err.puts "forge-ci: #{e.message}"
+      1
+    end
+
+    def status_command(argv)
+      options = { url: ENV["FORGE_CI_URL"], token: ENV["FORGE_CI_ADMIN_TOKEN"], poll: 5.0 }
+      parser = OptionParser.new do |opts|
+        opts.banner = "Usage: forge-ci status <pipeline-id> [--wait] [--poll SECONDS] [--json] [--url URL] [--token T]"
+        opts.on("--wait", "watch until the pipeline finishes") { options[:wait] = true }
+        opts.on("--poll SECONDS", Float, "positive poll interval (default 5)") { |v| options[:poll] = v }
+        opts.on("--json", "print one JSON response (final response with --wait)") { options[:json] = true }
+        opts.on("--url URL", "server base URL (env FORGE_CI_URL)") { |v| options[:url] = v }
+        opts.on("--token T", "bearer token (env FORGE_CI_ADMIN_TOKEN, or forge-ci login)") { |v| options[:token] = v }
+        opts.on("-h", "--help", "show this help and exit") do
+          @out.puts opts
+          return 0
+        end
+      end
+      parser.parse!(argv)
+      id = argv.shift
+      unless id && id.match?(/\A\d+\z/) && id.to_i.positive?
+        return usage_error("status requires a positive integer <pipeline-id>")
+      end
+      return usage_error("status takes exactly one <pipeline-id> argument") unless argv.empty?
+      unless options[:poll].finite? && options[:poll].positive?
+        return usage_error("--poll must be a positive finite number of seconds")
+      end
+      err = server_options_error(options)
+      return usage_error(err) if err
+
+      last = {}
+      loop do
+        pipeline = api_request(options, :get, "/api/v1/pipelines/#{id.to_i}")
+        last = print_pipeline_status(pipeline, last) unless options[:json]
+        terminal = !%w[pending running].include?(pipeline["status"])
+        unless options[:wait] && !terminal
+          @out.puts JSON.generate(pipeline) if options[:json]
+          return options[:wait] && pipeline["status"] != "success" ? 1 : 0
+        end
+        sleep options[:poll]
+      end
+    rescue OptionParser::ParseError => e
+      usage_error(e.message)
+    rescue ApiError => e
+      @err.puts "forge-ci: #{e.message}"
+      1
+    end
+
+    def print_pipeline_status(pipeline, last)
+      if last.empty?
+        @out.puts "forge-ci: branch #{pipeline["branch"]} sha #{pipeline["sha"]}"
+      end
+      states = { "pipeline #{pipeline["id"]}" => pipeline["status"] }
+      Array(pipeline["workflows"]).each do |workflow|
+        label = "workflow #{workflow["id"]} (#{workflow["name"]})"
+        states[label] = workflow["status"]
+        Array(workflow["jobs"]).each do |job|
+          states["#{label} job #{job["id"]} (#{job["name"]}[#{job["node_index"]}])"] = job["status"]
+        end
+      end
+      states.each do |label, status|
+        @out.puts "forge-ci: #{label}: #{status}" if last[label] != status
+      end
+      states
     end
 
     # -- forge-ci cancel <pipeline-id> ----------------------------------------

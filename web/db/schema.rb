@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_25_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_26_120000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.string "name", null: false
     t.string "record_type", null: false
@@ -220,6 +220,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_25_120000) do
     t.datetime "updated_at", null: false
   end
 
+  create_table "runner_instances", force: :cascade do |t|
+    t.integer "runner_token_id", null: false
+    t.string "uuid", null: false
+    t.string "hostname", limit: 255, null: false
+    t.string "implementation", null: false
+    t.string "resource_class"
+    t.datetime "last_seen_at", null: false
+    t.integer "current_job_run_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["current_job_run_id"], name: "index_runner_instances_on_current_job_run_id"
+    t.index ["runner_token_id", "uuid"], name: "index_runner_instances_on_runner_token_id_and_uuid", unique: true
+    t.index ["runner_token_id"], name: "index_runner_instances_on_runner_token_id"
+  end
+
   create_table "runner_tokens", force: :cascade do |t|
     t.string "name", null: false
     t.string "token_digest", null: false
@@ -281,6 +296,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_25_120000) do
   add_foreign_key "pipelines", "github_repositories"
   add_foreign_key "pipelines", "projects"
   add_foreign_key "project_variables", "projects"
+  add_foreign_key "runner_instances", "job_runs", column: "current_job_run_id", on_delete: :nullify
+  add_foreign_key "runner_instances", "runner_tokens", on_delete: :cascade
   add_foreign_key "step_runs", "job_runs"
   add_foreign_key "workflow_runs", "pipelines"
 end

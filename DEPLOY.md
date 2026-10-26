@@ -73,6 +73,14 @@ present), downloads the runner from your server, and starts the
 `--implementation go`; it needs Docker but no Ruby on runner hosts. Both use
 the same Rails control plane. Watch `journalctl -u forge-ci-runner -f`.
 
+**Settings → Runners** also lists reporting runner processes, their status,
+hostname, implementation, class, trust pool, last contact and current job.
+Use **Refresh** to update the list. Idle polls and job heartbeats update presence;
+no contact for 120 seconds means offline, not proof that the host powered down.
+Deploy the web migration and restart upgraded Ruby/Go runners to enable reporting.
+Older runners still execute jobs but do not appear. Each process restart creates
+a new identity; historical offline rows remain. Shared tokens do not merge hosts.
+
 A runner claims jobs whose `resource_class` matches its `--class`, plus jobs
 with no class. A runner installed without `--class` claims any job.
 For example, run checks on Spot machines (`--class spot`) and deploys on an

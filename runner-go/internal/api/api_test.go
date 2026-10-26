@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -89,6 +90,47 @@ func TestAuthAndAcceptHeaders(t *testing.T) {
 	}
 	if got := cp.header("/api/v1/runner/jobs/1042/start", 0, "Accept"); got != "application/json" {
 		t.Fatalf("accept header: %q", got)
+	}
+}
+
+func TestPresenceIdentity(t *testing.T) {
+	cp := newFakeCP(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/api/v1/runner/jobs/claim" {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			fmt.Fprint(w, `{"upcoming":0}`)
+		} else {
+			fmt.Fprint(w, `{"status":"running"}`)
+		}
+		return true
+	})
+	c := clientFor(t, cp.URL())
+	ctx := context.Background()
+	if _, _, err := c.Claim(ctx, ""); !errors.Is(err, ErrIdle) {
+		t.Fatalf("idle claim: %v", err)
+	}
+	id := cp.header("/api/v1/runner/jobs/claim", 0, "X-Forge-Runner-ID")
+	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(id) {
+		t.Fatalf("invalid runner UUID: %q", id)
+	}
+	hostname := cp.header("/api/v1/runner/jobs/claim", 0, "X-Forge-Runner-Hostname")
+	if len(hostname) == 0 || len(hostname) > 255 || strings.TrimSpace(hostname) != hostname || strings.IndexFunc(hostname, func(r rune) bool { return r < 0x20 || r > 0x7e }) >= 0 {
+		t.Fatalf("invalid hostname header: %q", hostname)
+	}
+	if got := cp.header("/api/v1/runner/jobs/claim", 0, "X-Forge-Runner-Implementation"); got != "go" {
+		t.Fatalf("implementation: %q", got)
+	}
+	if _, err := c.Heartbeat(ctx, 1042); err != nil {
+		t.Fatal(err)
+	}
+	if got := cp.header("/api/v1/runner/jobs/1042/heartbeat", 0, "X-Forge-Runner-ID"); got != id {
+		t.Fatalf("heartbeat identity changed: %q, want %q", got, id)
+	}
+	other := clientFor(t, cp.URL())
+	if _, _, err := other.Claim(ctx, ""); !errors.Is(err, ErrIdle) {
+		t.Fatalf("second idle claim: %v", err)
+	}
+	if got := cp.header("/api/v1/runner/jobs/claim", 1, "X-Forge-Runner-ID"); got == id {
+		t.Fatalf("clients share identity: %q", got)
 	}
 }
 
@@ -426,6 +468,11 @@ func TestDownloadRedirectsAndScheme(t *testing.T) {
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hops++
+		for _, name := range []string{"Authorization", "X-Forge-Runner-ID", "X-Forge-Runner-Hostname", "X-Forge-Runner-Implementation"} {
+			if value := r.Header.Get(name); value != "" {
+				t.Errorf("download leaked %s: %q", name, value)
+			}
+		}
 		switch {
 		case r.URL.Path == "/final":
 			fmt.Fprint(w, "the-tarball-bytes")

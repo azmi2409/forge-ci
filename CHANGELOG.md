@@ -6,6 +6,18 @@ separately.
 
 ## Unreleased
 
+- Add `forge-ci pipelines --project NAME` to discover existing automatic runs
+  with branch/SHA filters, plus `forge-ci status ID [--wait]` to inspect and
+  watch workflow/job states without triggering another run. Both support
+  saved OAuth sessions and JSON output. Add member-readable bounded project
+  pipeline listing API; existing status-by-ID API remains unchanged.
+
+- Admin **Settings → Runners** shows per-process online/busy/offline presence,
+  hostname, implementation, class, trust pool, last contact and current job.
+  Updated Ruby and Go runners report via existing claim polls and job heartbeats;
+  shared-token hosts remain distinct. Requires the runner-instance migration and
+  upgraded runner processes; legacy clients remain compatible but unlisted.
+
 - The Docker runner is now also available as a **static Go binary** (stdlib
   only, no Ruby on runner hosts). The web image cross-compiles
   `linux/amd64` + `linux/arm64` and ships the binaries in `/runner.tar.gz`
@@ -37,6 +49,9 @@ separately.
 - Document Ruby-to-Go runner migration, configuration preservation, canary
   validation and rollback across deployment, architecture, contributor and
   agent guidance. Ruby remains the installer default pending soak gates.
+
+## 0.4.0 (2026-10-26)
+
 - `forge-ci login [--url URL]` / `forge-ci logout`: OAuth sign-in for the
   CLI. The browser opens at the server, you sign in with your web-UI
   account, and the token (authorization-code + PKCE, stored per server in

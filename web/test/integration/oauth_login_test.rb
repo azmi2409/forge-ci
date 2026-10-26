@@ -81,6 +81,10 @@ class OAuthLoginTest < ActionDispatch::IntegrationTest
     assert_response :created
     pipeline_id = json_body["id"]
 
+    get "/api/v1/projects/#{@project.id}/pipelines", headers: bearer_headers(token)
+    assert_response :ok
+    assert_equal [pipeline_id], json_body["pipelines"].map { |pipeline| pipeline["id"] }
+
     get "/api/v1/pipelines/#{pipeline_id}", headers: bearer_headers(token)
     assert_response :ok
     post "/api/v1/pipelines/#{pipeline_id}/cancel", headers: bearer_headers(token)

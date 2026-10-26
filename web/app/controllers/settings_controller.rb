@@ -14,6 +14,7 @@ class SettingsController < ApplicationController
     @admin_token = ForgeCISecrets.fetch("admin_token")
     @queue = JobRun.where(status: %w[queued claimed running]).group(:resource_class).count
     @fork_runner_tokens = RunnerToken.where(fork_only: true).order(:name)
+    @runner_instances = RunnerInstance.includes(:runner_token, :current_job_run).order(last_seen_at: :desc)
     @public_url = !URI.parse(@base_url).host.to_s.match?(/\A(localhost|127\.|0\.0\.0\.0|\[::1\])/)
   end
 

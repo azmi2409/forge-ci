@@ -14,6 +14,11 @@ this changes only the runner daemon, not the Ruby/Rails control plane or DB.
 Use the [Ruby-to-Go runner migration guide](../DEPLOY.md#ruby-to-go-runner-migration)
 for an idle, non-deploy canary, environment preservation, and rollback.
 
+Updated runner processes report presence through idle claim polls and job
+heartbeats. Admins see each process in **Settings → Runners**, even with a
+shared token. Restart after upgrading; old processes remain compatible but
+unlisted. See [presence semantics](../docs/api.md#runner-presence).
+
 ## How it works
 
 ```

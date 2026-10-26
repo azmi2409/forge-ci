@@ -31,6 +31,44 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     assert_match "Connect GitHub", response.body
   end
 
+  test "runner presence is admin-only and escapes hostnames with linked active jobs" do
+    token, = RunnerToken.generate!(name: "settings-presence", fork_only: true)
+    project = Project.create!(name: "settings-presence")
+    pipeline = PipelineIntake.call!(project: project, sha: "settings", branch: "main", ir: compile_test_ir)
+    job = pipeline.job_runs.first
+    job.update!(status: :running, claimed_by: token.name)
+    runner = token.runner_instances.create!(uuid: SecureRandom.uuid, hostname: "<script>alert(1)</script>",
+                                            implementation: "go", resource_class: "isolated", last_seen_at: Time.current,
+                                            current_job_run: job)
+    get settings_path
+    assert_redirected_to "/login"
+    assert_not_includes response.body, runner.hostname
+    sign_in_as("presence-member", role: :member)
+    get settings_path
+    assert_not_equal 200, response.status
+    assert_not_includes response.body, runner.hostname
+    sign_in_as_admin
+    get settings_path
+    assert_response :ok
+    assert_not_includes response.body, runner.hostname
+    assert_select "#runner-instances a[href='#{job_run_path(job)}']", text: job.display_name
+    %w[Busy go isolated Fork-only].each { |text| assert_includes css_select("#runner-instances").first.text, text }
+    assert_select "a[href='#{settings_path}']", text: "Refresh"
+    job.update!(status: :canceled)
+    get settings_path
+    assert_select "#runner-instances a[href='#{job_run_path(job)}']", count: 0
+    assert_includes css_select("#runner-instances").first.text, "Idle"
+    runner.update!(last_seen_at: 121.seconds.ago)
+    get settings_path
+    assert_includes css_select("#runner-instances").first.text, "Offline"
+  end
+
+  test "runner presence has an empty state" do
+    sign_in_as_admin
+    get settings_path
+    assert_select "#runner-instances", text: /No runners have reported yet/
+  end
+
   test "admin can create and revoke a dedicated fork-only token" do
     sign_in_as_admin
     post create_fork_runner_settings_path, params: { name: "isolated-forks", resource_class: "fork" }

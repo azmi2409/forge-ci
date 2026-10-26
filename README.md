@@ -80,6 +80,10 @@ the static binary needs no Ruby or Go toolchain on runner hosts. The compiler
 and Rails control plane remain Ruby; switching runners does not require a
 database change.
 
+Admins can see reporting runners' idle/busy/offline status, last contact and
+current job in **Settings → Runners**. See [runner presence](docs/api.md#runner-presence)
+for upgrade requirements and the 120-second offline threshold.
+
 ## Use it with your repo
 
 - **With the GitHub App:** connect it under Settings, install it and push.
@@ -90,6 +94,22 @@ database change.
   ([setup](DEPLOY.md#use-it-without-the-github-app)).
 - **From any script or CI:** the same `forge-ci trigger` with the
   `FORGE_CI_URL` / `FORGE_CI_ADMIN_TOKEN` environment variables.
+
+Inspect automatically triggered runs without starting another pipeline:
+
+```sh
+export FORGE_CI_URL=https://ci.example.com
+forge-ci login
+forge-ci pipelines --project owner/repo --branch main
+forge-ci status 42
+forge-ci status 42 --wait
+```
+
+`pipelines` lists recent runs newest first; use an ID from that list with
+`status` to see workflows/jobs. `--wait` watches that existing run and exits
+nonzero if it fails or is canceled. Both commands accept `--json` and reuse
+your saved login; members can inspect runs. Deploy the updated control plane
+for pipeline listing.
 
 Check a config locally first; the compiler needs only Ruby 3.0+. `gem install`
 puts the `forge-ci` CLI on your PATH:
