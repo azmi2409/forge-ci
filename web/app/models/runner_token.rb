@@ -11,6 +11,8 @@
 class RunnerToken < ApplicationRecord
   STATIC_TOKEN_NAME = "static-runner"
 
+  has_many :runner_instances, dependent: :delete_all
+
   validates :name, presence: true, uniqueness: true
   validates :token_digest, presence: true, uniqueness: true
   validates :name, exclusion: { in: [STATIC_TOKEN_NAME] }, if: :fork_only?

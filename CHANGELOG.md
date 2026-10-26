@@ -6,6 +6,12 @@ separately.
 
 ## Unreleased
 
+- Admin **Settings → Runners** shows per-process online/busy/offline presence,
+  hostname, implementation, class, trust pool, last contact and current job.
+  Updated Ruby and Go runners report via existing claim polls and job heartbeats;
+  shared-token hosts remain distinct. Requires the runner-instance migration and
+  upgraded runner processes; legacy clients remain compatible but unlisted.
+
 - The Docker runner is now also available as a **static Go binary** (stdlib
   only, no Ruby on runner hosts). The web image cross-compiles
   `linux/amd64` + `linux/arm64` and ships the binaries in `/runner.tar.gz`

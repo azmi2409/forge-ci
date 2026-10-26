@@ -38,6 +38,11 @@ and backups; do not paste them into logs or commits. Reinstall rollback uses
 and restarts the service; retain separate protected backups before another
 install replaces those files. Failed activation attempts automatic restoration.
 
+The client reports per-process presence on idle claims and job heartbeats.
+Admins see status and current work in **Settings → Runners** after deploying
+the web migration and restarting upgraded runners. See
+[presence semantics](../docs/api.md#runner-presence); old servers ignore these headers.
+
 ## Build & test
 
 ```sh

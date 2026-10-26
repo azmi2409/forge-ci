@@ -75,8 +75,33 @@
         <h2 id="runners-title" class="card-title"><%= icon "server" %>Runners</h2>
         <p class="card-desc">Run this on any Linux machine with systemd (Ubuntu, Debian, Amazon Linux). It installs Docker and Ruby, then starts a runner as a service.</p>
       </div>
+      <%= link_to "Refresh", settings_path, class: "button-secondary" %>
     </div>
     <div class="card-body">
+      <div id="runner-instances">
+        <% if @runner_instances.empty? %>
+          <p class="text-muted">No runners have reported yet. Upgrade and restart existing runners, or install one below.</p>
+        <% else %>
+          <div class="table-wrap">
+            <table class="data-table">
+              <caption class="sr-only">Reporting runner processes</caption>
+              <thead><tr><th scope="col">Runner</th><th scope="col">Status</th><th scope="col">Class / trust</th><th scope="col">Last seen</th><th scope="col">Current job</th></tr></thead>
+              <tbody>
+                <% @runner_instances.each do |runner| %>
+                  <tr data-runner-id="<%= runner.uuid %>">
+                    <td><strong><%= runner.hostname %></strong><br><span class="text-muted mono"><%= runner.implementation %> · <%= runner.uuid.first(8) %></span></td>
+                    <td><span class="status-badge"><%= runner.status.capitalize %></span></td>
+                    <td><%= runner.resource_class.presence || "any class" %><br><span class="text-muted"><%= runner.runner_token.fork_only? ? "Fork-only" : "Trusted" %></span></td>
+                    <td class="nowrap"><%= time_ago_tag(runner.last_seen_at) %></td>
+                    <td><% if (job = runner.active_job) %><%= link_to job.display_name, job_run_path(job), class: "text-link" %><% else %>None<% end %></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
+        <% end %>
+      </div>
+      <p class="field-hint">Idle and busy runners are online. No contact for 120 seconds marks a process offline. Refresh to update; restarts create new process identities.</p>
       <% if @runner_token.blank? %>
         <p class="warn">No runner token is configured. Set <code>FORGE_CI_RUNNER_TOKEN</code> on the control plane.</p>
       <% else %>

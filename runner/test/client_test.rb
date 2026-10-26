@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "tempfile"
 
 class ClientTest < Minitest::Test
   def setup
@@ -22,6 +23,40 @@ class ClientTest < Minitest::Test
     req = @server.last_request
     assert_equal "Bearer test-token", req[:headers]["authorization"]
     assert_equal({ "resource_class" => "medium" }, JSON.parse(req[:body]))
+  end
+
+  def test_presence_identity_is_stable_across_idle_claims_and_heartbeats
+    @server.stub("POST", "/api/v1/runner/jobs/claim", "422", { "upcoming" => 0 })
+    @server.stub("POST", "/api/v1/runner/jobs/9/heartbeat", "200", { "status" => "running" })
+    assert_nil @client.claim_job(nil)
+    first = @server.last_request[:headers]
+    assert_match(/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/,
+                 first["x-forge-runner-id"])
+    hostname = first["x-forge-runner-hostname"]
+    assert_match(/\A[\x20-\x7e]{1,255}\z/, hostname)
+    assert_equal hostname.strip, hostname
+    assert_equal "ruby", first["x-forge-runner-implementation"]
+
+    @client.heartbeat(9)
+    assert_equal first["x-forge-runner-id"], @server.last_request[:headers]["x-forge-runner-id"]
+    other = ForgeCIRunner::Client.new(runner_config_for(@server))
+    assert_nil other.claim_job(nil)
+    refute_equal first["x-forge-runner-id"], @server.last_request[:headers]["x-forge-runner-id"]
+  end
+
+  def test_download_redirects_do_not_send_auth_or_presence
+    @server.stub_redirect("GET", "/redirect", "http://127.0.0.1:#{@server.port}/download")
+    @server.stub_raw("GET", "/download", "200", "application/octet-stream", "bytes")
+    Tempfile.create("runner-download") do |file|
+      @client.download("http://127.0.0.1:#{@server.port}/redirect", file.path)
+      assert_equal "bytes", File.binread(file.path)
+    end
+    assert_equal ["/redirect", "/download"], @server.requests.map { |request| request[:path] }
+    @server.requests.each do |request|
+      %w[authorization x-forge-runner-id x-forge-runner-hostname x-forge-runner-implementation].each do |name|
+        assert_nil request[:headers][name]
+      end
+    end
   end
 
   def test_claim_omits_resource_class_when_nil

@@ -33,6 +33,11 @@ Sources read to produce this: `web/app/controllers/api/v1/runner/jobs_controller
   so a retried POST cannot duplicate). Claim/start/heartbeat/complete/release, cache and
   artifact uploads are **never** blindly retried; callers decide (the runner loop's
   backoff is a new poll, not a retry of an in-flight request).
+- Additive presence headers on lifecycle JSON requests are documented in
+  [the API reference](../docs/api.md#runner-presence). Each client process has
+  one UUID, a hostname and implementation (`go`). Old servers may ignore them;
+  upgraded servers use idle polls and job heartbeats for admin status without
+  changing the job lifecycle response contract.
 
 ## POST /api/v1/runner/jobs/claim
 

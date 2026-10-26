@@ -80,6 +80,10 @@ the static binary needs no Ruby or Go toolchain on runner hosts. The compiler
 and Rails control plane remain Ruby; switching runners does not require a
 database change.
 
+Admins can see reporting runners' idle/busy/offline status, last contact and
+current job in **Settings → Runners**. See [runner presence](docs/api.md#runner-presence)
+for upgrade requirements and the 120-second offline threshold.
+
 ## Use it with your repo
 
 - **With the GitHub App:** connect it under Settings, install it and push.

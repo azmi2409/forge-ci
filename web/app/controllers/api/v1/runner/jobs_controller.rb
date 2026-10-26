@@ -7,11 +7,14 @@ module Api
       #   claim -> start -> heartbeat (every ~30s) -> log_chunks -> complete
       #   (or release, when a REQUEUE_ON_SHUTDOWN runner shuts down mid-job)
       class JobsController < BaseController
+        before_action :validate_runner_identity!
+
         # POST /api/v1/runner/jobs/claim { resource_class: "medium" }
         # Atomically claims the oldest queued job matching the token's
         # resource class (or, for a token without one, the requested
         # resource_class), honoring each project's max_concurrency.
         def claim
+          record_runner_presence(resource_class: current_runner_token.resource_class || params[:resource_class].presence)
           job = JobRun.claim_next!(current_runner_token, requested_resource_class: params[:resource_class].to_s)
           unless job
             # `upcoming`: this runner's class has jobs waiting on earlier ones;
@@ -20,6 +23,7 @@ module Api
             return render json: { error: "no claimable jobs right now", upcoming: JobRun.upcoming_count(klass, fork_only: current_runner_token.fork_only?) },
                           status: :unprocessable_entity
           end
+          @runner_instance&.update!(current_job_run: job)
 
           render json: job_payload(job), status: :ok
         end
@@ -30,6 +34,7 @@ module Api
           return unless job
 
           job.update!(heartbeat_at: Time.current)
+          @runner_instance&.update!(current_job_run: job) if JobRun::ACTIVE_STATUSES.include?(job.status)
           render json: { id: job.id, status: job.status, heartbeat_at: job.heartbeat_at }, status: :ok
         end
 
@@ -44,6 +49,7 @@ module Api
           rescue JobRun::IllegalTransition => e
             return render json: { error: e.message }, status: :unprocessable_entity
           end
+          @runner_instance&.update!(current_job_run: job)
           render json: { id: job.id, status: job.status }, status: :ok
         end
 
@@ -59,6 +65,7 @@ module Api
           rescue JobRun::IllegalTransition => e
             return render json: { error: e.message }, status: :unprocessable_entity
           end
+          clear_runner_assignment(job)
           render json: { id: job.id, status: job.status }, status: :ok
         end
 
@@ -78,16 +85,53 @@ module Api
           rescue JobRun::IllegalTransition => e
             return render json: { error: e.message }, status: :unprocessable_entity
           end
+          clear_runner_assignment(job)
           render json: { id: job.id, status: job.status }, status: :ok
         end
 
         private
 
+        def validate_runner_identity!
+          id = request.headers["X-Forge-Runner-ID"]
+          return if id.nil? && request.headers["X-Forge-Runner-Hostname"].nil? &&
+                    request.headers["X-Forge-Runner-Implementation"].nil?
+
+          hostname = request.headers["X-Forge-Runner-Hostname"].to_s
+          implementation = request.headers["X-Forge-Runner-Implementation"].to_s
+          unless id.to_s.match?(RunnerInstance::UUID) && hostname.present? && hostname.length <= 255 &&
+                 %w[ruby go].include?(implementation)
+            render json: { error: "invalid runner identity headers" }, status: :bad_request
+          end
+        end
+
+        def record_runner_presence(resource_class:)
+          id = request.headers["X-Forge-Runner-ID"]
+          return if id.nil?
+
+          @runner_instance = current_runner_token.runner_instances.create_or_find_by!(uuid: id.downcase) do |instance|
+            instance.hostname = request.headers["X-Forge-Runner-Hostname"]
+            instance.implementation = request.headers["X-Forge-Runner-Implementation"]
+            instance.last_seen_at = Time.current
+          end
+          @runner_instance.update!(hostname: request.headers["X-Forge-Runner-Hostname"],
+                                   implementation: request.headers["X-Forge-Runner-Implementation"],
+                                   resource_class: resource_class, last_seen_at: Time.current)
+        end
+
+        def clear_runner_assignment(job)
+          return unless @runner_instance
+
+          RunnerInstance.where(id: @runner_instance.id, current_job_run_id: job.id).update_all(current_job_run_id: nil)
+        end
+
         def find_owned_job
           job = JobRun.find(params[:id])
           require_job_owner!(job)
           # require_job_owner! renders 403 on mismatch; halt in that case.
-          performed? ? nil : job
+          return if performed?
+
+          record_runner_presence(resource_class: current_runner_token.resource_class || job.resource_class)
+          job
         rescue ActiveRecord::RecordNotFound
           render json: { error: "job not found" }, status: :not_found
           nil

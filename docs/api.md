@@ -241,6 +241,24 @@ pools. See [migration](../DEPLOY.md#ruby-to-go-runner-migration) and the
 [frozen Go contract](../runner-go/CONTRACT.md). Go interrupted steps remove
 the primary container before final reporting; remaining steps are skipped.
 
+### Runner presence
+
+Updated clients send these optional headers on claim/start/heartbeat/complete/release:
+
+- `X-Forge-Runner-ID`: UUID generated once per client process.
+- `X-Forge-Runner-Hostname`: hostname, at most 255 characters.
+- `X-Forge-Runner-Implementation`: `ruby` or `go`.
+
+Identity is scoped to the authenticated runner token; hostname is display metadata,
+not proof of host identity. Supplied invalid metadata returns `400` before claiming
+work. Requests without an identity retain the existing job API behavior but do not
+register presence. Empty claim responses (`422`) still update last contact.
+Settings is admin-only. Presence is offline after 120 seconds without lifecycle
+contact; otherwise an active assigned job means busy, and no active job means idle.
+Presence does not change job ownership, authorization, or stale-job recovery.
+
+### Job lifecycle
+
 1. Generate a token: `RunnerToken.generate!(name: "worker-1", resource_class: "medium")`
    and store the raw token on the runner host.
 2. Poll `POST /api/v1/runner/jobs/claim` every **5–10s** when idle

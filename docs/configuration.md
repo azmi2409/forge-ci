@@ -64,6 +64,13 @@ Ruby installation from `.old` and the environment and service unit from `.bak`,
 rather than rerunning the installer with defaults. Another installer run
 overwrites these backups; retain a separate protected copy.
 
+Admin **Settings → Runners** tracks upgraded Ruby and Go processes using idle
+claims and job heartbeats. No lifecycle contact for 120 seconds marks a process
+offline. Keep polling/backoff and heartbeat intervals below that threshold to
+avoid false offline readings. Restarted processes receive new identities; this
+is process presence, not host inventory. Legacy clients without presence headers
+continue working but are not listed. The page updates when refreshed.
+
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `CONTROL_PLANE_URL` | yes | — | Base URL of the control plane |
