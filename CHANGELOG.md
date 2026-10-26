@@ -6,6 +6,8 @@ separately.
 
 ## Unreleased
 
+## 0.5.0 (2026-10-26)
+
 - Add `forge-ci pipelines --project NAME` to discover existing automatic runs
   with branch/SHA filters, plus `forge-ci status ID [--wait]` to inspect and
   watch workflow/job states without triggering another run. Both support
