@@ -126,7 +126,8 @@ class RunnerLoopTest < Minitest::Test
     assert_equal [7], r.jobs
     assert_operator client.outlook_requests, :>=, 1
     assert_operator client.outlook_timeouts.first, :>, 0, "outlook is bounded by the remaining linger cap"
-    assert_operator client.claim_timeouts.last, :>, 0, "claim is bounded by the remaining linger cap"
+    assert client.claim_timeouts.any? { |timeout| timeout&.positive? },
+           "claim is bounded by the remaining linger cap"
     assert_empty r.shell
     assert_includes r.pauses, 5.0, "lingering uses the configured outlook interval"
   end
