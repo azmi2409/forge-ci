@@ -182,6 +182,36 @@ func (c *Client) Claim(ctx context.Context, resourceClass string) (*payload.Clai
 	return claim, 0, nil
 }
 
+// Outlook is the count-only idle-shutdown view for this runner's trust pool
+// and claimable resource class (plus classless jobs).
+type Outlook struct {
+	Queued  int `json:"queued"`
+	Running int `json:"running"`
+	Pending int `json:"pending"`
+}
+
+func (o *Outlook) HasWork() bool {
+	return o != nil && o.Queued+o.Running+o.Pending > 0
+}
+
+func (c *Client) Outlook(ctx context.Context, resourceClass string) (*Outlook, error) {
+	path := "/api/v1/runner/outlook"
+	if resourceClass != "" {
+		q := url.Values{}
+		q.Set("resource_class", resourceClass)
+		path += "?" + q.Encode()
+	}
+	body, err := c.getJSON(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var outlook Outlook
+	if err := json.Unmarshal(body, &outlook); err != nil {
+		return nil, fmt.Errorf("runner outlook response: %w", err)
+	}
+	return &outlook, nil
+}
+
 // HeartbeatReply is the heartbeat response; Status "canceled" tells the
 // runner the control plane stopped the job.
 type HeartbeatReply struct {

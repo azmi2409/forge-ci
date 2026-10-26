@@ -35,6 +35,10 @@ module ForgeCIRunner
   #   IDLE_SHUTDOWN_AFTER  seconds without a job after which the runner stops
   #                        claiming, runs IDLE_SHUTDOWN_COMMAND and exits
   #                        (default: 0, never). For scale-to-zero groups.
+  #   IDLE_LINGER_MAX      extra seconds to stay after base idle when the
+  #                        control plane reports expected work (default: 0).
+  #   IDLE_OUTLOOK_INTERVAL seconds between claim/outlook polls while lingering
+  #                        (default: 15).
   #   IDLE_SHUTDOWN_COMMAND shell command run once on idle shutdown, e.g.
   #                        bin/forge-ci-asg-terminate-self (optional)
   #   REQUEUE_ON_SHUTDOWN  1 = on SIGTERM/SIGINT mid-job, stop the running step
@@ -49,7 +53,7 @@ module ForgeCIRunner
                 :poll_interval, :max_idle_interval, :heartbeat_interval,
                 :log_chunk_size, :log_flush_interval, :checkout_repo_url, :redact_min_length,
                 :docker_bin, :buildx_bin, :step_no_output_timeout, :job_timeout,
-                :idle_shutdown_after, :idle_shutdown_command,
+                :idle_shutdown_after, :idle_shutdown_command, :idle_linger_max, :idle_outlook_interval,
                 :allow_docker_socket, :docker_socket_path, :requeue_on_shutdown
 
     def self.from_env(env = ENV)
@@ -69,6 +73,8 @@ module ForgeCIRunner
         step_no_output_timeout: (env["STEP_NO_OUTPUT_TIMEOUT"] || 600).to_f,
         job_timeout: (env["JOB_TIMEOUT"] || 3600).to_f,
         idle_shutdown_after: (env["IDLE_SHUTDOWN_AFTER"] || 0).to_f,
+        idle_linger_max: (env["IDLE_LINGER_MAX"] || 0).to_f,
+        idle_outlook_interval: (env["IDLE_OUTLOOK_INTERVAL"] || 15).to_f,
         idle_shutdown_command: env["IDLE_SHUTDOWN_COMMAND"],
         allow_docker_socket: %w[1 true yes].include?(env["ALLOW_DOCKER_SOCKET"].to_s.strip.downcase),
         docker_socket_path: env["DOCKER_SOCKET_PATH"].to_s.empty? ? "/var/run/docker.sock" : env["DOCKER_SOCKET_PATH"],
@@ -99,6 +105,7 @@ module ForgeCIRunner
                    checkout_repo_url: nil, redact_min_length: 8,
                    docker_bin: "docker", buildx_bin: nil, step_no_output_timeout: 600.0,
                    job_timeout: 3600.0, idle_shutdown_after: 0.0,
+                   idle_linger_max: 0.0, idle_outlook_interval: 15.0,
                    idle_shutdown_command: nil, allow_docker_socket: false,
                    docker_socket_path: "/var/run/docker.sock", requeue_on_shutdown: false)
       raise Error, "CONTROL_PLANE_URL is required" if control_plane_url.to_s.empty?
@@ -122,6 +129,8 @@ module ForgeCIRunner
       @step_no_output_timeout = step_no_output_timeout
       @job_timeout = job_timeout
       @idle_shutdown_after = idle_shutdown_after
+      @idle_linger_max = idle_linger_max
+      @idle_outlook_interval = idle_outlook_interval.to_f.positive? ? idle_outlook_interval.to_f : 15.0
       @idle_shutdown_command = idle_shutdown_command
       @allow_docker_socket = allow_docker_socket
       @docker_socket_path = docker_socket_path

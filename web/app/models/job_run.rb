@@ -314,6 +314,42 @@ class JobRun < ApplicationRecord
     scope.count
   end
 
+  # Aggregate only work this runner can route to: one trust pool and its
+  # resource class plus classless jobs. No project or job identifiers leave
+  # the server. Pending work is counted only while its workflow and pipeline
+  # remain active and every required job can still succeed.
+  def self.outlook_counts(token, requested_resource_class: nil)
+    resource_class = token.resource_class || requested_resource_class.presence
+    scope = joins(workflow_run: :pipeline).where(pipelines: { forked: token.fork_only? })
+    unless resource_class.nil?
+      scope = scope.where("job_runs.resource_class = ? OR job_runs.resource_class IS NULL", resource_class)
+    end
+
+    queued_jobs = scope.queued.includes(workflow_run: { pipeline: :project }).to_a
+    available_project_ids = queued_jobs.map(&:project).uniq
+                               .select { |project| project.free_slots.positive? }
+                               .map(&:id).to_set
+    queued_count = queued_jobs.count { |job| available_project_ids.include?(job.project.id) }
+    active_counts = scope.where(status: %w[claimed running]).group(:status).count
+    pending_scope = scope.pending
+                         .where(workflow_runs: { status: %w[pending running] },
+                                pipelines: { status: %w[pending running] })
+                         .includes(workflow_run: :job_runs)
+    pending_count = pending_scope.count do |job|
+      by_name = job.workflow_run.job_runs.group_by(&:name)
+      job.requires_list.all? do |required_name|
+        dependencies = by_name[required_name]
+        dependencies.present? && dependencies.none? { |dependency| dependency.failed? || dependency.canceled? }
+      end
+    end
+
+    {
+      queued: queued_count,
+      running: active_counts.fetch("claimed", 0) + active_counts.fetch("running", 0),
+      pending: pending_count
+    }
+  end
+
   # --- completion ---------------------------------------------------------------
 
   # Record the runner's report, update step runs, unblock dependents whose

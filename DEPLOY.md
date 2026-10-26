@@ -86,6 +86,18 @@ with no class. A runner installed without `--class` claims any job.
 For example, run checks on Spot machines (`--class spot`) and deploys on an
 on-demand machine (`--class deploy`).
 
+For scale-to-zero runners, `--idle-shutdown SECONDS` remains the base idle
+threshold. Deploy the control plane with `GET /api/v1/runner/outlook` first,
+then install/update runners; older servers are safe because an Outlook `404`
+falls back to base-idle shutdown. `--idle-linger-max SECONDS` optionally keeps a
+runner alive for at most that many extra seconds when its pool/class outlook
+reports queued, running, or viable pending work; `--idle-outlook-interval SECONDS`
+controls claim/outlook checks during that window (default 15). The linger default is 0,
+so existing installs keep immediate base-idle shutdown. If the server does not
+support Outlook or the request fails, runners also shut down at the base
+threshold. These values are available on both the installer and as runner
+environment variables; see [configuration](docs/configuration.md#runners-runner-runner-go).
+
 When AWS reclaims a Spot machine mid-job, the job is canceled by default. If
 every job on that class is safe to run twice (tests, not deploys), add
 `--requeue-on-shutdown` to its install command and the job goes back to the

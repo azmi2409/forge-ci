@@ -31,6 +31,18 @@ The secret must be byte-identical on both sides.
 - **Nothing queued**: jobs with unmet `requires` stay `pending`, not
   `queued` — check the pipeline view for a failed dependency upstream.
 
+## Runner shuts down despite expected next-stage work
+
+Idle linger is opt-in: `IDLE_LINGER_MAX` defaults to `0`, which preserves
+immediate shutdown at `IDLE_SHUTDOWN_AFTER`. Set a positive maximum and
+`IDLE_OUTLOOK_INTERVAL` (default 15 seconds) through the installer flags or the
+runner environment. The runner requests `/api/v1/runner/outlook` only after the
+base idle period and only lingers on positive counts for its own trust pool and
+class (plus classless jobs). A zero response, request failure, or `404` from an
+older server intentionally falls back to base-idle shutdown. Verify that the
+server is upgraded first, the runner has the intended class/token pool, and
+that the pipeline's workflow is still active with no failed prerequisite.
+
 ## Job stuck in `claimed` / `running` forever
 
 The runner died without completing. `ReclaimStaleJobsJob` returns jobs with

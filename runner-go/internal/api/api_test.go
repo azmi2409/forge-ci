@@ -173,6 +173,45 @@ func TestClaimWithResourceClass(t *testing.T) {
 	}
 }
 
+func TestOutlookCountsAndClassQuery(t *testing.T) {
+	var auth, accept, requestedClass string
+	cp := newFakeCP(t, func(w http.ResponseWriter, r *http.Request) bool {
+		auth = r.Header.Get("Authorization")
+		accept = r.Header.Get("Accept")
+		requestedClass = r.URL.Query().Get("resource_class")
+		fmt.Fprint(w, `{"queued":2,"running":1,"pending":3}`)
+		return true
+	})
+	c := clientFor(t, cp.URL())
+	outlook, err := c.Outlook(context.Background(), "large/spot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !outlook.HasWork() || outlook.Queued != 2 || outlook.Running != 1 || outlook.Pending != 3 {
+		t.Fatalf("outlook: %+v", outlook)
+	}
+	if got := cp.count("/api/v1/runner/outlook"); got != 1 {
+		t.Fatalf("requests: %d", got)
+	}
+	if auth != "Bearer test-token-12345678" || accept != "application/json" || requestedClass != "large/spot" {
+		t.Fatalf("request auth=%q accept=%q class=%q", auth, accept, requestedClass)
+	}
+}
+
+func TestOutlook404ReturnsError(t *testing.T) {
+	cp := newFakeCP(t, func(w http.ResponseWriter, _ *http.Request) bool {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error":"not found"}`)
+		return true
+	})
+	c := clientFor(t, cp.URL())
+	_, err := c.Outlook(context.Background(), "")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != http.StatusNotFound {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestClaimIdleAndUpcoming(t *testing.T) {
 	cp := newFakeCP(t, func(w http.ResponseWriter, r *http.Request) bool {
 		w.WriteHeader(http.StatusUnprocessableEntity)

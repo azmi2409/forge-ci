@@ -26,6 +26,8 @@ type Config struct {
 	StepNoOutputTimeout float64
 	JobTimeout          float64
 	IdleShutdownAfter   float64
+	IdleLingerMax       float64
+	IdleOutlookInterval float64
 	IdleShutdownCommand string
 	AllowDockerSocket   bool
 	DockerSocketPath    string
@@ -63,6 +65,8 @@ func fromEnv(env func(string) (string, bool)) (*Config, error) {
 		StepNoOutputTimeout: envFloat(env, "STEP_NO_OUTPUT_TIMEOUT", 600),
 		JobTimeout:          envFloat(env, "JOB_TIMEOUT", 3600),
 		IdleShutdownAfter:   envFloat(env, "IDLE_SHUTDOWN_AFTER", 0),
+		IdleLingerMax:       envFloat(env, "IDLE_LINGER_MAX", 0),
+		IdleOutlookInterval: envFloat(env, "IDLE_OUTLOOK_INTERVAL", 15),
 		IdleShutdownCommand: envGet(env, "IDLE_SHUTDOWN_COMMAND"),
 		AllowDockerSocket:   envBool(env, "ALLOW_DOCKER_SOCKET"),
 		DockerSocketPath:    envDefault(env, "DOCKER_SOCKET_PATH", "/var/run/docker.sock"),
@@ -70,6 +74,9 @@ func fromEnv(env func(string) (string, bool)) (*Config, error) {
 	}
 	if c.LogChunkSize <= 0 {
 		c.LogChunkSize = 65536
+	}
+	if c.IdleOutlookInterval <= 0 {
+		c.IdleOutlookInterval = 15
 	}
 	return c, nil
 }

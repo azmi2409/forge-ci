@@ -28,6 +28,14 @@ module Api
           render json: job_payload(job), status: :ok
         end
 
+        # GET /api/v1/runner/outlook — counts only, scoped to this token's
+        # trust pool and the class this runner may claim.
+        def outlook
+          resource_class = current_runner_token.resource_class || params[:resource_class].presence
+          record_runner_presence(resource_class: resource_class)
+          render json: JobRun.outlook_counts(current_runner_token, requested_resource_class: resource_class)
+        end
+
         # POST /api/v1/runner/jobs/:id/heartbeat — refresh heartbeat_at.
         def heartbeat
           job = find_owned_job

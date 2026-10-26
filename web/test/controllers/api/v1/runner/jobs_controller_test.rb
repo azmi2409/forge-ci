@@ -159,6 +159,97 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_equal false, json_body["trusted"]
   end
 
+  # --- outlook ------------------------------------------------------------------
+
+  test "outlook counts only the token's class plus classless jobs" do
+    # One trusted medium job is queued, one is claimed, and the medium test
+    # waits on build. The large deploy must not be counted for this runner.
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    job_named("build").reload.mark_running!
+    @pipeline.workflow_runs.sole.job_runs.create!(name: "claimed-extra", resource_class: "medium",
+                                                  executor: { "type" => "docker", "resource_class" => "medium" },
+                                                  steps: [], status: :queued)
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    @pipeline.workflow_runs.sole.job_runs.create!(name: "classless-queued", executor: { "type" => "docker" },
+                                                  steps: [], status: :queued)
+    get "/api/v1/runner/outlook", headers: auth
+    assert_response :ok
+    assert_equal({ "queued" => 1, "running" => 2, "pending" => 1 }, json_body)
+  end
+
+  test "outlook excludes queued jobs that cannot claim a full project slot" do
+    @project.update!(max_concurrency: 1)
+    extra = @pipeline.workflow_runs.sole.job_runs.create!(name: "queued-extra", executor: { "type" => "docker", "resource_class" => "medium" },
+                                                         steps: [], status: :queued)
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+
+    get "/api/v1/runner/outlook", headers: auth
+    assert_response :ok
+    assert_equal 0, json_body["queued"], "the full project has no claim slot"
+    assert_equal 1, json_body["running"], "the existing claimed job is visible"
+    assert extra.reload.queued?
+  end
+
+  test "outlook follows the requested class for classless tokens and exposes counts only" do
+    _token, raw = RunnerToken.generate!(name: "classless-runner")
+    get "/api/v1/runner/outlook", params: { resource_class: "large" }, headers: bearer_headers(raw)
+    assert_response :ok
+    assert_equal({ "queued" => 0, "running" => 0, "pending" => 1 }, json_body)
+    assert_equal %w[pending queued running], json_body.keys.sort
+    refute_includes response.body, @project.name
+    refute_match(/project_id|job_id|project_name|job_name/, response.body)
+  end
+
+  test "outlook separates trust pools and does not reveal project or job details" do
+    @pipeline.update!(forked: true)
+    get "/api/v1/runner/outlook", headers: auth
+    assert_response :ok
+    assert_equal({ "queued" => 0, "running" => 0, "pending" => 0 }, json_body)
+
+    _token, raw = RunnerToken.generate!(name: "fork-runner", resource_class: "medium", fork_only: true)
+    get "/api/v1/runner/outlook", headers: bearer_headers(raw)
+    assert_response :ok
+    assert_equal({ "queued" => 1, "running" => 0, "pending" => 1 }, json_body)
+    assert_equal %w[pending queued running], json_body.keys.sort
+    refute_includes response.body, @project.name
+    refute_match(/project_id|job_id|project_name|job_name/, response.body)
+  end
+
+  test "outlook excludes pending work in terminal workflows, pipelines, or with failed requirements" do
+    # A stale pending job with a failed prerequisite is not runnable.
+    workflow = @pipeline.workflow_runs.sole
+    dependency = workflow.job_runs.create!(name: "failed-prerequisite", executor: { "type" => "docker" },
+                                          steps: [], status: :failed)
+    blocked = workflow.job_runs.create!(name: "blocked", executor: { "type" => "docker" },
+                                        steps: [], requires: [dependency.name], status: :pending)
+
+    finished_pipeline = PipelineIntake.call!(project: @project, sha: "finished-sha", branch: "main",
+                                             ir: compile_test_ir)
+    finished_pipeline.update!(status: :success)
+    finished_pipeline.workflow_runs.update_all(status: WorkflowRun.statuses.fetch("success"))
+    failed_pipeline = PipelineIntake.call!(project: @project, sha: "failed-sha", branch: "main",
+                                           ir: compile_test_ir)
+    failed_pipeline.update!(status: :failed)
+    failed_pipeline.workflow_runs.update_all(status: WorkflowRun.statuses.fetch("failed"))
+
+    get "/api/v1/runner/outlook", headers: auth
+    assert_response :ok
+    assert_equal 1, json_body["pending"], "only the viable pending test in the active pipeline counts"
+    assert blocked.pending?
+  end
+
+  test "outlook requires a valid runner token" do
+    get "/api/v1/runner/outlook"
+    assert_response :unauthorized
+    get "/api/v1/runner/outlook", headers: bearer_headers("bogus")
+    assert_response :unauthorized
+    get "/api/v1/runner/outlook", headers: bearer_headers(TEST_ADMIN_TOKEN)
+    assert_response :unauthorized
+  end
+
   test "claim honors the project's max_concurrency cap" do
     @project.update!(max_concurrency: 1)
     post "/api/v1/runner/jobs/claim", headers: auth

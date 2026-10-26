@@ -27,6 +27,10 @@ class SettingsControllerTest < ActionDispatch::IntegrationTest
     get "/settings"
     assert_response :ok
     assert_match %r{/install-runner \| sudo sh -s -- --token runner-secret-abc}, response.body
+    assert_select "#runner-linger"
+    assert_select "#runner-outlook-interval"
+    assert_includes response.body, "--idle-linger-max "
+    assert_includes response.body, "--idle-outlook-interval "
     assert_match TEST_ADMIN_TOKEN, response.body
     assert_match "Connect GitHub", response.body
   end

@@ -40,6 +40,23 @@ class RunnerInstallControllerTest < ActionDispatch::IntegrationTest
     assert_match(%r{--requeue-on-shutdown\n(#.*\n)*#.*Spot/preemptible}, body, "documented in the Options header")
   end
 
+  test "idle linger installer flags are persisted for both runner implementations" do
+    get "/install-runner"
+    body = response.body
+    assert_includes body, '--idle-linger-max) IDLE_LINGER_MAX="${2:?--idle-linger-max needs seconds}"; shift 2 ;;'
+    assert_includes body, '--idle-outlook-interval) IDLE_OUTLOOK_INTERVAL="${2:?--idle-outlook-interval needs seconds}"; shift 2 ;;'
+    assert_includes body, 'echo "IDLE_LINGER_MAX=$IDLE_LINGER_MAX"'
+    assert_includes body, 'echo "IDLE_OUTLOOK_INTERVAL=$IDLE_OUTLOOK_INTERVAL"'
+
+    run_installer(args: ["--idle-shutdown", "60", "--idle-linger-max", "600", "--idle-outlook-interval", "20"]) do |root, output, status|
+      assert status.success?, output
+      env = File.read("#{root}/etc/forge-ci-runner.env")
+      assert_includes env, "IDLE_SHUTDOWN_AFTER=60\n"
+      assert_includes env, "IDLE_LINGER_MAX=600\n"
+      assert_includes env, "IDLE_OUTLOOK_INTERVAL=20\n"
+    end
+  end
+
   test "--implementation=go installs the static binary with integrity checks" do
     get "/install-runner"
     body = response.body
@@ -153,7 +170,7 @@ class RunnerInstallControllerTest < ActionDispatch::IntegrationTest
     assert_equal "old unit", File.read("#{root}/etc/systemd/system/forge-ci-runner.service")
   end
 
-  def run_installer(failure: "", installed: true)
+  def run_installer(failure: "", installed: true, args: [])
     get "/install-runner"
     Dir.mktmpdir("installer") do |root|
       FileUtils.mkdir_p(["#{root}/commands", "#{root}/opt/forge-ci-runner/bin", "#{root}/etc/systemd/system"])
@@ -209,7 +226,7 @@ class RunnerInstallControllerTest < ActionDispatch::IntegrationTest
       script = response.body.gsub("/opt/forge-ci-runner", "#{root}/opt/forge-ci-runner").gsub("/etc/", "#{root}/etc/")
       File.write("#{root}/install.sh", script)
       output, status = Open3.capture2e({ "PATH" => "#{root}/commands:#{ENV.fetch('PATH')}", "STUB_ROOT" => root, "FAILURE" => failure },
-        "sh", "#{root}/install.sh", "--token", "new-token", "--implementation", "go", "--allow-docker")
+        "sh", "#{root}/install.sh", "--token", "new-token", "--implementation", "go", "--allow-docker", *args)
       yield root, output, status
     end
   end

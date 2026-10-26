@@ -6,6 +6,16 @@ separately.
 
 ## Unreleased
 
+- Add runner-authenticated `GET /api/v1/runner/outlook` with queued, claimed/running,
+  and viable pending counts scoped to the token's trust pool and claimable resource
+  class, including classless jobs. Pending work blocked by a failed prerequisite or
+  a terminal pipeline/workflow is excluded; no project or job details are returned.
+- Add bounded outlook-driven idle linger to both Ruby and Go runners. The base
+  `IDLE_SHUTDOWN_AFTER` remains honored; `IDLE_LINGER_MAX` defaults to 0 and
+  `IDLE_OUTLOOK_INTERVAL` to 15 seconds. Outlook errors and older-server 404s
+  retain immediate base-idle shutdown. Expose installer flags and document rollout
+  order (server first); no infrastructure rollout is included here.
+
 ## 0.5.0 (2026-10-26)
 
 - Add `forge-ci pipelines --project NAME` to discover existing automatic runs

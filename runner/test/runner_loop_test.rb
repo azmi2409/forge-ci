@@ -6,24 +6,35 @@ require "test_helper"
 class RunnerLoopTest < Minitest::Test
   # Claim replies in order (nil = nothing claimable); then stops the runner.
   class ScriptedClient
-    attr_reader :claims
-    attr_accessor :upcoming, :upcoming_polls
+    attr_reader :claims, :outlook_requests, :outlook_timeouts, :claim_timeouts
+    attr_accessor :outlook_replies, :default_outlook
 
     def initialize(replies, on_empty)
       @replies = replies
       @on_empty = on_empty
       @claims = 0
-      @upcoming = 0
-      @upcoming_polls = 0
+      @outlook_replies = []
+      @default_outlook = { "queued" => 0, "running" => 0, "pending" => 0 }
+      @outlook_requests = 0
+      @outlook_timeouts = []
+      @claim_timeouts = []
     end
 
-    def claim_job(_resource_class)
+    def claim_job(_resource_class, timeout: nil)
+      @claim_timeouts << timeout
       @claims += 1
-      # The first `upcoming_polls` empty claims report a job on the way.
-      @upcoming = @upcoming_polls.positive? ? (@upcoming_polls -= 1; 1) : 0
       return @on_empty.call if @replies.empty?
 
       @replies.shift
+    end
+
+    def outlook(_resource_class, timeout: nil)
+      @outlook_requests += 1
+      @outlook_timeouts << timeout
+      reply = @outlook_replies.empty? ? @default_outlook : @outlook_replies.shift
+      raise reply if reply.is_a?(StandardError)
+
+      reply
     end
   end
 
@@ -106,15 +117,55 @@ class RunnerLoopTest < Minitest::Test
     assert_empty r.shell
   end
 
-  def test_upcoming_jobs_keep_an_idle_runner_up_until_they_stop
-    r = runner([], on_empty: -> { nil }, idle_shutdown_after: 120.0, idle_shutdown_command: "terminate-me")
-    r.instance_variable_get(:@client).upcoming_polls = 20 # e.g. a deploy waiting for its checks
+  def test_outlook_work_keeps_the_runner_up_until_it_claims_a_job
+    r = runner([nil, nil, nil, { "id" => 7 }], on_empty: -> { r.stop!; nil },
+               idle_shutdown_after: 10.0, idle_linger_max: 30.0, idle_outlook_interval: 5.0)
+    client = r.instance_variable_get(:@client)
+    client.outlook_replies = [{ "queued" => 0, "running" => 0, "pending" => 1 }]
     r.run
-    assert_equal ["terminate-me"], r.shell, "it still idles out once nothing is on the way"
-    # The idle clock restarts at each poll that reports a job on the way; the
-    # 20th is the last, after 19 pauses.
-    waited = r.pauses.first(19).sum
-    assert_operator waited, :>, 120.0, "it stayed up past the idle limit while jobs were on the way"
-    assert_operator r.clock, :>=, waited + 120.0, "the idle clock only started after the upcoming jobs went away"
+    assert_equal [7], r.jobs
+    assert_operator client.outlook_requests, :>=, 1
+    assert_operator client.outlook_timeouts.first, :>, 0, "outlook is bounded by the remaining linger cap"
+    assert_operator client.claim_timeouts.last, :>, 0, "claim is bounded by the remaining linger cap"
+    assert_empty r.shell
+    assert_includes r.pauses, 5.0, "lingering uses the configured outlook interval"
+  end
+
+  def test_zero_outlook_shuts_down_at_base_idle
+    r = runner([nil, nil], idle_shutdown_after: 5.0, idle_linger_max: 30.0,
+               idle_shutdown_command: "terminate-me")
+    r.run
+    assert_equal ["terminate-me"], r.shell
+    assert_equal 1, r.instance_variable_get(:@client).outlook_requests
+  end
+
+  def test_linger_max_bounds_positive_outlook
+    r = runner([nil, nil, nil, nil], idle_shutdown_after: 5.0, idle_linger_max: 10.0,
+               idle_outlook_interval: 5.0, idle_shutdown_command: "terminate-me")
+    client = r.instance_variable_get(:@client)
+    client.default_outlook = { "queued" => 1, "running" => 0, "pending" => 0 }
+    r.run
+    assert_equal ["terminate-me"], r.shell
+    assert_operator r.clock, :>=, 15.0
+    assert_equal 2, client.outlook_requests, "the cap expires before another outlook request"
+  end
+
+  def test_outlook_404_or_network_error_falls_back_to_base_shutdown
+    [ForgeCIRunner::Client::HTTPError.new("404", "older server"), IOError.new("offline")].each do |error|
+      r = runner([nil, nil], idle_shutdown_after: 5.0, idle_linger_max: 30.0,
+                 idle_shutdown_command: "terminate-me")
+      r.instance_variable_get(:@client).outlook_replies = [error]
+      r.run
+      assert_equal ["terminate-me"], r.shell
+      assert_equal 5.0, r.clock
+    end
+  end
+
+  def test_zero_linger_max_preserves_immediate_shutdown_without_outlook
+    r = runner([nil, nil], idle_shutdown_after: 5.0, idle_linger_max: 0,
+               idle_shutdown_command: "terminate-me")
+    r.run
+    assert_equal ["terminate-me"], r.shell
+    assert_equal 0, r.instance_variable_get(:@client).outlook_requests
   end
 end

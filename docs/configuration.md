@@ -54,8 +54,8 @@ not evidence that production soak gates have passed.
 
 The installer rewrites the runner environment file. Before rerunning it,
 securely back up the installation and environment, preserve every original
-installer flag (including resource class, Docker access, idle shutdown and
-requeue settings). The installer starts the service automatically: keep the
+installer flag (including resource class, Docker access, idle shutdown/linger/outlook
+and requeue settings). The installer starts the service automatically: keep the
 canary's job queue empty, stop the service after installation, restore custom
 environment values, then restart before submitting work. Protect tokens in
 both live files and backups; do not paste them into
@@ -88,7 +88,9 @@ continue working but are not listed. The page updates when refreshed.
 | `BUILDX_BIN` | no | — | Path to a buildx binary the runner copies into job images that lack one, for `docker_layer_caching` builds. Set automatically by the install command's `--allow-docker` and the runner image |
 | `STEP_NO_OUTPUT_TIMEOUT` | no | `600` | Seconds without step output before interrupting the step; `0` disables |
 | `JOB_TIMEOUT` | no | `3600` | Job wall-clock limit in seconds; `0` disables |
-| `IDLE_SHUTDOWN_AFTER` | no | `0` (never) | Seconds without a job after which the runner stops claiming, runs `IDLE_SHUTDOWN_COMMAND` and exits |
+| `IDLE_SHUTDOWN_AFTER` | no | `0` (never) | Base seconds without a job before the runner checks outlook and may shut down |
+| `IDLE_LINGER_MAX` | no | `0` | Maximum extra seconds after base idle to stay when outlook reports eligible work. Zero preserves immediate shutdown |
+| `IDLE_OUTLOOK_INTERVAL` | no | `15` | Seconds between job-claim and outlook checks while lingering |
 | `IDLE_SHUTDOWN_COMMAND` | no | — | Shell command run once on idle shutdown, e.g. `bin/forge-ci-asg-terminate-self` |
 | `ALLOW_DOCKER_SOCKET` | no | off | `1` lets jobs with `setup_remote_docker` use this machine's Docker socket. Such a job controls the machine, so set it only on runners trusted with that (the deploy runner); fork pull requests are always refused. The install command's `--allow-docker` sets it |
 | `REQUEUE_ON_SHUTDOWN` | no | off | `1`: on SIGTERM/SIGINT mid-job, stop the running step and put the job back in the queue instead of reporting it canceled (at most twice per job). For Spot/preemptible runners whose jobs are safe to retry; never on deploy runners. The install command's `--requeue-on-shutdown` sets it |

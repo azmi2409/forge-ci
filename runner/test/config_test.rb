@@ -54,6 +54,8 @@ class ConfigTest < Minitest::Test
     assert_nil cfg.checkout_repo_url
     assert_equal 8, cfg.redact_min_length
     assert_equal "docker", cfg.docker_bin
+    assert_equal 0.0, cfg.idle_linger_max
+    assert_equal 15.0, cfg.idle_outlook_interval
   end
 
   def test_overrides
@@ -62,10 +64,14 @@ class ConfigTest < Minitest::Test
         "RUNNER_TOKEN" => "t",
         "RESOURCE_CLASS" => "medium",
         "POLL_INTERVAL" => "2",
+        "IDLE_LINGER_MAX" => "600",
+        "IDLE_OUTLOOK_INTERVAL" => "20",
         "CHECKOUT_REPO_URL" => "https://github.com/o/r.git" }
     )
     assert_equal "medium", cfg.resource_class
     assert_equal 2.0, cfg.poll_interval
     assert_equal "https://github.com/o/r.git", cfg.checkout_repo_url
+    assert_equal 600.0, cfg.idle_linger_max
+    assert_equal 20.0, cfg.idle_outlook_interval
   end
 end

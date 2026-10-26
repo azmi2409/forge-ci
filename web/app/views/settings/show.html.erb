@@ -114,6 +114,14 @@
             <label class="field-label" for="runner-idle">Stop when idle for (seconds, optional)</label>
             <input class="field" type="number" id="runner-idle" min="0" placeholder="e.g. 600 for scale to zero">
           </div>
+          <div class="form-row">
+            <label class="field-label" for="runner-linger">Extra linger when work is expected (seconds, optional)</label>
+            <input class="field" type="number" id="runner-linger" min="0" placeholder="default: 0 (disabled)">
+          </div>
+          <div class="form-row">
+            <label class="field-label" for="runner-outlook-interval">Outlook poll interval (seconds, optional)</label>
+            <input class="field" type="number" id="runner-outlook-interval" min="1" placeholder="default: 15">
+          </div>
         </div>
         <div class="copy-row">
           <pre class="code-block" id="install-command" data-base="curl -fsSL <%= @base_url %>/install-runner | sudo sh -s -- --token <%= @runner_token %>">curl -fsSL <%= @base_url %>/install-runner | sudo sh -s -- --token <%= @runner_token %></pre>
@@ -179,16 +187,22 @@
     var cmd = document.getElementById("install-command");
     var cls = document.getElementById("runner-class");
     var idle = document.getElementById("runner-idle");
+    var linger = document.getElementById("runner-linger");
+    var outlookInterval = document.getElementById("runner-outlook-interval");
     function update() {
       if (!cmd) return;
       var text = cmd.dataset.base;
       var c = (cls.value || "").trim().replace(/[^A-Za-z0-9_.-]/g, "");
       var i = parseInt(idle.value, 10);
+      var l = parseInt(linger.value, 10);
+      var o = parseInt(outlookInterval.value, 10);
       if (c) text += " --class " + c;
       if (i > 0) text += " --idle-shutdown " + i;
+      if (l > 0) text += " --idle-linger-max " + l;
+      if (o > 0) text += " --idle-outlook-interval " + o;
       cmd.textContent = text;
     }
-    [cls, idle].forEach(function(el) { if (el) el.addEventListener("input", update); });
+    [cls, idle, linger, outlookInterval].forEach(function(el) { if (el) el.addEventListener("input", update); });
     document.querySelectorAll("form[data-github-connect]").forEach(function(form) {
       var row = form.querySelector("[data-org-row]");
       var input = row.querySelector("input");

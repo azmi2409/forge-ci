@@ -46,6 +46,7 @@ import (
 type ControlPlane interface {
 	executor.ControlPlane
 	Claim(ctx context.Context, resourceClass string) (*payload.Claim, int, error)
+	Outlook(ctx context.Context, resourceClass string) (*api.Outlook, error)
 	Start(ctx context.Context, jobID int64) error
 	Heartbeat(ctx context.Context, jobID int64) (*api.HeartbeatReply, error)
 	Complete(ctx context.Context, jobID int64, status string, stepResults []api.StepResult) error
@@ -69,7 +70,7 @@ type Runner struct {
 
 	logMu sync.Mutex
 	// idleSince tracks the last moment work was seen, for scale-to-zero.
-	idleSince atomic.Int64
+	idleSince time.Time
 
 	sigCh chan os.Signal
 }
@@ -105,7 +106,8 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	r.logf("forge-ci-runner %s starting (%s, resource_class=%s)",
 		version.Version, r.cfg.ControlPlaneURL, orDefault(r.cfg.ResourceClass, "any"))
-	r.idleSince.Store(time.Now().UnixNano())
+	r.idleSince = time.Now()
+	var lingerUntil time.Time
 
 	for {
 		if ctx.Err() != nil {
@@ -115,7 +117,19 @@ func (r *Runner) Run(ctx context.Context) error {
 			break
 		}
 
-		claim, upcoming, err := r.client.Claim(ctx, r.cfg.ResourceClass)
+		claimCtx := ctx
+		var cancelClaim context.CancelFunc
+		if !lingerUntil.IsZero() {
+			if !time.Now().Before(lingerUntil) {
+				r.idleShutdown()
+				return nil
+			}
+			claimCtx, cancelClaim = context.WithDeadline(ctx, lingerUntil)
+		}
+		claim, _, err := r.client.Claim(claimCtx, r.cfg.ResourceClass)
+		if cancelClaim != nil {
+			cancelClaim()
+		}
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				r.beginShutdown(nil)
@@ -128,19 +142,40 @@ func (r *Runner) Run(ctx context.Context) error {
 				r.logf("%v; exiting", err)
 				return err
 			}
-			if errors.Is(err, api.ErrIdle) {
-				// Work is coming (e.g. a deploy waiting on checks): not idle.
-				if upcoming > 0 {
-					r.idleSince.Store(time.Now().UnixNano())
-				}
-				if r.idleTooLong() {
-					r.idleShutdown()
-					return nil
-				}
-				r.pause(time.Duration(r.backoff.Tick() * float64(time.Second)))
-				continue
+			if !errors.Is(err, api.ErrIdle) {
+				r.logf("control plane error: %v; backing off", err)
 			}
-			r.logf("control plane error: %v; backing off", err)
+		}
+
+		if err != nil && r.cfg.IdleShutdownAfter > 0 && r.idleTooLong() {
+			if r.cfg.IdleLingerMax <= 0 {
+				r.idleShutdown()
+				return nil
+			}
+			if lingerUntil.IsZero() {
+				baseDeadline := r.idleSince.Add(seconds(r.cfg.IdleShutdownAfter))
+				lingerUntil = baseDeadline.Add(seconds(r.cfg.IdleLingerMax))
+			}
+			if !time.Now().Before(lingerUntil) {
+				r.idleShutdown()
+				return nil
+			}
+			outlookCtx, cancelOutlook := context.WithDeadline(ctx, lingerUntil)
+			outlook, outlookErr := r.client.Outlook(outlookCtx, r.cfg.ResourceClass)
+			cancelOutlook()
+			if outlookErr != nil {
+				r.logf("runner outlook unavailable (%v); shutting down at base idle", outlookErr)
+				r.idleShutdown()
+				return nil
+			}
+			if !outlook.HasWork() || !time.Now().Before(lingerUntil) {
+				r.idleShutdown()
+				return nil
+			}
+			r.pause(lingerPause(r.cfg.IdleOutlookInterval, time.Until(lingerUntil)))
+			continue
+		}
+		if err != nil {
 			r.pause(time.Duration(r.backoff.Tick() * float64(time.Second)))
 			continue
 		}
@@ -154,7 +189,8 @@ func (r *Runner) Run(ctx context.Context) error {
 
 		r.backoff.Reset()
 		r.runJob(ctx, claim)
-		r.idleSince.Store(time.Now().UnixNano())
+		r.idleSince = time.Now()
+		lingerUntil = time.Time{}
 	}
 
 	r.logf("forge-ci-runner stopped")
@@ -190,7 +226,22 @@ func (r *Runner) idleTooLong() bool {
 	if limit <= 0 {
 		return false
 	}
-	return time.Since(time.Unix(0, r.idleSince.Load())) >= time.Duration(limit*float64(time.Second))
+	return time.Since(r.idleSince) >= time.Duration(limit*float64(time.Second))
+}
+
+func seconds(value float64) time.Duration {
+	return time.Duration(value * float64(time.Second))
+}
+
+func lingerPause(interval float64, remaining time.Duration) time.Duration {
+	d := seconds(interval)
+	if d <= 0 {
+		d = 15 * time.Second
+	}
+	if remaining < d {
+		return remaining
+	}
+	return d
 }
 
 // idleShutdown runs the scale-to-zero command (e.g. ASG self-terminate) and

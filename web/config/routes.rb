@@ -73,6 +73,7 @@ Rails.application.routes.draw do
 
       # Runner polling API (Bearer-token auth via RunnerToken).
       namespace :runner do
+        get "outlook", to: "jobs#outlook"
         resources :jobs, only: [] do
           collection do
             post :claim
