@@ -126,7 +126,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 			claimCtx, cancelClaim = context.WithDeadline(ctx, lingerUntil)
 		}
-		claim, _, err := r.client.Claim(claimCtx, r.cfg.ResourceClass)
+		claim, upcoming, err := r.client.Claim(claimCtx, r.cfg.ResourceClass)
 		if cancelClaim != nil {
 			cancelClaim()
 		}
@@ -147,7 +147,13 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 
-		if err != nil && r.cfg.IdleShutdownAfter > 0 && r.idleTooLong() {
+		if errors.Is(err, api.ErrIdle) && upcoming > 0 {
+			// Work is coming (e.g. a deploy waiting on checks): not idle.
+			r.idleSince = time.Now()
+			lingerUntil = time.Time{}
+		}
+
+		if errors.Is(err, api.ErrIdle) && r.cfg.IdleShutdownAfter > 0 && r.idleTooLong() {
 			if r.cfg.IdleLingerMax <= 0 {
 				r.idleShutdown()
 				return nil

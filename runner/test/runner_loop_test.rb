@@ -6,12 +6,13 @@ require "test_helper"
 class RunnerLoopTest < Minitest::Test
   # Claim replies in order (nil = nothing claimable); then stops the runner.
   class ScriptedClient
-    attr_reader :claims, :outlook_requests, :outlook_timeouts, :claim_timeouts
-    attr_accessor :outlook_replies, :default_outlook
+    attr_reader :claims, :outlook_requests, :outlook_timeouts, :claim_timeouts, :no_work
+    attr_accessor :outlook_replies, :default_outlook, :upcoming
 
     def initialize(replies, on_empty)
       @replies = replies
       @on_empty = on_empty
+      @upcoming = 0
       @claims = 0
       @outlook_replies = []
       @default_outlook = { "queued" => 0, "running" => 0, "pending" => 0 }
@@ -23,9 +24,15 @@ class RunnerLoopTest < Minitest::Test
     def claim_job(_resource_class, timeout: nil)
       @claim_timeouts << timeout
       @claims += 1
+      @no_work = true
       return @on_empty.call if @replies.empty?
 
-      @replies.shift
+      reply = @replies.shift
+      if reply == :outage
+        @no_work = false
+        return nil
+      end
+      reply
     end
 
     def outlook(_resource_class, timeout: nil)
@@ -106,6 +113,25 @@ class RunnerLoopTest < Minitest::Test
     # Idle time is counted from the end of job 7, not from start-up.
     assert_operator r.clock, :>=, 5 + 10 + 30 + 100
     assert_empty r.shell, "no command configured, so nothing runs"
+  end
+
+  def test_upcoming_work_suppresses_idle_shutdown
+    r = nil
+    r = runner([], on_empty: -> { r.stop! if r.clock > 300; nil }, idle_shutdown_after: 60.0,
+               idle_shutdown_command: "terminate-me")
+    r.instance_variable_get(:@client).upcoming = 2
+    r.run
+    assert_empty r.shell, "work is coming, so the runner must not shut down"
+    assert_operator r.clock, :>, 300
+  end
+
+  def test_claim_outage_does_not_count_as_idle
+    r = nil
+    r = runner(Array.new(40) { :outage }, on_empty: -> { r.stop!; nil }, idle_shutdown_after: 60.0,
+               idle_shutdown_command: "terminate-me")
+    r.run
+    assert_empty r.shell, "an outage is not no-work, so it must not shut the runner down"
+    assert_operator r.clock, :>, 60.0
   end
 
   def test_no_idle_shutdown_by_default

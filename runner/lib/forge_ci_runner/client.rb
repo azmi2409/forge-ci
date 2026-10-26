@@ -38,15 +38,17 @@ module ForgeCIRunner
     # or nil when the server answers 422 (nothing claimable).
     # Jobs of this runner's class waiting on earlier jobs, from the last
     # claim that found nothing (0 from older servers).
-    attr_reader :upcoming
+    attr_reader :upcoming, :no_work
 
     def claim_job(resource_class, timeout: nil)
       body = {}
       body["resource_class"] = resource_class if resource_class
       @upcoming = 0
+      @no_work = false
       post("/api/v1/runner/jobs/claim", body, timeout: timeout)
     rescue HTTPError => e
       if e.code == "422"
+        @no_work = true
         @upcoming = (JSON.parse(e.body.to_s)["upcoming"].to_i rescue 0)
         return nil
       end
