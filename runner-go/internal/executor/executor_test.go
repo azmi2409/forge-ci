@@ -335,7 +335,7 @@ func TestExecuteCancelMidStep(t *testing.T) {
 	if !strings.Contains(log, "step stopped: job was canceled") {
 		t.Errorf("cancel note missing: %q", log)
 	}
-	if !strings.Contains(log, "step skipped: after (job canceled)") {
+	if !strings.Contains(log, "step skipped: after (") || strings.Contains(log, "--- step: after (") {
 		t.Errorf("remaining step must be skipped: %q", log)
 	}
 	if len(results) != 2 {
@@ -400,15 +400,15 @@ func TestExecuteJobTimeout(t *testing.T) {
 	cfg := testCfg("")
 	cfg.JobTimeout = 1
 	start := time.Now()
-	status, _, cp, _, _ := runLifecycle(t, claim, cfg, "")
+	status, _, cp, _, e := runLifecycle(t, claim, cfg, "")
 	if elapsed := time.Since(start); elapsed > 6*time.Second {
 		t.Fatalf("job deadline kill took %v", elapsed)
 	}
 	if status != StatusFailed {
-		t.Fatalf("status %s", status)
+		t.Fatalf("status %s log=%s", status, cp.log())
 	}
-	if !strings.Contains(cp.log(), "JOB_TIMEOUT") {
-		t.Errorf("deadline note missing: %q", cp.log())
+	if e.runCtx.Err() != context.DeadlineExceeded {
+		t.Errorf("job deadline did not expire: %v", e.runCtx.Err())
 	}
 }
 
@@ -515,5 +515,91 @@ func TestFakeDockerIsolation(t *testing.T) {
 	re := regexp.MustCompile(`^docker$`)
 	if re.MatchString(bin) {
 		t.Fatal("must not shadow the real docker")
+	}
+}
+
+func TestInterruptedStepStopsContainerBeforeSkippingFailureSteps(t *testing.T) {
+	claim := `{
+	  "id": 61, "name": "timeout", "executor": {"image": "fake"},
+	  "steps": [
+	    {"type": "run", "command": "sleep 8"},
+	    {"type": "run", "command": "echo must-not-run", "when": "always"}
+	  ]
+	}`
+	cfg := testCfg("")
+	cfg.StepNoOutputTimeout = 0.1
+	status, results, cp, dockerLogPath, e := runLifecycle(t, claim, cfg, "")
+	if status != StatusFailed || len(results) != 2 || results[0].ExitCode != timeoutExit {
+		t.Fatalf("status=%s results=%+v", status, results)
+	}
+	if !strings.Contains(cp.log(), "step skipped:") || strings.Contains(cp.log(), "must-not-run") {
+		t.Fatalf("failure step ran after interruption: %s", cp.log())
+	}
+	// One immediate removal at interruption, another idempotent cleanup.
+	if calls := readDockerLog(t, dockerLogPath); strings.Count(calls, "rm -f "+e.container+"\n") != 2 {
+		t.Fatalf("interruption did not remove primary before final cleanup: %s", calls)
+	}
+}
+
+func TestRedactsEveryEnvironmentScopeAndShadowedValue(t *testing.T) {
+	claim := `{
+	  "id": 62, "name": "secrets", "environment": {"SECRET": "job-secret-value"},
+	  "executor": {"image": "fake", "secondary_images": [
+	    {"image": "redis", "environment": {"SECRET": "service-secret-value"}}
+	  ]},
+	  "steps": [
+	    {"type": "run", "environment": {"SECRET": "step-first-value"}, "command": "echo job-secret-value step-first-value service-secret-value"},
+	    {"type": "run", "environment": {"SECRET": "step-next-value"}, "command": "echo step-next-value"}
+	  ]
+	}`
+	status, _, cp, _, _ := runLifecycle(t, claim, nil, "")
+	if status != StatusSuccess {
+		t.Fatalf("status=%s log=%s", status, cp.log())
+	}
+	for _, secret := range []string{"job-secret-value", "service-secret-value", "step-first-value", "step-next-value"} {
+		if strings.Contains(cp.log(), secret) {
+			t.Errorf("secret leaked: %s", secret)
+		}
+	}
+}
+
+func TestServiceFailedStartRemovesOnlyOwnedContainer(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "calls.log")
+	bin := filepath.Join(dir, "docker")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %q\ncase \"$1\" in run) exit 1;; esac\n", logPath)
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := payload.ParseClaim([]byte(`{"id":63,"name":"service","executor":{"image":"fake","secondary_images":[{"image":"redis","name":"unrelated-host-container"}]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := New(testCfg(bin), &fakeCP{}, claim)
+	status, _ := e.Execute(context.Background(), func() bool { return false }, func() bool { return false })
+	calls := readDockerLog(t, logPath)
+	if status != StatusFailed || !strings.Contains(calls, "rm -f forge-ci-svc-0-"+e.suffix) {
+		t.Fatalf("failed service start leaked container: status=%s calls=%s", status, calls)
+	}
+	if strings.Contains(calls, "--name unrelated-host-container") || strings.Contains(calls, "rm -f unrelated-host-container") {
+		t.Fatalf("payload controlled host container name: %s", calls)
+	}
+}
+
+func TestOrdinaryShutdownDuringFinalStepReportsCanceled(t *testing.T) {
+	bin, logPath := fakeDocker(t)
+	claim, err := payload.ParseClaim([]byte(`{"id":64,"name":"final","executor":{"image":"fake"},"steps":[{"type":"run","command":"echo final-step-started; sleep 0.2; echo final-step-finished"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp := &fakeCP{}
+	e := New(testCfg(bin), cp, claim)
+	shutdown := func() bool {
+		calls, _ := os.ReadFile(logPath)
+		return strings.Contains(string(calls), "echo final-step-started")
+	}
+	status, results := e.Execute(context.Background(), shutdown, func() bool { return false })
+	if status != StatusCanceled || len(results) != 1 || results[0].ExitCode != 0 || !strings.Contains(cp.log(), "final-step-finished") {
+		t.Fatalf("status=%s results=%+v log=%s", status, results, cp.log())
 	}
 }

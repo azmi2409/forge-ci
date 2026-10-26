@@ -61,9 +61,11 @@ Identical to the Ruby runner (`runner/README.md` has the full table):
 ## Deliberate differences from the Ruby runner
 
 - **Process groups**: every subprocess gets its own; interruption is
-  TERM-group → 5s grace → KILL-group, and job-level interruption also
-  explicitly removes the job containers (killing the `docker exec` client
-  alone never stops container-side processes).
+  TERM-group → 5s grace → KILL-group. Interrupted foreground steps also
+  immediately remove the primary container, stopping container-side descendants
+  and detached background steps. Killing the `docker exec` client alone never
+  stops those processes. Remaining steps, including `on_fail` and `always`, are
+  logged as skipped (`job interrupted`); a timeout still fails the job with 124.
 - **Streaming redaction**: output is redacted at emission with a retained
   tail, so secrets split across read boundaries (or timer flushes) are still
   caught; valid UTF-8 is never split across chunks, invalid bytes become
@@ -71,9 +73,9 @@ Identical to the Ruby runner (`runner/README.md` has the full table):
 - **Four separate lifetimes** (stop claiming / interrupt execution /
   heartbeats / final reporting) instead of one flag — see
   `internal/runner/runner.go`.
-- Everything else — exit codes (124 timeout, 130 cancel), `when` semantics,
-  key templates, workspace namespace, deferred-step warnings, step naming —
-  matches the Ruby runner exactly.
+- Everything else — exit codes (124 timeout, 130 cancel), normal-failure `when`
+  semantics, key templates, workspace namespace, deferred-step warnings, step
+  naming — matches the Ruby runner.
 
 ## Distribution
 

@@ -517,3 +517,22 @@ func TestCloseSanitizesIncompleteUTF8(t *testing.T) {
 		t.Fatalf("incomplete final rune not sanitized: %q", out)
 	}
 }
+
+func TestOverlappingSecretsRemainRawAcrossWrites(t *testing.T) {
+	for split := 1; split < len("abcdefghijklmnop"); split++ {
+		t.Run(fmt.Sprint(split), func(t *testing.T) {
+			p := newFakePoster()
+			r := redact.New(map[string]string{"SHORT": "abcdefgh", "LONG": "abcdefghijklmnop"}, 8)
+			s := New(p, 1, r, 3, 0)
+			prefix, secret := strings.Repeat("x", 32), "abcdefghijklmnop"
+			s.Write([]byte(prefix + secret[:split]))
+			s.flush(false)
+			s.Write([]byte(secret[split:] + " tail"))
+			s.Close()
+			out, _ := p.all()
+			if want := prefix + redact.Replacement + " tail"; out != want {
+				t.Fatalf("overlapping secret leaked or context lost: got %q want %q", out, want)
+			}
+		})
+	}
+}

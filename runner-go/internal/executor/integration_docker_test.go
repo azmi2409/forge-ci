@@ -82,3 +82,46 @@ func assertNoLeak(t *testing.T, dockerBin, filter string) {
 		t.Errorf("leaked object matching %q: %s", filter, strings.TrimSpace(res.output))
 	}
 }
+
+func TestDockerTimeoutRemovesContainerBeforeNextStep(t *testing.T) {
+	bin := os.Getenv("DOCKER_BIN")
+	if bin == "" {
+		bin = "docker"
+	}
+	if !DockerAvailable(bin) {
+		t.Skip("docker not available; CI runs this test with docker present")
+	}
+	claim, err := payload.ParseClaim([]byte(`{
+	  "id":9002,"name":"timeout-processes","executor":{"image":"busybox:latest"},
+	  "steps":[
+	    {"type":"run","background":true,"command":"sleep 300"},
+	    {"type":"run","command":"sleep 300 & wait"}
+	  ]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := testCfg(bin)
+	cfg.StepNoOutputTimeout = 0.5
+	e := New(cfg, &fakeCP{}, claim)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	e.runCtx = ctx
+	defer e.streamer.Close()
+	defer e.cleanup()
+	if err := e.unpackScripts(); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.setupContainers(); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.executeRun(&claim.Steps[0]); code != 0 {
+		t.Fatalf("background launch exit=%d", code)
+	}
+	if code := e.executeRun(&claim.Steps[1]); code != timeoutExit {
+		t.Fatalf("timeout exit=%d", code)
+	}
+	// Check before deferred job cleanup. Both detached and foreground
+	// container processes must already be gone when the step returns.
+	assertNoLeak(t, bin, "name="+e.container)
+}

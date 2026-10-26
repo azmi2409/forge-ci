@@ -84,6 +84,7 @@ type Executor struct {
 	services          []string
 	buildxCreated     bool
 	stoppedForRequeue bool
+	stepInterrupted   bool
 
 	mu       sync.Mutex
 	stepsDir string
@@ -129,6 +130,18 @@ func New(cfg *config.Config, client ControlPlane, claim *payload.Claim) *Executo
 		"__checkout_token":       checkoutToken,
 		"__build_cache_password": buildCachePassword,
 	})
+	for i, step := range claim.Steps {
+		for key, value := range step.Environment {
+			env[fmt.Sprintf("__step_%d_%s", i, key)] = value
+		}
+	}
+	if claim.Executor != nil {
+		for i, service := range claim.Executor.SecondaryImages {
+			for key, value := range service.Environment {
+				env[fmt.Sprintf("__service_%d_%s", i, key)] = value
+			}
+		}
+	}
 	e.redactor = redact.New(env, cfg.RedactMinLength)
 	e.streamer = logstream.New(client, jobID, e.redactor, cfg.LogChunkSize, time.Duration(cfg.LogFlushInterval*float64(time.Second)))
 	return e
@@ -201,6 +214,10 @@ func (e *Executor) Execute(ctx context.Context, shutdownCheck func() bool, cance
 
 	if setupErr == nil {
 		for _, entry := range planner.Plan(e.claim.Steps) {
+			if e.stepInterrupted || errors.Is(e.runCtx.Err(), context.DeadlineExceeded) {
+				results = append(results, e.skippedResult(entry, "job interrupted"))
+				continue
+			}
 			if shutdownCheck() || cancelCheck() || errors.Is(e.runCtx.Err(), context.Canceled) {
 				shuttingDown = true
 				note := "runner shutting down"
@@ -230,7 +247,7 @@ func (e *Executor) Execute(ctx context.Context, shutdownCheck func() bool, cance
 	switch {
 	case requeueCheck() && (shuttingDown || e.stoppedForRequeue || errors.Is(e.runCtx.Err(), context.Canceled)):
 		return StatusRequeue, results
-	case shuttingDown || cancelCheck() || errors.Is(e.runCtx.Err(), context.Canceled):
+	case shuttingDown || (!e.cfg.RequeueOnShutdown && shutdownCheck()) || cancelCheck() || errors.Is(e.runCtx.Err(), context.Canceled):
 		return StatusCanceled, results
 	case failed:
 		return StatusFailed, results
@@ -352,6 +369,9 @@ func (e *Executor) setupContainers() error {
 	for i, svc := range ex.SecondaryImages {
 		name, args := e.serviceRunArgs(svc, i)
 		e.logf("[forge-ci] starting service %s (%s)", name, svc.Image)
+		// Register before starting: a detached container can start even if
+		// its docker client is interrupted before returning success.
+		e.services = append(e.services, name)
 		res, err := runStream(e.runCtx, args, e.streamLog)
 		if err != nil {
 			return fmt.Errorf("service %s failed to start: %w", name, err)
@@ -359,7 +379,6 @@ func (e *Executor) setupContainers() error {
 		if res.exitCode != 0 {
 			return fmt.Errorf("service %s failed to start (exit %d)", name, res.exitCode)
 		}
-		e.services = append(e.services, name)
 	}
 
 	e.logf("[forge-ci] starting primary container %s (%s)", e.container, ex.Image)

@@ -5,6 +5,7 @@ require "zlib"
 require "digest"
 require "fileutils"
 require "tmpdir"
+require "tempfile"
 
 # Public endpoints behind the one-line runner install on the Runners page:
 #   GET /install-runner   the install script, with this control plane's URL
@@ -65,8 +66,8 @@ class RunnerInstallController < ActionController::Base
   # never loaded whole (the Go binaries are far too big for that).
   def self.build_tarball(root, dest)
     FileUtils.mkdir_p(File.dirname(dest))
-    tmp = "#{dest}.tmp.#{Process.pid}"
-    File.open(tmp, "wb") do |file|
+    Tempfile.create([File.basename(dest), ".tmp"], File.dirname(dest)) do |file|
+      file.binmode
       gz = Zlib::GzipWriter.new(file)
       Gem::Package::TarWriter.new(gz) do |tar|
         RUNNER_DIRS.each do |dir|
@@ -83,12 +84,10 @@ class RunnerInstallController < ActionController::Base
           end
         end
       end
-      gz.close
+      gz.finish
+      file.flush
+      File.rename(file.path, dest)
     end
-    File.rename(tmp, dest)
-  rescue StandardError
-    File.delete(tmp) if File.exist?(tmp)
-    raise
   end
 
   private

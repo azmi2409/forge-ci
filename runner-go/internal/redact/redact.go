@@ -49,6 +49,29 @@ func (r *Redactor) Redact(s string) string {
 	return s
 }
 
+// PrefixCut moves a raw emission boundary before any secret it would split.
+// Retaining raw bytes lets a later write complete a longer overlapping secret.
+func (r *Redactor) PrefixCut(s string, cut int) int {
+	for {
+		previous := cut
+		for _, secret := range r.secrets {
+			if secret == "" {
+				continue
+			}
+			start := cut - len(secret) + 1
+			if start < 0 {
+				start = 0
+			}
+			if at := strings.Index(s[start:], secret); at >= 0 && start+at < cut {
+				cut = start + at
+			}
+		}
+		if cut == previous {
+			return cut
+		}
+	}
+}
+
 // MaxSecretLen is the length of the longest secret, or 0 with none. The
 // streaming layer retains up to MaxSecretLen()-1 bytes so a secret split
 // across read boundaries is still caught.

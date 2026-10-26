@@ -3,8 +3,8 @@
 //
 // Correctness rules (frozen in runner-go/CONTRACT.md):
 //
-//   - Raw bytes are buffered un-redacted; the WHOLE buffer is redacted
-//     before any of it is emitted, so a secret is never caught half-split.
+//   - Raw bytes are retained until safe to emit; boundaries never split a
+//     complete secret. Only the extracted raw prefix is redacted.
 //   - Emission stops maxSecretLen-1 bytes short of the live tail unless the
 //     stream is closing: a secret split across read boundaries is completed
 //     by later bytes while it sits in the retained suffix. Periodic timer
@@ -172,17 +172,13 @@ func (s *Streamer) flush(force bool) {
 	}
 }
 
-// extractLocked redacts the whole buffer, then splits emittable bytes into
+// extractLocked selects a safe raw prefix, redacts it, then splits it into
 // chunkSize pieces, assigning seqs in order. Caller holds s.mu.
 func (s *Streamer) extractLocked(force bool) []chunk {
 	if len(s.buffer) == 0 {
 		return nil
 	}
-	// Redact complete occurrences everywhere (including any crossing the
-	// seam into the retained tail). Incomplete occurrences (extending past
-	// the buffer end) can only begin within the last maxSecretLen-1 bytes,
-	// which stay unemitted.
-	buf := []byte(s.redactor.Redact(string(s.buffer)))
+	buf := s.buffer
 
 	keep := s.redactor.MaxSecretLen()
 	if keep > 0 {
@@ -196,11 +192,15 @@ func (s *Streamer) extractLocked(force bool) []chunk {
 		return nil
 	}
 	if !force {
+		cut = s.redactor.PrefixCut(string(buf), cut)
 		cut = backUpToUTF8Boundary(buf, cut)
 		if cut <= 0 {
 			return nil
 		}
 	}
+	buf = []byte(s.redactor.Redact(string(s.buffer[:cut])))
+	s.buffer = append(s.buffer[:0], s.buffer[cut:]...)
+	cut = len(buf)
 
 	var chunks []chunk
 	for start := 0; start < cut; {
@@ -226,7 +226,7 @@ func (s *Streamer) extractLocked(force bool) []chunk {
 		chunks = append(chunks, chunk{seq: s.seq - 1, bytes: sanitize(string(buf[start:end]))})
 		start = end
 	}
-	s.buffer = append(s.buffer[:0], buf[cut:]...)
+	// The unredacted suffix remains buffered for subsequent writes.
 	return chunks
 }
 

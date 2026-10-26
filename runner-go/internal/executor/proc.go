@@ -90,6 +90,9 @@ func startStreamed(argv []string, onOutput func([]byte)) (*exec.Cmd, <-chan erro
 // runStream runs argv to completion, killing the process group when ctx is
 // done. Returns the exit code (or -1 with errInterrupted).
 func runStream(ctx context.Context, argv []string, onOutput func([]byte)) (runResult, error) {
+	if ctx.Err() != nil {
+		return runResult{exitCode: -1}, errInterrupted
+	}
 	cmd, waitCh, err := startStreamed(argv, onOutput)
 	if err != nil {
 		return runResult{exitCode: -1}, err

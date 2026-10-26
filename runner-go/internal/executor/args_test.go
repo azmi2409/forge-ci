@@ -143,14 +143,11 @@ func TestServiceRunArgs(t *testing.T) {
 		Environment: payload.Env{"POSTGRES_PASSWORD": "ci-secret"},
 		Command:     strPtr("postgres"),
 	}, 0)
-	if name != "db" {
+	if name != "forge-ci-svc-0-"+e.suffix {
 		t.Fatalf("name %q", name)
 	}
-	want := []string{"docker", "run", "-d", "--name", "db", "--network", "forge-ci-net-7-" + e.suffix,
-		"--network-alias", "db", "-e", "POSTGRES_PASSWORD=ci-secret", "--entrypoint" /*absent*/}
-	_ = want
 	joined := strings.Join(args, " ")
-	for _, frag := range []string{"--name db", "--network-alias db", "-e POSTGRES_PASSWORD=ci-secret", "postgres:16", "/bin/sh -c postgres"} {
+	for _, frag := range []string{"--name " + name, "--network-alias db", "-e POSTGRES_PASSWORD=ci-secret", "postgres:16", "/bin/sh -c postgres"} {
 		if !strings.Contains(joined, frag) {
 			t.Errorf("missing %q in %s", frag, joined)
 		}

@@ -93,3 +93,16 @@ func TestDockerAvailable(t *testing.T) {
 		t.Fatal("missing docker should be unavailable")
 	}
 }
+
+func TestRunStreamCanceledContextDoesNotStartProcess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	marker := filepath.Join(t.TempDir(), "started")
+	_, err := runStream(ctx, []string{"sh", "-c", "touch " + shellQuote(marker)}, func([]byte) {})
+	if err != errInterrupted {
+		t.Fatalf("canceled invocation error=%v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("canceled invocation started: %v", err)
+	}
+}

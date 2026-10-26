@@ -181,10 +181,11 @@ func refWithoutHost(ref string) string {
 // serviceRunArgs returns (name, argv) for a service container.
 func (e *Executor) serviceRunArgs(svc payload.ServiceImage, index int) (string, []string) {
 	name := fmt.Sprintf("forge-ci-svc-%d-%s", index, e.suffix)
+	alias := name
 	if svc.Name != nil && *svc.Name != "" {
-		name = *svc.Name
+		alias = *svc.Name
 	}
-	args := []string{e.cfg.DockerBin, "run", "-d", "--name", name, "--network", e.network, "--network-alias", name}
+	args := []string{e.cfg.DockerBin, "run", "-d", "--name", name, "--network", e.network, "--network-alias", alias}
 	args = append(args, envArgs(svc.Environment)...)
 	if svc.Entrypoint != nil && *svc.Entrypoint != "" {
 		args = append(args, "--entrypoint", *svc.Entrypoint)

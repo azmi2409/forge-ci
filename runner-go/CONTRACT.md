@@ -152,10 +152,18 @@ tarball then the manifest; attach reads the manifest then extracts each root tar
   Non-`run` steps follow on_success semantics.
 - Exit codes: step killed for silence (`no_output_timeout`, default 600s) or job deadline
   (default 3600s) → `124`; stopped for cancellation/shutdown → `130`.
+- Interruption removes the primary container before the active step returns,
+  killing its descendants and detached background steps. All remaining steps,
+  including `on_fail` and `always`, are logged as skipped (`job interrupted`)
+  because their container is no longer available. Silence/deadline interruption
+  fails the job; ordinary command failures still allow `on_fail`/`always` steps.
+  Ordinary TERM finishes the active step and reports canceled even if it was the
+  final step; requeue shutdown interrupts instead.
 - Skipped steps report `exit_code: 0` with identical start/finish timestamps.
 - Durations parse `30s`/`10m`/`1h`/bare seconds; unparseable → step/config default.
-- Secrets redacted from logs: every env value (plus checkout token and build-cache
-  password) ≥ `REDACT_MIN_LENGTH` (default 8) chars, longest-first exact substring →
+- Secrets redacted from logs: every job, step, and service env value (including
+  shadowed values, plus checkout token and build-cache password)
+  ≥ `REDACT_MIN_LENGTH` (default 8) chars, longest-first exact substring →
   `[REDACTED]` — including values split across streamed read boundaries.
 - Output bytes that are invalid UTF-8 are replaced with U+FFFD at chunk emission
   (before JSON encoding); valid multi-byte characters are never split across chunks.

@@ -127,6 +127,12 @@ func (e *Executor) executeRun(step *payload.Step) int {
 // the job deadline stop it (124). Ordinary shutdown does NOT interrupt —
 // the in-flight step finishes (matching the Ruby runner).
 func (e *Executor) streamStep(argv []string, noOutputTimeout float64) int {
+	if e.runCtx.Err() != nil {
+		if e.runCtx.Err() == context.Canceled {
+			return cancelExit
+		}
+		return timeoutExit
+	}
 	cmd, waitCh, err := startStreamed(argv, e.streamLog)
 	if err != nil {
 		e.logf("[forge-ci] ERROR: %v", err)
@@ -153,6 +159,16 @@ func (e *Executor) streamStep(argv []string, noOutputTimeout float64) int {
 		}
 	}
 
+	noOutputExpired := noOutputTimeout > 0 && time.Since(e.streamer.LastWrite()) > time.Duration(noOutputTimeout*float64(time.Second))
+	// Killing docker exec only disconnects the client. Stop the primary
+	// container too, including detached steps and surviving descendants.
+	e.stepInterrupted = true
+	stopCtx, cancel := context.WithTimeout(context.Background(), cleanupBudget)
+	defer cancel()
+	if res, err := runStream(stopCtx, []string{e.cfg.DockerBin, "rm", "-f", e.container}, func([]byte) {}); err != nil || res.exitCode != 0 {
+		e.logf("[forge-ci] WARNING: interrupted container removal failed (exit %d): %v", res.exitCode, err)
+	}
+
 	terminateGroup(cmd.Process.Pid)
 	<-waitCh // reap; output copier bounded by WaitDelay
 
@@ -169,7 +185,7 @@ func (e *Executor) streamStep(argv []string, noOutputTimeout float64) int {
 	case e.runCtx.Err() == context.Canceled:
 		e.logf("[forge-ci] step stopped: job context canceled")
 		return cancelExit
-	case noOutputTimeout > 0 && time.Since(e.streamer.LastWrite()) > time.Duration(noOutputTimeout*float64(time.Second)):
+	case noOutputExpired:
 		e.logf("[forge-ci] step killed: no output for %ds (no_output_timeout)", int(noOutputTimeout))
 		return timeoutExit
 	default:

@@ -27,6 +27,13 @@ separately.
   when jobs omit an override. Serialize log delivery, synchronize output
   activity tracking, and preserve UTF-8 across reads. Runner upgrades stage
   dependencies before stopping and restore the previous installation on failure.
+- Make concurrent runner archive downloads safe with unique staging files.
+  Preserve overlapping secrets across log reads, isolate service container
+  names per job, and stop container-side work after interrupted steps. Fix
+  lifecycle CI synchronization and cancellation during the final step.
+  Interrupted steps remove the primary container before returning; remaining
+  steps, including `on_fail`/`always`, are skipped because that container is
+  no longer safe to reuse. Redact step and service environment secrets too.
 - `forge-ci login [--url URL]` / `forge-ci logout`: OAuth sign-in for the
   CLI. The browser opens at the server, you sign in with your web-UI
   account, and the token (authorization-code + PKCE, stored per server in

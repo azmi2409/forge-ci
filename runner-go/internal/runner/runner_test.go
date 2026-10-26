@@ -37,7 +37,11 @@ type fakeRunnerCP struct {
 	// idleUpcoming is the upcoming count returned with ErrIdle (default 0).
 	idleUpcoming int
 	// heartbeatLatency makes heartbeats slow to test finalization races.
-	heartbeatLatency time.Duration
+	heartbeatLatency  time.Duration
+	heartbeatHook     func()
+	heartbeatOnce     sync.Once
+	heartbeatDone     chan struct{}
+	heartbeatDoneOnce sync.Once
 
 	// releaseErr, when set, is returned by Release.
 	releaseErr error
@@ -96,8 +100,25 @@ func (f *fakeRunnerCP) Start(ctx context.Context, jobID int64) error {
 }
 
 func (f *fakeRunnerCP) Heartbeat(ctx context.Context, jobID int64) (*api.HeartbeatReply, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	f.heartbeatOnce.Do(func() {
+		if f.heartbeatHook != nil {
+			f.heartbeatHook()
+		}
+	})
+	if f.heartbeatDone != nil {
+		defer f.heartbeatDoneOnce.Do(func() { close(f.heartbeatDone) })
+	}
 	if f.heartbeatLatency > 0 {
-		time.Sleep(f.heartbeatLatency)
+		timer := time.NewTimer(f.heartbeatLatency)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -230,7 +251,9 @@ func runOnce(t *testing.T, r *Runner, f *fakeRunnerCP, jobIDs ...int64) {
 }
 
 func TestJobLifecycleSuccess(t *testing.T) {
-	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{mustClaim(t, 101, "true"), nil}}
+	command, _, unblock := gatedCommand(t)
+	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{mustClaim(t, 101, command)}}
+	f.heartbeatHook = unblock
 	r := New(runnerCfg(t), f)
 	runOnce(t, r, f, 101)
 
@@ -288,7 +311,8 @@ func TestShutdownAfterClaimBeforeStart(t *testing.T) {
 // Race 4: release succeeds server-side but the response is lost — the job
 // must not continue locally and the fallback reports canceled.
 func TestReleaseFailureFallsBackToCanceled(t *testing.T) {
-	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{mustClaim(t, 103, "true")}, releaseErr: errors.New("connection reset")}
+	command, entered, _ := gatedCommand(t)
+	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{mustClaim(t, 103, command)}, releaseErr: errors.New("connection reset")}
 	cfg := runnerCfg(t)
 	cfg.RequeueOnShutdown = true
 	r := New(cfg, f)
@@ -300,7 +324,7 @@ func TestReleaseFailureFallsBackToCanceled(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() { done <- r.Run(context.Background()) }()
-	time.Sleep(50 * time.Millisecond)
+	waitForFile(t, entered)
 	r.sigCh <- syscall.SIGTERM // exercise production signal consumption
 
 	select {
@@ -323,7 +347,9 @@ func TestReleaseFailureFallsBackToCanceled(t *testing.T) {
 
 // Race 3: server cancel races successful completion — complete fires once.
 func TestServerCancelRacingCompletion(t *testing.T) {
-	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{mustClaim(t, 104, "true")}, heartbeatStatus: "canceled"}
+	command, entered, _ := gatedCommand(t)
+	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{mustClaim(t, 104, command)}, heartbeatStatus: "canceled"}
+	f.heartbeatHook = func() { waitForFile(t, entered) }
 	cfg := runnerCfg(t)
 	cfg.DockerBin = fakeDockerBin(t)
 	r := New(cfg, f)
@@ -340,17 +366,25 @@ func TestServerCancelRacingCompletion(t *testing.T) {
 
 // Race 5: heartbeat in flight during finalization must not delay it.
 func TestHeartbeatInFlightDuringFinalization(t *testing.T) {
+	command, _, unblock := gatedCommand(t)
 	f := &fakeRunnerCP{
 		t:                t,
-		claims:           []*payload.Claim{mustClaim(t, 105, "true")},
+		claims:           []*payload.Claim{mustClaim(t, 105, command)},
 		heartbeatLatency: 3 * time.Second,
+		heartbeatDone:    make(chan struct{}),
 	}
+	f.heartbeatHook = unblock
 	cfg := runnerCfg(t)
 	cfg.DockerBin = fakeDockerBin(t)
 	r := New(cfg, f)
 
 	start := time.Now()
 	runOnce(t, r, f, 105)
+	select {
+	case <-f.heartbeatDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat did not stop after finalization")
+	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Fatalf("finalization waited on the slow heartbeat: %v", elapsed)
 	}
@@ -362,8 +396,9 @@ func TestHeartbeatInFlightDuringFinalization(t *testing.T) {
 // Ordinary TERM: the in-flight step finishes, remaining steps are skipped,
 // the job is reported canceled (the executor's shutdownCheck path).
 func TestOrdinaryShutdownFinishesStep(t *testing.T) {
+	command, entered, unblock := gatedCommand(t)
 	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{
-		mustClaim(t, 106, "echo one; sleep 1; echo two"),
+		mustClaim(t, 106, command),
 	}}
 	f.claims = append(f.claims, mustClaim(t, 107, "true"))
 	cfg := runnerCfg(t)
@@ -373,16 +408,14 @@ func TestOrdinaryShutdownFinishesStep(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- r.Run(context.Background()) }()
 
-	// Signal once the first job is running.
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if f.hasStarted(106) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	time.Sleep(200 * time.Millisecond) // let the step get going
+	waitForFile(t, entered)
 	r.sigCh <- syscall.SIGTERM
+	select {
+	case <-r.shutdownDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown signal not consumed")
+	}
+	unblock()
 
 	select {
 	case err := <-done:
@@ -471,4 +504,39 @@ func fakeDockerBin(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// gatedCommand holds a real shell step until the test releases it.
+func gatedCommand(t *testing.T) (string, string, func()) {
+	t.Helper()
+	dir := t.TempDir()
+	entered, gate := filepath.Join(dir, "entered"), filepath.Join(dir, "gate")
+	command := fmt.Sprintf("touch %q; while [ ! -f %q ]; do sleep 0.01; done", entered, gate)
+	var once sync.Once
+	return command, entered, func() {
+		once.Do(func() {
+			if err := os.WriteFile(gate, nil, 0o600); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		select {
+		case <-tick.C:
+		case <-deadline.C:
+			t.Errorf("step did not reach %s", path)
+			return
+		}
+	}
 }

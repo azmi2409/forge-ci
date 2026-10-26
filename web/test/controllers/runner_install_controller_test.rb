@@ -120,6 +120,31 @@ class RunnerInstallControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "concurrent archive builders publish a complete runner archive" do
+    Dir.mktmpdir do |root|
+      FileUtils.mkdir_p("#{root}/bin")
+      content = Random.new(1).bytes(512 * 1024)
+      File.binwrite("#{root}/bin/runner", content)
+      dest = "#{root}/runner.tar.gz"
+      gate = Queue.new
+      builders = 8.times.map do
+        Thread.new do
+          gate.pop
+          RunnerInstallController.build_tarball(root, dest)
+        end
+      end
+      builders.each { gate << true }
+      builders.each(&:value)
+      Zlib::GzipReader.open(dest) do |gz|
+        Gem::Package::TarReader.new(gz) do |tar|
+          tar.each do |entry|
+            assert_equal content, entry.read if entry.full_name == "bin/runner"
+          end
+        end
+      end
+    end
+  end
+
   private
 
   def assert_previous_installation(root)
