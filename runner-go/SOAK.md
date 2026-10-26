@@ -52,12 +52,14 @@ Ruby; `--implementation=go` is opt-in.
 
 ## Installer gates
 
-- [ ] Fresh install (apt path) with `--implementation=go`
-- [ ] Fresh install (dnf/yum path) with `--implementation=go`
-- [ ] Upgrade over an existing Ruby runner (binary replaced, env preserved,
-      single service)
-- [ ] Failed upgrade (corrupt download) leaves the old runner running
-- [ ] Rollback: `--implementation=ruby` reinstall restores service
+- [ ] Fresh install (apt path) with `--implementation go`
+- [ ] Fresh install (dnf/yum path) with `--implementation go`
+- [ ] Upgrade over an existing Ruby runner (single service; previous tree
+      retained at `/opt/forge-ci-runner.old`)
+- [ ] Failed download (including buildx) leaves the old runner running
+- [ ] Failed activation restores the previous tree, unit, env, and running service
+- [ ] Installer reports success only after `systemctl is-active` succeeds
+- [ ] Rollback: `--implementation ruby` reinstall restores service
 - [ ] Unsupported architecture rejected before anything is touched
 - [ ] Compose image (Go runner container) drives the host daemon end to end
 
@@ -65,6 +67,10 @@ Ruby; `--implementation=go` is opt-in.
 
 When every box is ticked for a full week of staging + production Spot-class
 traffic: flip the installer default (stage 4), watch a week, then remove the
-Ruby runner (stage 5). Rollback at any point before stage 5 is
-`--implementation=ruby` — the previous binary and env file are preserved by
-the installer.
+Ruby runner (stage 5). Before stage 5, rollback is a reinstall with
+`--implementation ruby`. Successful
+upgrades retain the previous installation at `/opt/forge-ci-runner.old`, with
+configuration backups at `/etc/forge-ci-runner.env.bak` and
+`/etc/systemd/system/forge-ci-runner.service.bak`. Failed activation automatically
+restores the previous installation and configuration and restarts it if it was
+running before the upgrade.

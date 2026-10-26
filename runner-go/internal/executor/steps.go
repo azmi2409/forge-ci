@@ -166,6 +166,9 @@ func (e *Executor) streamStep(argv []string, noOutputTimeout float64) int {
 		e.stoppedForRequeue = true
 		e.mu.Unlock()
 		return cancelExit
+	case e.runCtx.Err() == context.Canceled:
+		e.logf("[forge-ci] step stopped: job context canceled")
+		return cancelExit
 	case noOutputTimeout > 0 && time.Since(e.streamer.LastWrite()) > time.Duration(noOutputTimeout*float64(time.Second)):
 		e.logf("[forge-ci] step killed: no output for %ds (no_output_timeout)", int(noOutputTimeout))
 		return timeoutExit

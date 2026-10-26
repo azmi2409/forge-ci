@@ -2,6 +2,7 @@
 
 require "test_helper"
 require "rubygems/package"
+require "open3"
 
 class RunnerInstallControllerTest < ActionDispatch::IntegrationTest
   test "the install script is public and points at this control plane" do
@@ -58,6 +59,48 @@ class RunnerInstallControllerTest < ActionDispatch::IntegrationTest
     assert_includes body, "ExecStart=/usr/bin/env ruby /opt/forge-ci-runner/bin/forge-ci-runner"
   end
 
+  test "buildx failure leaves the running installation and configuration untouched" do
+    run_installer(failure: "buildx") do |root, output, status|
+      assert_not status.success?, output
+      assert_previous_installation(root)
+      assert_not_includes File.read("#{root}/systemctl.log"), "stop forge-ci-runner"
+    end
+  end
+
+  test "failed activation restores the previous runner unit and environment" do
+    %w[restart inactive].each do |failure|
+      run_installer(failure: failure) do |root, output, status|
+        assert_not status.success?, output
+        assert_previous_installation(root)
+        assert_equal "active", File.read("#{root}/active")
+        assert_includes output, "restoring the previous installation"
+        assert_not_includes output, "runner installed and started"
+      end
+    end
+  end
+
+  test "failed first activation removes new installation and configuration" do
+    run_installer(failure: "restart", installed: false) do |root, output, status|
+      assert_not status.success?, output
+      assert_not File.exist?("#{root}/opt/forge-ci-runner")
+      assert_not File.exist?("#{root}/etc/forge-ci-runner.env")
+      assert_not File.exist?("#{root}/etc/systemd/system/forge-ci-runner.service")
+      assert_not_includes output, "runner installed and started"
+    end
+  end
+
+  test "successful upgrade retains the previous installation and both configuration backups" do
+    run_installer do |root, output, status|
+      assert status.success?, output
+      assert_equal "old runner", File.read("#{root}/opt/forge-ci-runner.old/bin/forge-ci-runner")
+      assert_equal "old environment", File.read("#{root}/etc/forge-ci-runner.env.bak")
+      assert_equal "old unit", File.read("#{root}/etc/systemd/system/forge-ci-runner.service.bak")
+      assert_includes File.read("#{root}/etc/systemd/system/forge-ci-runner.service"), "Description=ForgeCI runner (Go)"
+      assert_equal "active", File.read("#{root}/active")
+      assert_includes output, "runner installed and started"
+    end
+  end
+
   test "the runner tarball has the runner code with its executable bits" do
     get "/runner.tar.gz"
     assert_response :ok
@@ -74,6 +117,75 @@ class RunnerInstallControllerTest < ActionDispatch::IntegrationTest
     if entries.key?("bin/SHA256SUMS")
       assert entries.key?("bin/forge-ci-runner-linux-amd64")
       assert entries.key?("bin/forge-ci-runner-linux-arm64")
+    end
+  end
+
+  private
+
+  def assert_previous_installation(root)
+    assert_equal "old runner", File.read("#{root}/opt/forge-ci-runner/bin/forge-ci-runner")
+    assert_equal "old environment", File.read("#{root}/etc/forge-ci-runner.env")
+    assert_equal "old unit", File.read("#{root}/etc/systemd/system/forge-ci-runner.service")
+  end
+
+  def run_installer(failure: "", installed: true)
+    get "/install-runner"
+    Dir.mktmpdir("installer") do |root|
+      FileUtils.mkdir_p(["#{root}/commands", "#{root}/opt/forge-ci-runner/bin", "#{root}/etc/systemd/system"])
+      if installed
+        File.write("#{root}/opt/forge-ci-runner/bin/forge-ci-runner", "old runner")
+        File.write("#{root}/etc/forge-ci-runner.env", "old environment")
+        File.write("#{root}/etc/systemd/system/forge-ci-runner.service", "old unit")
+      else
+        FileUtils.rm_rf("#{root}/opt/forge-ci-runner")
+      end
+      File.write("#{root}/active", installed ? "active" : "inactive")
+      commands = {
+        "id" => "echo 0",
+        "uname" => "echo x86_64",
+        "docker" => "exit 0",
+        "sha256sum" => "exit 0",
+        "curl" => <<~'SH',
+          case "$*" in
+            *buildx*)
+              [ "$FAILURE" != buildx ] || exit 1
+              while [ "$1" != -o ]; do shift; done
+              printf '#!/bin/sh\nexit 0\n' > "$2"
+              ;;
+            *) echo archive ;;
+          esac
+        SH
+        "tar" => <<~'SH',
+          cat >/dev/null
+          mkdir -p "$3/bin"
+          printf '#!/bin/sh\necho test-version\n' > "$3/bin/forge-ci-runner-linux-amd64"
+        SH
+        "systemctl" => <<~'SH'
+          echo "$*" >> "$STUB_ROOT/systemctl.log"
+          case "$1 $2" in
+            "is-active "*) [ "$(cat "$STUB_ROOT/active")" = active ] ;;
+            "stop forge-ci-runner") printf inactive > "$STUB_ROOT/active" ;;
+            "restart forge-ci-runner")
+              if [ ! -f "$STUB_ROOT/activation-attempted" ]; then
+                touch "$STUB_ROOT/activation-attempted"
+                [ "$FAILURE" != restart ] || exit 1
+                [ "$FAILURE" != inactive ] || exit 0
+              fi
+              printf active > "$STUB_ROOT/active"
+              ;;
+          esac
+        SH
+      }
+      commands.each do |name, body|
+        path = "#{root}/commands/#{name}"
+        File.write(path, "#!/bin/sh\n#{body}\n")
+        File.chmod(0o755, path)
+      end
+      script = response.body.gsub("/opt/forge-ci-runner", "#{root}/opt/forge-ci-runner").gsub("/etc/", "#{root}/etc/")
+      File.write("#{root}/install.sh", script)
+      output, status = Open3.capture2e({ "PATH" => "#{root}/commands:#{ENV.fetch('PATH')}", "STUB_ROOT" => root, "FAILURE" => failure },
+        "sh", "#{root}/install.sh", "--token", "new-token", "--implementation", "go", "--allow-docker")
+      yield root, output, status
     end
   end
 end

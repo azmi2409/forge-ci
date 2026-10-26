@@ -60,6 +60,8 @@ type Runner struct {
 
 	shuttingDown   atomic.Bool // stopClaiming lifetime
 	shutdownSignal string
+	shutdownMu     sync.Mutex
+	shutdownDone   chan struct{}
 
 	// execCancel interrupts the current job's execution (interruptExecution
 	// lifetime): set by server-cancel or requeue shutdown.
@@ -74,10 +76,11 @@ type Runner struct {
 
 func New(cfg *config.Config, client ControlPlane) *Runner {
 	return &Runner{
-		cfg:     cfg,
-		client:  client,
-		backoff: backoff.New(cfg.PollInterval, cfg.MaxIdleInterval),
-		sigCh:   make(chan os.Signal, 1),
+		cfg:          cfg,
+		client:       client,
+		backoff:      backoff.New(cfg.PollInterval, cfg.MaxIdleInterval),
+		sigCh:        make(chan os.Signal, 1),
+		shutdownDone: make(chan struct{}),
 	}
 }
 
@@ -86,18 +89,27 @@ func New(cfg *config.Config, client ControlPlane) *Runner {
 func (r *Runner) Run(ctx context.Context) error {
 	signal.Notify(r.sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(r.sigCh)
+	watchDone := make(chan struct{})
+	watchStopped := make(chan struct{})
+	go func() {
+		defer close(watchStopped)
+		select {
+		case sig := <-r.sigCh:
+			r.beginShutdown(sig)
+		case <-ctx.Done():
+			r.beginShutdown(nil)
+		case <-watchDone:
+		}
+	}()
+	defer func() { close(watchDone); <-watchStopped }()
 
 	r.logf("forge-ci-runner %s starting (%s, resource_class=%s)",
 		version.Version, r.cfg.ControlPlaneURL, orDefault(r.cfg.ResourceClass, "any"))
 	r.idleSince.Store(time.Now().UnixNano())
 
 	for {
-		select {
-		case sig := <-r.sigCh:
-			r.beginShutdown(sig)
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			r.beginShutdown(nil)
-		default:
 		}
 		if r.shuttingDown.Load() {
 			break
@@ -153,12 +165,16 @@ func (r *Runner) Run(ctx context.Context) error {
 // in-flight step finish; with REQUEUE_ON_SHUTDOWN the executor interrupts
 // (its requeueCheck sees shuttingDown) and the job is released.
 func (r *Runner) beginShutdown(sig os.Signal) {
-	if r.shuttingDown.Swap(true) {
+	r.shutdownMu.Lock()
+	defer r.shutdownMu.Unlock()
+	if r.shuttingDown.Load() {
 		return
 	}
 	if sig != nil {
 		r.shutdownSignal = sig.String()
 	}
+	r.shuttingDown.Store(true)
+	close(r.shutdownDone)
 	plan := "finishing current job"
 	if r.cfg.RequeueOnShutdown {
 		plan = "releasing current job"
@@ -198,8 +214,7 @@ func (r *Runner) pause(d time.Duration) {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
-	case sig := <-r.sigCh:
-		r.beginShutdown(sig)
+	case <-r.shutdownDone:
 	case <-timer.C:
 	}
 }
@@ -226,6 +241,9 @@ func (r *Runner) runJob(ctx context.Context, claim *payload.Claim) {
 	// server-cancel or requeue shutdown, deadline-bounded by the executor.
 	execCtx, cancelExec := context.WithCancel(context.Background())
 	r.execCancel.Store(cancelExec)
+	if r.shuttingDown.Load() && r.cfg.RequeueOnShutdown {
+		cancelExec()
+	}
 	defer cancelExec()
 
 	heartbeatDone := make(chan struct{})
@@ -241,6 +259,7 @@ func (r *Runner) runJob(ctx context.Context, claim *payload.Claim) {
 
 	exec := executor.New(r.cfg, r.client, claim)
 	status, stepResults := exec.Execute(
+		execCtx,
 		func() bool { return r.shuttingDown.Load() }, // shutdownCheck
 		func() bool {
 			select {
@@ -261,6 +280,9 @@ func (r *Runner) runJob(ctx context.Context, claim *payload.Claim) {
 		// irrelevant now; don't wait for it.
 	}
 
+	finalCtx, cancelFinal := context.WithTimeout(context.Background(), api.JSONDeadline())
+	defer cancelFinal()
+	ctx = finalCtx
 	switch status {
 	case executor.StatusRequeue:
 		r.releaseJob(ctx, claim.ID, stepResults)
@@ -316,7 +338,9 @@ func (r *Runner) heartbeatLoop(ctx context.Context, jobID int64, done chan struc
 // but a refused or unreachable release must fall back to reporting the job
 // canceled so the server does not wait on a runner that left.
 func (r *Runner) releaseJob(ctx context.Context, jobID int64, stepResults []api.StepResult) {
+	r.shutdownMu.Lock()
 	reason := fmt.Sprintf("runner shutting down (%s)", orDefault(r.shutdownSignal, "signal"))
+	r.shutdownMu.Unlock()
 	err := r.client.Release(ctx, jobID, reason)
 	if err == nil {
 		r.logf("job #%d released back to the queue", jobID)

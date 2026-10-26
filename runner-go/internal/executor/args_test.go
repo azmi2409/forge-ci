@@ -96,6 +96,27 @@ func TestPrimaryRunArgs(t *testing.T) {
 	}
 }
 
+func TestOmittedWorkingDirectory(t *testing.T) {
+	e := testExecutor(t, `{"id": 1, "name": "default-workdir", "executor": {"image": "alpine"}, "steps": [{"type": "run", "command": "pwd"}]}`)
+	primary, err := e.primaryRunArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, args := range map[string][]string{
+		"primary": primary,
+		"step":    e.execArgs(&e.claim.Steps[0], false),
+	} {
+		for _, arg := range args {
+			if arg == "-w" {
+				t.Errorf("%s overrides image working directory: %v", name, args)
+			}
+		}
+	}
+	if got, present := e.jobEnvironment()["CIRCLE_WORKING_DIRECTORY"]; present {
+		t.Errorf("CIRCLE_WORKING_DIRECTORY unexpectedly set to %q", got)
+	}
+}
+
 func TestPrimaryRunArgsMissingImage(t *testing.T) {
 	e := testExecutor(t, `{"id": 1, "name": "x", "steps": []}`)
 	if _, err := e.primaryRunArgs(); err == nil {

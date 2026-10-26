@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/azmi2409/forge-ci/runner-go/internal/redact"
 )
@@ -305,11 +306,16 @@ func TestBoundedBackpressure(t *testing.T) {
 }
 
 type gatedPoster struct {
-	inner ChunkPoster
-	gate  chan struct{}
+	inner   ChunkPoster
+	gate    chan struct{}
+	entered chan struct{}
+	once    sync.Once
 }
 
 func (g *gatedPoster) PostLogChunk(ctx context.Context, jobID int64, seq int64, chunk string) error {
+	if g.entered != nil {
+		g.once.Do(func() { close(g.entered) })
+	}
 	<-g.gate
 	return g.inner.PostLogChunk(ctx, jobID, seq, chunk)
 }
@@ -331,7 +337,12 @@ func TestConcurrentWritersNoLoss(t *testing.T) {
 	wg.Wait()
 	s.Close()
 
-	out, _ := p.all()
+	out, seqs := p.all()
+	for i, seq := range seqs {
+		if seq != int64(i) {
+			t.Fatalf("seq %d at position %d", seq, i)
+		}
+	}
 	for w := 0; w < 8; w++ {
 		for i := 0; i < 50; i++ {
 			if !strings.Contains(out, fmt.Sprintf("w%d-i%03d\n", w, i)) {
@@ -404,5 +415,105 @@ func TestTimerFlushEmitsLiveWithoutTail(t *testing.T) {
 	out, _ := p.all()
 	if out != "abcd\n" {
 		t.Fatalf("close must emit the tail: %q", out)
+	}
+}
+
+func TestConcurrentEnqueueKeepsSequenceOrder(t *testing.T) {
+	p := newFakePoster()
+	gate := make(chan struct{})
+	poster := &gatedPoster{inner: p, gate: gate, entered: make(chan struct{})}
+	// A tiny queue forces producers to block midway through their batches.
+	s := &Streamer{
+		client: poster, redactor: redact.New(nil, 8), chunkSize: 1,
+		outbound: make(chan chunk, 1), done: make(chan struct{}), closeDone: make(chan struct{}),
+	}
+	go s.sender()
+	var writers sync.WaitGroup
+	writers.Add(1)
+	go func() {
+		defer writers.Done()
+		s.Write([]byte(strings.Repeat("a", 128)))
+	}()
+	<-poster.entered
+	writers.Add(2)
+	go func() {
+		defer writers.Done()
+		s.Write([]byte(strings.Repeat("b", 128)))
+	}()
+	go func() {
+		defer writers.Done()
+		s.flush(false)
+	}()
+	close(gate)
+	writers.Wait()
+	s.Close()
+	out, seqs := p.all()
+	if out != strings.Repeat("a", 128)+strings.Repeat("b", 128) {
+		t.Fatalf("concurrent batches reordered: %q", out)
+	}
+	for i, seq := range seqs {
+		if seq != int64(i) {
+			t.Fatalf("seq %d at position %d", seq, i)
+		}
+	}
+}
+
+func TestLastWriteConcurrentReads(t *testing.T) {
+	s := New(newFakePoster(), 1, redact.New(nil, 8), 4096, 0)
+	defer s.Close()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			s.Write([]byte("x"))
+		}
+	}()
+	previous := s.LastWrite()
+	for range 100 {
+		current := s.LastWrite()
+		if current.Before(previous) {
+			t.Fatal("LastWrite moved backwards")
+		}
+		previous = current
+	}
+	wg.Wait()
+}
+
+func TestUTF8SplitAcrossWritesAndFlushes(t *testing.T) {
+	for _, runeText := range []string{"é", "界", "😀"} {
+		for split := 1; split < len(runeText); split++ {
+			for _, chunkSize := range []int{1, 2, 3, 8} {
+				for _, secret := range []string{"", "xy", "xyz"} {
+					t.Run(fmt.Sprintf("%s/split%d/chunk%d/keep%d", runeText, split, chunkSize, len(secret)), func(t *testing.T) {
+						p := newFakePoster()
+						values := map[string]string{}
+						if secret != "" {
+							values["S"] = secret
+						}
+						s := New(p, 1, redact.New(values, 1), chunkSize, 0)
+						s.Write([]byte("a" + runeText[:split]))
+						s.flush(false)
+						s.Write([]byte(runeText[split:] + "z"))
+						s.Close()
+						out, _ := p.all()
+						if out != "a"+runeText+"z" || !utf8.ValidString(out) {
+							t.Fatalf("split rune corrupted: %q", out)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestCloseSanitizesIncompleteUTF8(t *testing.T) {
+	p := newFakePoster()
+	s := New(p, 1, redact.New(nil, 8), 1, 0)
+	s.Write([]byte{'o', 'k', 0xF0, 0x9F})
+	s.Close()
+	out, _ := p.all()
+	if out != "ok\uFFFD" {
+		t.Fatalf("incomplete final rune not sanitized: %q", out)
 	}
 }

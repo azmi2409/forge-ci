@@ -145,7 +145,7 @@ func testCfg(dockerBin string) *config.Config {
 
 // runLifecycle executes a job against a fake docker. Mode:
 //   - "": no interrupt
-//   - "cancel": e.Cancel() fires ~200ms after setup completed (mid-step)
+//   - "cancel": caller context canceled ~200ms after setup completed (mid-step)
 //   - "requeue": the shutdown check fires ~200ms after setup (mid-step);
 //     requires cfg.RequeueOnShutdown
 func runLifecycle(t *testing.T, claimJSON string, cfg *config.Config, mode string) (string, []api.StepResult, *fakeCP, string, *Executor) {
@@ -162,6 +162,8 @@ func runLifecycle(t *testing.T, claimJSON string, cfg *config.Config, mode strin
 	}
 	cp := &fakeCP{}
 	e := New(cfg, cp, claim)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	cancelCheck := func() bool { return false }
 	shutdownCheck := func() bool { return false }
@@ -170,9 +172,9 @@ func runLifecycle(t *testing.T, claimJSON string, cfg *config.Config, mode strin
 		go func() {
 			waitDockerLog(t, dockerLogPath, "circleci_cli.sh")
 			time.Sleep(200 * time.Millisecond)
-			e.Cancel()
+			cancel()
 		}()
-		cancelCheck = func() bool { return e.runCtx.Err() != nil }
+		cancelCheck = func() bool { return ctx.Err() != nil }
 	case "requeue":
 		triggered := make(chan struct{})
 		go func() {
@@ -190,7 +192,7 @@ func runLifecycle(t *testing.T, claimJSON string, cfg *config.Config, mode strin
 		}
 	}
 
-	status, results := e.Execute(shutdownCheck, cancelCheck)
+	status, results := e.Execute(ctx, shutdownCheck, cancelCheck)
 	return status, results, cp, dockerLogPath, e
 }
 
@@ -423,6 +425,64 @@ func TestExecuteSetupFailureStillCleans(t *testing.T) {
 	dockerLog := readDockerLog(t, dockerLogPath)
 	if !strings.Contains(dockerLog, "network rm") {
 		t.Errorf("cleanup must run even after setup failure: %s", dockerLog)
+	}
+}
+
+func TestExecuteSetupCancellation(t *testing.T) {
+	for _, beforeExecute := range []bool{true, false} {
+		for _, requeue := range []bool{false, true} {
+			t.Run(fmt.Sprintf("before=%t/requeue=%t", beforeExecute, requeue), func(t *testing.T) {
+				dir := t.TempDir()
+				bin := filepath.Join(dir, "docker")
+				logPath := filepath.Join(dir, "calls.log")
+				script := fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %q\nif [ \"$1\" = pull ]; then exec sleep 30; fi\n", logPath)
+				if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				claim, err := payload.ParseClaim([]byte(`{"id": 30, "name": "setup-cancel", "executor": {"image": "busybox"}, "steps": [{"type": "run", "command": "echo must-not-run"}]}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				cfg := testCfg(bin)
+				cfg.RequeueOnShutdown = requeue
+				e := New(cfg, &fakeCP{}, claim)
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				if beforeExecute {
+					cancel()
+				}
+				done := make(chan string, 1)
+				go func() {
+					status, _ := e.Execute(ctx,
+						func() bool { return requeue && ctx.Err() != nil },
+						func() bool { return !requeue && ctx.Err() != nil })
+					done <- status
+				}()
+				if !beforeExecute {
+					waitDockerLog(t, logPath, "pull busybox")
+					cancel()
+				}
+				select {
+				case status := <-done:
+					want := StatusCanceled
+					if requeue {
+						want = StatusRequeue
+					}
+					if status != want {
+						t.Errorf("status = %s; want %s", status, want)
+					}
+				case <-time.After(10 * time.Second):
+					t.Fatal("setup cancellation did not stop pull")
+				}
+				log := readDockerLog(t, logPath)
+				if strings.Contains(log, "network create") || strings.Contains(log, "exec ") {
+					t.Errorf("setup continued after cancellation: %s", log)
+				}
+				if !strings.Contains(log, "rm -f ") || !strings.Contains(log, "network rm ") {
+					t.Errorf("cleanup missing after cancellation: %s", log)
+				}
+			})
+		}
 	}
 }
 

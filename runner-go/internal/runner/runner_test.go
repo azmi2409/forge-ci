@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -253,9 +254,15 @@ func TestShutdownAfterClaimBeforeStart(t *testing.T) {
 	cfg := runnerCfg(t)
 	r := New(cfg, f)
 
-	// Deterministic race: the shutdown lands between the claim response and
-	// the runner's Start call (the hook runs inside Claim).
-	f.claimHook = func() { r.beginShutdown(nil) }
+	// Deliver through the production signal channel while Claim is in flight.
+	f.claimHook = func() {
+		r.sigCh <- syscall.SIGTERM
+		select {
+		case <-r.shutdownDone:
+		case <-time.After(2 * time.Second):
+			t.Error("shutdown signal was not consumed during claim")
+		}
+	}
 
 	done := make(chan error, 1)
 	go func() { done <- r.Run(context.Background()) }()
@@ -294,7 +301,7 @@ func TestReleaseFailureFallsBackToCanceled(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- r.Run(context.Background()) }()
 	time.Sleep(50 * time.Millisecond)
-	r.beginShutdown(nil) // requeue shutdown: interrupts + releases
+	r.sigCh <- syscall.SIGTERM // exercise production signal consumption
 
 	select {
 	case err := <-done:
@@ -375,7 +382,7 @@ func TestOrdinaryShutdownFinishesStep(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	time.Sleep(200 * time.Millisecond) // let the step get going
-	r.beginShutdown(nil)
+	r.sigCh <- syscall.SIGTERM
 
 	select {
 	case err := <-done:

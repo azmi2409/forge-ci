@@ -31,6 +31,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -68,13 +69,12 @@ type Streamer struct {
 	buffer            []byte
 	seq               int64
 	closed            bool
-	lastWriteUnixNano int64
+	lastWriteUnixNano atomic.Int64
 
 	outbound  chan chunk // bounded; single sender drains it in order
 	done      chan struct{}
 	closeDone chan struct{}
 	flusher   *time.Ticker
-	wg        sync.WaitGroup // in-flight producers (blocked or sending)
 	closeOnce sync.Once
 }
 
@@ -96,7 +96,7 @@ func New(client ChunkPoster, jobID int64, redactor *redact.Redactor, chunkSize i
 		done:       make(chan struct{}),
 		closeDone:  make(chan struct{}),
 	}
-	s.lastWriteUnixNano = time.Now().UnixNano()
+	s.lastWriteUnixNano.Store(time.Now().UnixNano())
 	go s.sender()
 	return s
 }
@@ -138,17 +138,12 @@ func (s *Streamer) Write(p []byte) (int, error) {
 		s.mu.Unlock()
 		return len(p), nil // post-close writes are dropped, not fatal
 	}
-	// Counted under the lock so Close's wg.Wait cannot slip past a producer
-	// that has passed the closed-check.
-	s.wg.Add(1)
 	s.buffer = append(s.buffer, p...)
-	s.lastWriteUnixNano = time.Now().UnixNano()
+	s.lastWriteUnixNano.Store(time.Now().UnixNano())
 	chunks := s.extractLocked(false)
-	s.mu.Unlock()
-
-	defer s.wg.Done()
-	// Blocking send: backpressure. The sender drains until Close's done,
-	// which is only closed after every counted producer has landed.
+	defer s.mu.Unlock()
+	// Keep extraction and enqueueing under one lock so concurrent writers
+	// and timer flushes cannot enqueue later sequence numbers first.
 	for _, c := range chunks {
 		s.outbound <- c
 	}
@@ -158,7 +153,7 @@ func (s *Streamer) Write(p []byte) (int, error) {
 // LastWrite is when output was last received — the executor's no-output
 // watchdog consumes this (activity = bytes received, not newlines).
 func (s *Streamer) LastWrite() time.Time {
-	return time.Unix(0, s.lastWriteUnixNano)
+	return time.Unix(0, s.lastWriteUnixNano.Load())
 }
 
 // flush extracts and enqueues emittable bytes. With force (Close) everything
@@ -170,11 +165,8 @@ func (s *Streamer) flush(force bool) {
 		s.mu.Unlock()
 		return
 	}
-	s.wg.Add(1)
+	defer s.mu.Unlock()
 	chunks := s.extractLocked(force)
-	s.mu.Unlock()
-
-	defer s.wg.Done()
 	for _, c := range chunks {
 		s.outbound <- c
 	}
@@ -219,6 +211,15 @@ func (s *Streamer) extractLocked(force bool) []chunk {
 			// Split whole chunks on UTF-8 boundaries too.
 			if backed := backUpToUTF8Boundary(buf, end); backed > start {
 				end = backed
+			} else {
+				// A rune can exceed chunkSize; emit it whole instead.
+				// At Close an incomplete final rune is sanitized as one tail.
+				if !utf8.FullRune(buf[start:cut]) {
+					end = cut
+				} else {
+					_, size := utf8.DecodeRune(buf[start:cut])
+					end = start + size
+				}
 			}
 		}
 		s.seq++
@@ -229,16 +230,21 @@ func (s *Streamer) extractLocked(force bool) []chunk {
 	return chunks
 }
 
-// backUpToUTF8Boundary moves cut left over UTF-8 continuation bytes so the
-// emitted prefix ends on a character boundary.
+// backUpToUTF8Boundary retains an incomplete rune, including at the live
+// buffer's end. Invalid bytes are complete and sanitized when emitted.
 func backUpToUTF8Boundary(buf []byte, cut int) int {
-	for cut > 0 && cut < len(buf) && isUTF8Continuation(buf[cut]) {
-		cut--
+	start := cut
+	for start > 0 && cut-start < utf8.UTFMax-1 && !utf8.RuneStart(buf[start-1]) {
+		start--
+	}
+	if start > 0 {
+		start--
+		if !utf8.FullRune(buf[start:cut]) {
+			return start
+		}
 	}
 	return cut
 }
-
-func isUTF8Continuation(b byte) bool { return b&0xC0 == 0x80 }
 
 // sanitize replaces invalid UTF-8 with U+FFFD before JSON encoding.
 func sanitize(s string) string {
@@ -299,9 +305,6 @@ func (s *Streamer) Close() {
 		// Final tail. The sender is still running (done is open), so this
 		// blocking send always drains.
 		s.flush(true)
-		// Let producers with in-flight sends finish enqueueing; after
-		// closed=true no NEW chunks are extracted.
-		s.wg.Wait()
 		// Only now tell the sender to exit after draining.
 		close(s.done)
 		<-s.closeDone

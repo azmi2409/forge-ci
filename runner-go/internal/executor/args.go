@@ -206,7 +206,9 @@ func (e *Executor) execArgs(step *payload.Step, detached bool) []string {
 	if detached {
 		args = append(args, "-d")
 	}
-	args = append(args, "-w", e.workdir())
+	if wd := payload.ExpandWorkdir(e.claim.WorkingDirectory); wd != "" {
+		args = append(args, "-w", wd)
+	}
 	args = append(args, envArgs(e.jobEnvironment())...)
 	args = append(args, envArgs(step.Environment)...)
 	args = append(args, e.container)

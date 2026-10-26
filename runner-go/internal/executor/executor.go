@@ -79,8 +79,7 @@ type Executor struct {
 	defaultShell string
 	// runCtx bounds every docker operation of this job: it carries the job
 	// deadline and is canceled on interrupt (requeue shutdown / cancel).
-	runCtx    context.Context
-	runCancel context.CancelFunc
+	runCtx context.Context
 
 	services          []string
 	buildxCreated     bool
@@ -135,26 +134,29 @@ func New(cfg *config.Config, client ControlPlane, claim *payload.Claim) *Executo
 	return e
 }
 
-// Execute runs the job. shutdownCheck is the runner's "shutting down" flag
+// Execute runs the job under the caller's cancellation context. The caller
+// cancels it for server cancellation or requeue shutdown, not ordinary TERM.
+//
+// shutdownCheck is the runner's "shutting down" flag
 // (finish the in-flight step, skip the rest — ordinary TERM), cancelCheck is
 // the control plane's cancel flag. With requeue-on-shutdown configured, a
 // shutdown instead interrupts the current step; an unfinished job returns
 // StatusRequeue (the runner releases it rather than completing).
-func (e *Executor) Execute(shutdownCheck func() bool, cancelCheck func() bool) (string, []api.StepResult) {
+func (e *Executor) Execute(ctx context.Context, shutdownCheck func() bool, cancelCheck func() bool) (string, []api.StepResult) {
 	requeueCheck := func() bool { return false }
 	if e.cfg.RequeueOnShutdown {
 		requeueCheck = shutdownCheck
 	}
 
-	// Job deadline bounds everything, including pulls and transfers.
-	base := context.Background()
+	// Job deadline bounds everything, including pulls and transfers. The caller
+	// owns cancellation, so even cancellation before Execute reaches setup sticks.
+	base := ctx
 	if e.cfg.JobTimeout > 0 {
 		var cancel context.CancelFunc
 		base, cancel = context.WithTimeout(base, time.Duration(e.cfg.JobTimeout*float64(time.Second)))
 		defer cancel()
 	}
-	e.runCtx, e.runCancel = context.WithCancel(base)
-	defer e.runCancel()
+	e.runCtx = base
 
 	e.cancelCheck = cancelCheck
 	e.requeueCheck = func() bool { return false }
@@ -180,6 +182,9 @@ func (e *Executor) Execute(shutdownCheck func() bool, cancelCheck func() bool) (
 	}
 
 	setupErr := func() error {
+		if err := e.runCtx.Err(); err != nil {
+			return err
+		}
 		if err := e.checkRemoteDocker(); err != nil {
 			return err
 		}
@@ -196,7 +201,7 @@ func (e *Executor) Execute(shutdownCheck func() bool, cancelCheck func() bool) (
 
 	if setupErr == nil {
 		for _, entry := range planner.Plan(e.claim.Steps) {
-			if shutdownCheck() || cancelCheck() {
+			if shutdownCheck() || cancelCheck() || errors.Is(e.runCtx.Err(), context.Canceled) {
 				shuttingDown = true
 				note := "runner shutting down"
 				if cancelCheck() {
@@ -223,9 +228,9 @@ func (e *Executor) Execute(shutdownCheck func() bool, cancelCheck func() bool) (
 	}
 
 	switch {
-	case requeueCheck() && (shuttingDown || e.stoppedForRequeue):
+	case requeueCheck() && (shuttingDown || e.stoppedForRequeue || errors.Is(e.runCtx.Err(), context.Canceled)):
 		return StatusRequeue, results
-	case shuttingDown || cancelCheck():
+	case shuttingDown || cancelCheck() || errors.Is(e.runCtx.Err(), context.Canceled):
 		return StatusCanceled, results
 	case failed:
 		return StatusFailed, results
@@ -237,14 +242,6 @@ func (e *Executor) Execute(shutdownCheck func() bool, cancelCheck func() bool) (
 // Streamer exposes the job's log stream (the runner drains it before
 // reporting terminal status).
 func (e *Executor) Streamer() *logstream.Streamer { return e.streamer }
-
-// Cancel interrupts in-flight docker operations (setup, transfers, and the
-// current step's watchdog). Used by the runner for server-driven cancels.
-func (e *Executor) Cancel() {
-	if e.runCancel != nil {
-		e.runCancel()
-	}
-}
 
 func (e *Executor) cancelCheckFired() bool {
 	return e.cancelCheck != nil && e.cancelCheck()

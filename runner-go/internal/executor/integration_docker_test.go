@@ -25,10 +25,9 @@ func TestDockerIntegration(t *testing.T) {
 	// Use a tiny image; pull happens as part of the job.
 	claimJSON := `{
       "id": 9001, "name": "integration",
-      "working_directory": "~/project",
       "executor": {"image": "busybox:latest"},
       "steps": [
-        {"type": "run", "name": "hello", "command": "echo hello-from-container; echo token=$INTEGRATION_SECRET"},
+        {"type": "run", "name": "hello", "command": "test \"$PWD\" = / && test -z \"${CIRCLE_WORKING_DIRECTORY+x}\" && echo hello-from-container && echo token=$INTEGRATION_SECRET"},
         {"type": "run", "name": "fail", "command": "false"},
         {"type": "run", "name": "rescue", "command": "echo rescue-ran", "when": "on_fail"}
       ],
@@ -46,7 +45,7 @@ func TestDockerIntegration(t *testing.T) {
 	cp := &fakeCP{}
 	e := New(cfg, cp, claim)
 	start := time.Now()
-	status, results := e.Execute(func() bool { return false }, func() bool { return false })
+	status, results := e.Execute(context.Background(), func() bool { return false }, func() bool { return false })
 	t.Logf("job took %s", time.Since(start))
 
 	if status != StatusFailed {

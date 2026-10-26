@@ -22,6 +22,11 @@ separately.
   lifetimes (stop claiming / interrupt execution / heartbeats / final
   reporting). Runner contract, fixtures, and test-coverage matrix:
   `runner-go/CONTRACT.md`, `runner-go/TESTING.md`.
+- Fix Go runner shutdown signal handling during active jobs and propagate
+  cancellation through setup and transfers. Preserve image working directories
+  when jobs omit an override. Serialize log delivery, synchronize output
+  activity tracking, and preserve UTF-8 across reads. Runner upgrades stage
+  dependencies before stopping and restore the previous installation on failure.
 - `forge-ci login [--url URL]` / `forge-ci logout`: OAuth sign-in for the
   CLI. The browser opens at the server, you sign in with your web-UI
   account, and the token (authorization-code + PKCE, stored per server in

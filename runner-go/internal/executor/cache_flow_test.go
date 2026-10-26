@@ -125,7 +125,7 @@ func TestCacheSaveRestoreFlow(t *testing.T) {
       {"type": "restore_cache", "keys": ["gems-{{ checksum \"Gemfile.lock\" }}", "gems-"]}
     ]`)
 	e := New(cfg, cp, claim)
-	status, results := e.Execute(func() bool { return false }, func() bool { return false })
+	status, results := e.Execute(context.Background(), func() bool { return false }, func() bool { return false })
 
 	if status != StatusSuccess {
 		t.Fatalf("status %s; log unavailable", status)
@@ -153,7 +153,7 @@ func TestCacheRestoreMissIsClean(t *testing.T) {
       {"type": "restore_cache", "keys": ["nothing-matches"]}
     ]`)
 	e := New(cfg, cp, claim)
-	status, results := e.Execute(func() bool { return false }, func() bool { return false })
+	status, results := e.Execute(context.Background(), func() bool { return false }, func() bool { return false })
 	if status != StatusSuccess {
 		t.Fatalf("status %s", status)
 	}
@@ -175,7 +175,7 @@ func TestWorkspacePersistAttachFlow(t *testing.T) {
       {"type": "attach_workspace", "at": "attached"}
     ]`)
 	e := New(cfg, cp, claim)
-	status, _ := e.Execute(func() bool { return false }, func() bool { return false })
+	status, _ := e.Execute(context.Background(), func() bool { return false }, func() bool { return false })
 	if status != StatusSuccess {
 		t.Fatalf("status %s", status)
 	}
@@ -203,7 +203,7 @@ func TestStoreArtifactsFlow(t *testing.T) {
       {"type": "store_artifacts", "path": "tmp/capybara", "destination": "screenshots"}
     ]`)
 	e := New(cfg, cp, claim)
-	status, _ := e.Execute(func() bool { return false }, func() bool { return false })
+	status, _ := e.Execute(context.Background(), func() bool { return false }, func() bool { return false })
 	if status != StatusSuccess {
 		t.Fatalf("status %s", status)
 	}
