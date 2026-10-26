@@ -49,8 +49,14 @@ Write standard CircleCI 2.1. These are the differences that matter:
   `CIRCLE_REPOSITORY_URL`, `CIRCLE_PROJECT_USERNAME`,
   `CIRCLE_PROJECT_REPONAME`. Others such as `CIRCLE_PR_NUMBER` and
   `CIRCLE_TAG` are not set.
-- **Timeouts:** a step is killed after 10 minutes without output (raise it
-  per step with `no_output_timeout:`), a job after 1 hour.
+- **Timeouts:** both runners default to 10 minutes without output per foreground
+  `run` step (`no_output_timeout:` overrides it) and 1 hour per job;
+  `STEP_NO_OUTPUT_TIMEOUT` / `JOB_TIMEOUT` set defaults, `0` disables. Both
+  report timeout exit code 124. Go enforces a job-wide execution deadline and
+  removes the primary container immediately on interruption, skipping remaining
+  steps **including `on_fail`/`always`**. Ruby checks deadlines while streaming
+  commands and removes containers at cleanup. Normal command failure still
+  runs failure handlers. Never rely on timeout-triggered handlers for cleanup.
 - **Secrets** belong in the project's environment variables (the project
   page in the ForgeCI dashboard) or a context, never in the config. Every job
   gets them; a job's own `environment:` wins over project variables and
@@ -71,6 +77,29 @@ Resource classes are routing labels, not a security boundary. Fork caches
 are separate from trusted caches; fork checkout is anonymous GitHub-only,
 without installation tokens or operator-configured repository URLs. Private
 fork checkout can fail; never work around it by injecting privileged tokens.
+
+### Runner implementation changes
+
+Ruby remains the default runner; PR #28's `runner-go` branch adds opt-in Go
+with `--implementation go` (space-separated). It does not replace the Ruby/Rails
+control plane and needs no DB migration solely for the runner switch. Use the
+[migration runbook](https://github.com/azmi2409/forge-ci/blob/runner-go/DEPLOY.md#ruby-to-go-runner-migration);
+do not assume the branch is merged, deployed, or its soak complete.
+
+Start with an idle, non-deploy canary. Never run both implementations under one
+runner identity, weaken fork/trusted host isolation, or change resource-class
+routing to bypass trust rules. The installer rewrites the env file and unit:
+preserve **all original flags** (class, idle shutdown, ASG, Docker access,
+requeue) and securely restore custom env settings, including timeouts,
+Docker/buildx, and token-file configuration. Never print tokens, env contents,
+or credentials into logs or commits; keep independent protected backups before
+reinstalling. Rollback uses `--implementation ruby` with original settings,
+or restores the matching `/opt/forge-ci-runner.old`,
+`/etc/forge-ci-runner.env.bak`, and
+`/etc/systemd/system/forge-ci-runner.service.bak` together, followed by
+systemd reload/restart. Later installs replace those backups. Follow the runbook
+rather than inventing a partial restore. Never enable requeue or automatic
+deployment retries merely to test migration.
 
 ### Splitting tests
 

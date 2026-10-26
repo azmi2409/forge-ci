@@ -2,11 +2,20 @@
 
 require "rubygems/package"
 require "zlib"
+require "digest"
+require "fileutils"
+require "tmpdir"
+require "tempfile"
 
 # Public endpoints behind the one-line runner install on the Runners page:
 #   GET /install-runner   the install script, with this control plane's URL
-#   GET /runner.tar.gz    the runner code (bin/ and lib/) this server ships
+#   GET /runner.tar.gz    the runner code this server ships
 # Neither holds a secret: the token is passed on the admin's command line.
+#
+# The archive is built once per content fingerprint to a file under tmp and
+# streamed from disk (send_file): it now carries multi-architecture Go
+# binaries (~15MB each), so holding it in memory per Rails process — as the
+# first implementation did — is no longer acceptable.
 class RunnerInstallController < ActionController::Base
   RUNNER_DIRS = %w[bin lib aws].freeze
 
@@ -16,36 +25,69 @@ class RunnerInstallController < ActionController::Base
   end
 
   def tarball
-    send_data self.class.tarball, filename: "forge-ci-runner.tar.gz", type: "application/gzip"
-  end
-
-  # Built once per process: the runner code doesn't change while it runs.
-  def self.tarball
-    @tarball ||= build_tarball(runner_path)
+    send_file self.class.tarball_path,
+              filename: "forge-ci-runner.tar.gz",
+              type: "application/gzip"
   end
 
   def self.runner_path
     ENV["FORGE_CI_RUNNER_PATH"].presence || Rails.root.join("..", "runner").expand_path.to_s
   end
 
-  def self.build_tarball(root)
-    io = StringIO.new("".b)
-    gz = Zlib::GzipWriter.new(io)
-    Gem::Package::TarWriter.new(gz) do |tar|
-      RUNNER_DIRS.each do |dir|
-        Dir.glob(File.join(root, dir, "**", "*")).sort.each do |path|
-          rel = path.delete_prefix("#{root}/")
-          mode = File.stat(path).mode & 0o777
-          if File.directory?(path)
-            tar.mkdir(rel, mode)
-          else
-            tar.add_file_simple(rel, mode, File.size(path)) { |f| f.write(File.binread(path)) }
+  # Path of the cached archive for the current content, building it if the
+  # fingerprint changed or the file was cleaned up. The fingerprint covers
+  # relative paths, sizes and mtimes, so an edit invalidates the cache.
+  def self.tarball_path
+    fingerprint = dir_fingerprint(runner_path)
+    path = File.join(archive_dir, "forge-ci-runner-#{fingerprint}.tar.gz")
+    build_tarball(runner_path, path) unless File.exist?(path)
+    path
+  end
+
+  def self.archive_dir
+    File.join(Dir.tmpdir, "forge-ci-runner-archives")
+  end
+
+  def self.dir_fingerprint(root)
+    digest = Digest::SHA256.new
+    RUNNER_DIRS.each do |dir|
+      Dir.glob(File.join(root, dir, "**", "*"), File::FNM_DOTMATCH).sort.each do |path|
+        next if File.directory?(path)
+
+        rel = path.delete_prefix("#{root}/")
+        stat = File.stat(path)
+        digest.update("#{rel}:#{stat.size}:#{stat.mtime.to_i}\n")
+      end
+    end
+    digest.hexdigest[0, 16]
+  end
+
+  # Streams the archive to disk; file contents are piped through in chunks,
+  # never loaded whole (the Go binaries are far too big for that).
+  def self.build_tarball(root, dest)
+    FileUtils.mkdir_p(File.dirname(dest))
+    Tempfile.create([File.basename(dest), ".tmp"], File.dirname(dest)) do |file|
+      file.binmode
+      gz = Zlib::GzipWriter.new(file)
+      Gem::Package::TarWriter.new(gz) do |tar|
+        RUNNER_DIRS.each do |dir|
+          Dir.glob(File.join(root, dir, "**", "*")).sort.each do |path|
+            rel = path.delete_prefix("#{root}/")
+            mode = File.stat(path).mode & 0o777
+            if File.directory?(path)
+              tar.mkdir(rel, mode)
+            else
+              tar.add_file_simple(rel, mode, File.size(path)) do |f|
+                IO.copy_stream(path, f)
+              end
+            end
           end
         end
       end
+      gz.finish
+      file.flush
+      File.rename(file.path, dest)
     end
-    gz.close
-    io.string
   end
 
   private

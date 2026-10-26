@@ -235,6 +235,12 @@ only** — values are never echoed back:
 
 ## Runner contract (checklist for runner implementations)
 
+Both Ruby (`runner/`, default) and Go (`runner-go/`, opt-in) implement this
+contract; switching implementation does not change endpoints or token trust
+pools. See [migration](../DEPLOY.md#ruby-to-go-runner-migration) and the
+[frozen Go contract](../runner-go/CONTRACT.md). Go interrupted steps remove
+the primary container before final reporting; remaining steps are skipped.
+
 1. Generate a token: `RunnerToken.generate!(name: "worker-1", resource_class: "medium")`
    and store the raw token on the runner host.
 2. Poll `POST /api/v1/runner/jobs/claim` every **5–10s** when idle

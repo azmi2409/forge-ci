@@ -6,6 +6,37 @@ separately.
 
 ## Unreleased
 
+- The Docker runner is now also available as a **static Go binary** (stdlib
+  only, no Ruby on runner hosts). The web image cross-compiles
+  `linux/amd64` + `linux/arm64` and ships the binaries in `/runner.tar.gz`
+  next to the Ruby runner; the install command accepts `--implementation=go`
+  (Ruby stays the default until the soak gates pass). The installer verifies
+  the binary's SHA256, installs atomically, keeps the previous binary for
+  rollback, and never runs both implementations under the same runner
+  identity. The Go runner keeps the exact control-plane contract and
+  behavior, with deliberate hardening: secrets split across streamed
+  log-read boundaries are still redacted (retained-tail emission), log
+  chunks post strictly in seq order with bounded queueing, every subprocess
+  gets its own process group (TERM → grace → KILL) and job-level
+  interruption explicitly removes containers, and shutdown separates four
+  lifetimes (stop claiming / interrupt execution / heartbeats / final
+  reporting). Runner contract, fixtures, and test-coverage matrix:
+  `runner-go/CONTRACT.md`, `runner-go/TESTING.md`.
+- Fix Go runner shutdown signal handling during active jobs and propagate
+  cancellation through setup and transfers. Preserve image working directories
+  when jobs omit an override. Serialize log delivery, synchronize output
+  activity tracking, and preserve UTF-8 across reads. Runner upgrades stage
+  dependencies before stopping and restore the previous installation on failure.
+- Make concurrent runner archive downloads safe with unique staging files.
+  Preserve overlapping secrets across log reads, isolate service container
+  names per job, and stop container-side work after interrupted steps. Fix
+  lifecycle CI synchronization and cancellation during the final step.
+  Interrupted steps remove the primary container before returning; remaining
+  steps, including `on_fail`/`always`, are skipped because that container is
+  no longer safe to reuse. Redact step and service environment secrets too.
+- Document Ruby-to-Go runner migration, configuration preservation, canary
+  validation and rollback across deployment, architecture, contributor and
+  agent guidance. Ruby remains the installer default pending soak gates.
 - `forge-ci login [--url URL]` / `forge-ci logout`: OAuth sign-in for the
   CLI. The browser opens at the server, you sign in with your web-UI
   account, and the token (authorization-code + PKCE, stored per server in

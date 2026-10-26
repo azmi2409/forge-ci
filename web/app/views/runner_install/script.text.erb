@@ -19,9 +19,16 @@
 #                        put it back in the queue instead of canceling it: for
 #                        Spot/preemptible runners running retry-safe jobs;
 #                        never on deploy runners
+#   --implementation go|ruby
+#                        the runner implementation to install (default: ruby).
+#                        "go" installs the static binary (no Ruby needed) from
+#                        the same archive; it replaces — never runs alongside —
+#                        a ruby runner with the same identity. Rollback:
+#                        reinstall with --implementation ruby (the previous
+#                        installation is kept at /opt/forge-ci-runner.old).
 #
-# Skips installing packages when Docker and Ruby are already there (a baked
-# image), and waits for the dpkg lock (e.g. unattended-upgrades at boot).
+# Skips installing packages when they are already there (a baked image), and
+# waits for the dpkg lock (e.g. unattended-upgrades at boot).
 #
 # Supports Debian/Ubuntu (apt) and Amazon Linux/Fedora/RHEL (dnf or yum).
 set -eu
@@ -33,6 +40,7 @@ IDLE_SHUTDOWN_AFTER=0
 ASG=0
 ALLOW_DOCKER=0
 REQUEUE_ON_SHUTDOWN=0
+IMPL="ruby"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -42,32 +50,69 @@ while [ $# -gt 0 ]; do
     --asg) ASG=1; shift ;;
     --allow-docker) ALLOW_DOCKER=1; shift ;;
     --requeue-on-shutdown) REQUEUE_ON_SHUTDOWN=1; shift ;;
-    *) echo "forge-ci: unknown option $1" >&2; exit 2 ;;
+    --implementation) IMPL="${2:?--implementation needs go or ruby}"; shift 2 ;;
+    *) echo "forge-ci: unknown option $1" >&2; exit 1 ;;
   esac
 done
 
 say() { echo "forge-ci: $*"; }
 [ "$(id -u)" -eq 0 ] || { echo "forge-ci: run as root (pipe to 'sudo sh')" >&2; exit 1; }
 [ -n "$TOKEN" ] || { echo "forge-ci: --token is required (copy the command from the Runners page)" >&2; exit 2; }
+case "$IMPL" in
+  go|ruby) ;;
+  *) echo "forge-ci: --implementation must be go or ruby (got $IMPL)" >&2; exit 2 ;;
+esac
 command -v systemctl >/dev/null || { echo "forge-ci: systemd is required" >&2; exit 1; }
 
-if command -v docker >/dev/null && command -v ruby >/dev/null; then
-  say "Docker and Ruby already installed"
-elif command -v apt-get >/dev/null; then
-  say "installing Docker and Ruby"
-  export DEBIAN_FRONTEND=noninteractive
-  # At boot unattended-upgrades may hold the dpkg lock: wait for it.
-  apt-get -o DPkg::Lock::Timeout=300 update -q
-  apt-get -o DPkg::Lock::Timeout=300 install -y -q docker.io ruby curl ca-certificates tar unzip
-elif command -v dnf >/dev/null; then
-  say "installing Docker and Ruby"
-  dnf install -y -q docker ruby curl tar unzip
-elif command -v yum >/dev/null; then
-  say "installing Docker and Ruby"
-  yum install -y -q docker ruby curl tar unzip
-else
-  echo "forge-ci: no apt-get, dnf or yum; install Docker and Ruby 3.0+ yourself and re-run" >&2
+# Architecture, mapped once. For the Go runner an unsupported architecture is
+# rejected BEFORE anything on this machine is touched.
+case "$(uname -m)" in
+  x86_64) go_arch=amd64 ;;
+  aarch64 | arm64) go_arch=arm64 ;;
+  *) go_arch="" ;;
+esac
+if [ "$IMPL" = "go" ] && [ -z "$go_arch" ]; then
+  echo "forge-ci: unsupported architecture $(uname -m) for the Go runner (need x86_64 or arm64)" >&2
   exit 1
+fi
+
+if [ "$IMPL" = "ruby" ]; then
+  if command -v docker >/dev/null && command -v ruby >/dev/null; then
+    say "Docker and Ruby already installed"
+  elif command -v apt-get >/dev/null; then
+    say "installing Docker and Ruby"
+    export DEBIAN_FRONTEND=noninteractive
+    # At boot unattended-upgrades may hold the dpkg lock: wait for it.
+    apt-get -o DPkg::Lock::Timeout=300 update -q
+    apt-get -o DPkg::Lock::Timeout=300 install -y -q docker.io ruby curl ca-certificates tar unzip
+  elif command -v dnf >/dev/null; then
+    say "installing Docker and Ruby"
+    dnf install -y -q docker ruby curl tar unzip
+  elif command -v yum >/dev/null; then
+    say "installing Docker and Ruby"
+    yum install -y -q docker ruby curl tar unzip
+  else
+    echo "forge-ci: no apt-get, dnf or yum; install Docker and Ruby 3.0+ yourself and re-run" >&2
+    exit 1
+  fi
+else
+  if command -v docker >/dev/null; then
+    say "Docker already installed"
+  elif command -v apt-get >/dev/null; then
+    say "installing Docker"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get -o DPkg::Lock::Timeout=300 update -q
+    apt-get -o DPkg::Lock::Timeout=300 install -y -q docker.io curl ca-certificates tar unzip
+  elif command -v dnf >/dev/null; then
+    say "installing Docker"
+    dnf install -y -q docker curl tar unzip
+  elif command -v yum >/dev/null; then
+    say "installing Docker"
+    yum install -y -q docker curl tar unzip
+  else
+    echo "forge-ci: no apt-get, dnf or yum; install Docker yourself and re-run" >&2
+    exit 1
+  fi
 fi
 systemctl enable --now docker
 
@@ -81,8 +126,28 @@ say "downloading the runner from $CONTROL_PLANE_URL"
 rm -rf /opt/forge-ci-runner.new
 mkdir -p /opt/forge-ci-runner.new
 curl -fsSL "$CONTROL_PLANE_URL/runner.tar.gz" | tar -xz -C /opt/forge-ci-runner.new
-rm -rf /opt/forge-ci-runner
-mv /opt/forge-ci-runner.new /opt/forge-ci-runner
+
+if [ "$IMPL" = "go" ]; then
+  # Verify integrity and runnability of the downloaded binary BEFORE the
+  # current installation is touched.
+  BIN_NEW="/opt/forge-ci-runner.new/bin/forge-ci-runner-linux-$go_arch"
+  if [ ! -f "$BIN_NEW" ]; then
+    echo "forge-ci: the runner archive has no binary for $go_arch — is the server new enough?" >&2
+    exit 1
+  fi
+  ( cd /opt/forge-ci-runner.new/bin && sha256sum -c --ignore-missing SHA256SUMS >/dev/null ) || {
+    echo "forge-ci: downloaded binary failed the SHA256 integrity check; aborting" >&2
+    exit 1
+  }
+  chmod 755 "$BIN_NEW"
+  "$BIN_NEW" --version >/dev/null 2>&1 || { echo "forge-ci: downloaded binary failed to run; aborting" >&2; exit 1; }
+  say "Go runner $( "$BIN_NEW" --version ) for linux/$go_arch verified"
+fi
+
+if [ "$IMPL" = "go" ]; then
+  mv "/opt/forge-ci-runner.new/bin/forge-ci-runner-linux-$go_arch" /opt/forge-ci-runner.new/bin/forge-ci-runner
+  rm -f /opt/forge-ci-runner.new/bin/forge-ci-runner-linux-*
+fi
 
 # buildx for docker_layer_caching builds (the runner copies it into job
 # images that ship without one; images with buildx skip the copy).
@@ -96,8 +161,8 @@ if [ "$ALLOW_DOCKER" -eq 1 ]; then
   if [ -n "$buildx_arch" ]; then
     say "installing buildx $BUILDX_VERSION ($buildx_arch)"
     curl -fsSL "https://github.com/docker/buildx/releases/download/$BUILDX_VERSION/buildx-$BUILDX_VERSION.linux-$buildx_arch" \
-      -o /opt/forge-ci-runner/bin/buildx
-    chmod 755 /opt/forge-ci-runner/bin/buildx
+      -o /opt/forge-ci-runner.new/bin/buildx
+    chmod 755 /opt/forge-ci-runner.new/bin/buildx
   else
     say "WARNING: no buildx build for $(uname -m); docker_layer_caching jobs will need an image with buildx"
   fi
@@ -111,13 +176,33 @@ umask 077
   [ "$IDLE_SHUTDOWN_AFTER" != "0" ] && echo "IDLE_SHUTDOWN_AFTER=$IDLE_SHUTDOWN_AFTER"
   [ "$ASG" -eq 1 ] && echo "IDLE_SHUTDOWN_COMMAND=/opt/forge-ci-runner/bin/forge-ci-asg-terminate-self"
   [ "$ALLOW_DOCKER" -eq 1 ] && echo "ALLOW_DOCKER_SOCKET=1"
-  [ "$ALLOW_DOCKER" -eq 1 ] && [ -x /opt/forge-ci-runner/bin/buildx ] && echo "BUILDX_BIN=/opt/forge-ci-runner/bin/buildx"
+  [ "$ALLOW_DOCKER" -eq 1 ] && [ -x /opt/forge-ci-runner.new/bin/buildx ] && echo "BUILDX_BIN=/opt/forge-ci-runner/bin/buildx"
   [ "$REQUEUE_ON_SHUTDOWN" -eq 1 ] && echo "REQUEUE_ON_SHUTDOWN=1"
   true
-} > /etc/forge-ci-runner.env
+} > /etc/forge-ci-runner.env.new
 umask 022
 
-cat > /etc/systemd/system/forge-ci-runner.service <<'UNIT'
+if [ "$IMPL" = "go" ]; then
+  cat > /etc/systemd/system/forge-ci-runner.service.new <<'UNIT'
+[Unit]
+Description=ForgeCI runner (Go)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/forge-ci-runner.env
+ExecStart=/opt/forge-ci-runner/bin/forge-ci-runner
+# on-failure, not always: an idle shutdown exits 0 and must stay stopped.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+else
+  cat > /etc/systemd/system/forge-ci-runner.service.new <<'UNIT'
 [Unit]
 Description=ForgeCI runner
 After=docker.service network-online.target
@@ -136,9 +221,74 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 UNIT
+fi
 
+# Keep all fallible downloads and configuration generation ahead of downtime.
+# Preserve both configuration files, including their absence on a first install.
+had_env=0
+had_unit=0
+was_running=0
+was_enabled=0
+old_moved=0
+new_installed=0
+systemctl is-active --quiet forge-ci-runner && was_running=1
+systemctl is-enabled --quiet forge-ci-runner && was_enabled=1
+rm -f /etc/forge-ci-runner.env.bak /etc/systemd/system/forge-ci-runner.service.bak
+if [ -f /etc/forge-ci-runner.env ]; then
+  cp -p /etc/forge-ci-runner.env /etc/forge-ci-runner.env.bak
+  had_env=1
+fi
+if [ -f /etc/systemd/system/forge-ci-runner.service ]; then
+  cp -p /etc/systemd/system/forge-ci-runner.service /etc/systemd/system/forge-ci-runner.service.bak
+  had_unit=1
+fi
+
+rollback() {
+  status=$?
+  trap - 0 HUP INT TERM
+  [ "$status" -ne 0 ] || return 0
+  set +e
+  say "activation failed; restoring the previous installation"
+  systemctl stop forge-ci-runner >/dev/null 2>&1
+  if [ "$new_installed" -eq 1 ]; then rm -rf /opt/forge-ci-runner; fi
+  if [ "$old_moved" -eq 1 ]; then mv /opt/forge-ci-runner.old /opt/forge-ci-runner; fi
+  if [ "$had_env" -eq 1 ]; then
+    cp -p /etc/forge-ci-runner.env.bak /etc/forge-ci-runner.env
+  else
+    rm -f /etc/forge-ci-runner.env
+  fi
+  if [ "$had_unit" -eq 1 ]; then
+    cp -p /etc/systemd/system/forge-ci-runner.service.bak /etc/systemd/system/forge-ci-runner.service
+  else
+    rm -f /etc/systemd/system/forge-ci-runner.service
+  fi
+  systemctl daemon-reload
+  if [ "$was_enabled" -eq 0 ]; then systemctl disable forge-ci-runner >/dev/null 2>&1; fi
+  if [ "$was_running" -eq 1 ]; then
+    if ! systemctl restart forge-ci-runner || ! systemctl is-active --quiet forge-ci-runner; then
+      say "ERROR: previous runner could not be restarted; inspect journalctl -u forge-ci-runner"
+    fi
+  fi
+  exit "$status"
+}
+trap rollback 0
+trap 'exit 1' HUP INT TERM
+
+# Swap only while the service is stopped: one runner identity runs at a time.
+if [ "$had_unit" -eq 1 ] || [ "$was_running" -eq 1 ]; then systemctl stop forge-ci-runner; fi
+if [ -d /opt/forge-ci-runner ]; then
+  rm -rf /opt/forge-ci-runner.old
+  mv /opt/forge-ci-runner /opt/forge-ci-runner.old
+  old_moved=1
+fi
+mv /opt/forge-ci-runner.new /opt/forge-ci-runner
+new_installed=1
+mv /etc/forge-ci-runner.env.new /etc/forge-ci-runner.env
+mv /etc/systemd/system/forge-ci-runner.service.new /etc/systemd/system/forge-ci-runner.service
 systemctl daemon-reload
-systemctl enable forge-ci-runner >/dev/null
 systemctl restart forge-ci-runner
-say "runner installed and started (resource class: ${RESOURCE_CLASS:-any})"
+systemctl is-active --quiet forge-ci-runner
+systemctl enable forge-ci-runner >/dev/null
+trap - 0 HUP INT TERM
+say "runner installed and started (implementation: $IMPL, resource class: ${RESOURCE_CLASS:-any})"
 say "watch it with: journalctl -u forge-ci-runner -f"

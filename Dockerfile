@@ -54,11 +54,30 @@ COPY runner/aws /forge-ci/runner/aws
 COPY web/Gemfile web/Gemfile.lock ./
 RUN bundle install && \
     rm -rf ~/.bundle/ "${BUNDLE_PATH}"/ruby/*/cache "${BUNDLE_PATH}"/ruby/*/bundler/gems/*/.git && \
+    # -j 1 disable parallel compilation to avoid a QEMU bug: https://github.com/rails/bootsnap/issues/495
     bundle exec bootsnap precompile -j 1 --gemfile
 
 # App code.
 COPY web/ ./
 RUN bundle exec bootsnap precompile -j 1 app/ lib/
+
+# The Go runner, cross-compiled for the runner hosts and shipped through
+# /runner.tar.gz (RunnerInstallController). CGO_ENABLED=0: a static binary,
+# no Ruby on runner hosts. The embedded shell helpers are refreshed from the
+# canonical runner/lib copies so the binary can never embed a stale fork.
+FROM golang:1.27-alpine AS runner-build
+ARG RUNNER_VERSION=dev
+COPY runner-go/ /src/runner-go/
+COPY runner/lib/forge_ci_runner/circleci_cli.sh /src/runner-go/internal/executor/scripts/circleci_cli.sh
+COPY runner/lib/forge_ci_runner/docker_build_wrapper.sh /src/runner-go/internal/executor/scripts/docker_build_wrapper.sh
+WORKDIR /src/runner-go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+      -ldflags "-s -w -X github.com/azmi2409/forge-ci/runner-go/internal/version.Version=${RUNNER_VERSION}" \
+      -o /out/forge-ci-runner-linux-amd64 ./cmd/forge-ci-runner && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath \
+      -ldflags "-s -w -X github.com/azmi2409/forge-ci/runner-go/internal/version.Version=${RUNNER_VERSION}" \
+      -o /out/forge-ci-runner-linux-arm64 ./cmd/forge-ci-runner && \
+    cd /out && sha256sum forge-ci-runner-linux-amd64 forge-ci-runner-linux-arm64 > SHA256SUMS
 
 FROM base
 
@@ -68,6 +87,8 @@ RUN groupadd --system --gid 1000 rails && \
 COPY --chown=rails:rails --from=build "${BUNDLE_PATH}" "${BUNDLE_PATH}"
 COPY --chown=rails:rails --from=build /rails /rails
 COPY --chown=rails:rails --from=build /forge-ci /forge-ci
+# Go runner binaries land in /forge-ci/runner/bin/ next to the Ruby runner.
+COPY --from=runner-build /out/ /forge-ci/runner/bin/
 
 # /rails/storage is the data volume: generated secrets, logs, caches,
 # artifacts. Created here so a fresh named volume is owned by the app user.

@@ -1,0 +1,49 @@
+{
+  "id": 1042,
+  "name": "test (3/4)",
+  "node_index": 2,
+  "parallelism": 4,
+  "working_directory": "~/app",
+  "executor": {
+    "image": "cimg/ruby:3.2",
+    "environment": { "BUNDLE_PATH": "vendor/bundle" },
+    "resource_class": "medium",
+    "entrypoint": "/bin/sh",
+    "command": "sleep infinity",
+    "secondary_images": [
+      { "image": "postgres:16", "environment": { "POSTGRES_PASSWORD": "ci" }, "name": "db" },
+      { "image": "redis:7", "name": "cache" }
+    ]
+  },
+  "steps": [
+    { "type": "checkout" },
+    { "type": "run", "name": "bundle install", "command": "bundle install", "no_output_timeout": "10m" },
+    { "type": "restore_cache", "keys": ["gems-v1-{{ checksum \"Gemfile.lock\" }}", "gems-v1-"] },
+    { "type": "save_cache", "key": "gems-v1-{{ checksum \"Gemfile.lock\" }}", "paths": ["vendor/bundle"] },
+    { "type": "run", "name": "tests", "command": "bundle exec rake", "when": "always" },
+    { "type": "store_artifacts", "path": "tmp/capybara", "destination": "screenshots" },
+    { "type": "setup_remote_docker", "layer_caching": true },
+    { "type": "run", "command": "forge-ci-build -t registry/app:sha .", "background": true },
+    { "type": "persist_to_workspace", "root": ".", "paths": ["tmp"] }
+  ],
+  "environment": {
+    "DATABASE_URL": "postgres://ci:secret-pw@db:5432/app_test",
+    "FORGE_TOKEN": "s3cr3t-token-value-0001"
+  },
+  "pipeline": { "sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", "branch": "feat/new-ui" },
+  "trusted": true,
+  "workflow_run_id": 907,
+  "project_id": 12,
+  "repository": {
+    "url": "https://github.com/azmi2409/forge-ci.git",
+    "sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+    "branch": "feat/new-ui",
+    "token": "ghs_installationToken000000000000"
+  },
+  "docker_build_cache": {
+    "registry": "123456789012.dkr.ecr.ap-southeast-3.amazonaws.com/forge-ci-cache",
+    "ref": "123456789012.dkr.ecr.ap-southeast-3.amazonaws.com/forge-ci-cache:p12-feat-new-ui",
+    "username": "AWS",
+    "password": "ecr-token-abc123def456"
+  }
+}

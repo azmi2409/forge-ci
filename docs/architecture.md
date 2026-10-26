@@ -23,7 +23,7 @@ claimed by polling runners.
          ▼
 ┌───────────────────┐
 │  Runner daemon    │  poll → claim → docker run → step exec → stream logs
-│  (Ruby, Docker)   │  → upload artifacts/cache → complete
+│  (Ruby or Go)     │  → upload artifacts/cache → complete (Docker CLI)
 └───────────────────┘
 ```
 
@@ -107,7 +107,22 @@ untrusted fork code. Compile errors still create a failed pipeline with a
 
 ## The runner (component 5)
 
-A zero-dependency Ruby daemon (`net/http`, `open3` — no gems). Per claimed job:
+Two standard-library-only daemons implement the same runner API: the default
+Ruby runner (`runner/`, `net/http` and `open3`, no gems) and the opt-in Go runner
+(`runner-go/`, no external Go modules). Go 1.27 builds static binaries for
+`linux/amd64` and `linux/arm64`; macOS is for development/tests only. Go runner
+hosts need neither Ruby nor a Go toolchain. The compiler gem and Rails control
+plane stay Ruby; switching the execution daemon changes no database schema.
+
+Select Go with the install command's `--implementation go`, not a control-plane
+or database setting. Ruby remains the default while cutover gates are pending;
+opt-in support does not establish completed production soak. Follow the
+[Ruby-to-Go migration guide](../DEPLOY.md#ruby-to-go-runner-migration) for an
+idle non-deploy canary, configuration preservation and rollback. Shared wire
+behaviour is frozen in [the Go contract](../runner-go/CONTRACT.md); implementation
+differences are documented in [the Go runner guide](../runner-go/README.md).
+
+Per claimed job:
 
 1. Pull primary + service images; create an isolated Docker network.
 2. Start service containers first (reachable by container name), then the
@@ -128,9 +143,11 @@ A zero-dependency Ruby daemon (`net/http`, `open3` — no gems). Per claimed job
 4. Stream redacted log chunks (every env value ≥ `REDACT_MIN_LENGTH` chars is
    masked — secret redaction is the runner's job; the control plane stores
    log text verbatim).
-5. Always clean up (`docker rm -f`, remove network) in `ensure` blocks —
-   even on failure or SIGTERM. On SIGTERM/SIGINT the runner finishes the
-   in-flight step, reports `canceled`, and exits without claiming more work.
+5. Always clean up containers and the network, including failures and shutdown.
+   Shutdown reports `canceled` by default; `REQUEUE_ON_SHUTDOWN` can instead
+   requeue eligible interrupted jobs (never enable it on deploy runners).
+   Go uses bounded cleanup and process-group interruption; see its documented
+   [shutdown differences](../runner-go/README.md#deliberate-differences-from-the-ruby-runner).
 
 ## Secrets model (component 8)
 

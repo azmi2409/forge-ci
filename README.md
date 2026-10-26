@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>CircleCI-compatible CI/CD you run yourself.</strong><br>
-  Your <code>.circleci/config.yml</code>, your runners, your storage. Pure Ruby, MIT licensed.
+  Your <code>.circleci/config.yml</code>, your runners, your storage. Ruby control plane, Ruby or Go runners, MIT licensed.
 </p>
 
 <p align="center">
@@ -71,6 +71,14 @@ UI, **Settings → Connect GitHub**. To run jobs on the same machine, use
 `RUNNERS=1 docker compose up -d` (or put `RUNNERS=1` in `.env`); for other
 machines, paste the command from **Settings → Runners**. For a real server (HTTPS,
 Coolify, S3, scaling to zero) see **[DEPLOY.md](DEPLOY.md)**.
+
+Ruby remains the default runner. The standard-library-only Go runner is opt-in:
+append `--implementation go` to the runner install command, following the
+[Ruby-to-Go migration guide](DEPLOY.md#ruby-to-go-runner-migration) for a safe
+canary and rollback. It builds with Go 1.27 for `linux/amd64` and `linux/arm64`;
+the static binary needs no Ruby or Go toolchain on runner hosts. The compiler
+and Rails control plane remain Ruby; switching runners does not require a
+database change.
 
 ## Use it with your repo
 
@@ -143,18 +151,21 @@ covered in [docs/agent-skills.md](docs/agent-skills.md).
 | [TODO.md](TODO.md) | What's left |
 
 The repository holds the compiler gem and CLI (root), the Rails control plane
-([`web/`](web/README.md)), the runner ([`runner/`](runner/README.md)) and the
-agent skill (`skills/`). All 8 planned components are built and tested.
+([`web/`](web/README.md)), both stdlib-only runners
+([Ruby `runner/`](runner/README.md), [Go `runner-go/`](runner-go/README.md)) and
+the agent skill (`skills/`). Go opt-in does not mean production soak or default
+cutover gates have passed.
 
 ## Contributing
 
-PRs are welcome against `main`, with all three test suites green. Start with
-[CONTRIBUTING.md](CONTRIBUTING.md).
+PRs are welcome against `main`, with the compiler, control-plane and both runner
+suites green. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for developer checks.
 
 ```sh
 rake test                                                       # compiler gem
-cd web && DATABASE_URL="sqlite3:db/test.sqlite3" bin/rails test   # control plane
-cd runner && rake test                                          # runner
+(cd web && DATABASE_URL="sqlite3:db/test.sqlite3" bin/rails test) # control plane
+(cd runner && rake test)                                       # Ruby runner
+(cd runner-go && go test -race -count=1 ./...)                   # Go runner, Go 1.27
 ```
 
 ## License

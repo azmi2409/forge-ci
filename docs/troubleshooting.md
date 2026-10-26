@@ -87,6 +87,51 @@ The runner shells out to the `docker` CLI — it must run as root or as a user
 in the `docker` group, and `docker info` must succeed (the daemon fails fast
 otherwise). Set `DOCKER_BIN` if the CLI isn't on `PATH`.
 
+## Switching a Ruby runner to Go
+
+Ruby remains the default on PR #28's `runner-go` branch. Opt in with
+`--implementation go` (not `--implementation=go`) using the
+[Ruby-to-Go migration runbook](../DEPLOY.md#ruby-to-go-runner-migration).
+The Rails control plane stays Ruby; switching runners alone needs no DB change.
+
+- **Canary safety:** switch an idle, non-deploy runner first. Keep one service
+  per identity, existing resource-class routing, and separate fork/trusted hosts.
+  Never enable requeue for deployments or retry work not known safe to repeat.
+- **Settings disappeared:** reinstall rewrites `/etc/forge-ci-runner.env` and
+  the systemd unit. Reuse all original installer flags (`--class`,
+  `--idle-shutdown`, `--asg`, `--allow-docker`, `--requeue-on-shutdown`) and
+  securely restore custom settings such as timeouts, polling, Docker/buildx,
+  checkout fallback, and token-file configuration. Do not print env files or
+  tokens into terminal recordings, tickets, or logs.
+- **Archive has no Go binary / checksum failure:** the root web image builds
+  both architectures automatically. Source-only Rails deployments must
+  [build binaries and `SHA256SUMS`](../runner-go/README.md#source-only-control-plane-deployments)
+  in the `runner/` directory selected by `FORGE_CI_RUNNER_PATH`. Do not bypass
+  checksum verification. Download/verification failures precede service swap.
+- **Activation failed:** installer attempts to restore the old tree, env,
+  unit, and previously running service. Check `systemctl is-active
+  forge-ci-runner` and inspect `journalctl -u forge-ci-runner` privately;
+  service activation is not evidence of job parity or a completed soak.
+- **Rollback:** reinstall with `--implementation ruby`, preserving the same
+  flags and custom settings, or restore `/opt/forge-ci-runner.old` together
+  with `/etc/forge-ci-runner.env.bak` and
+  `/etc/systemd/system/forge-ci-runner.service.bak`, reload systemd, and restart
+  the single service. Follow the runbook's exact restore steps. Later installs
+  overwrite `.old`/`.bak`; retain independent protected backups first.
+
+## Go timeout skips `on_fail` / `always` steps
+
+Both runners support `STEP_NO_OUTPUT_TIMEOUT=600` and `JOB_TIMEOUT=3600`
+(seconds; `0` disables), and a step's `no_output_timeout` overrides the silence
+limit. Both report timeout exit code 124. Go applies a job-wide execution
+deadline, immediately removes the primary container when interrupted, and
+skips every remaining step, including `on_fail`/`always`. Ruby checks deadlines
+while streaming commands and kills the client; container-side work stops at
+cleanup. Normal command failure still allows failure handlers in both. Do not
+depend on timeout handlers for essential cleanup; review the
+[behavioral differences](../runner-go/README.md#deliberate-differences-from-the-ruby-runner)
+before canarying jobs with long silent steps or slow setup/transfers.
+
 ## `exe/forge-ci` isn't executable after checkout
 
 `git` preserves the mode, but some copy flows don't. `chmod +x exe/forge-ci`

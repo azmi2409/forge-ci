@@ -37,7 +37,32 @@ first boot and kept in `secrets.yml` in the data directory.
 | `FORGE_CI_SEED_DEMO` | — | `1` loads the demo project and pipelines in production (`db:prepare` skips them otherwise) |
 | `RAILS_MAX_THREADS` | `16` in the image (`3` otherwise) | Web request threads, and the database pool size |
 
-## Runner (`runner/`)
+## Runners (`runner/`, `runner-go/`)
+
+Both runners are standard-library-only and use the environment variables below.
+Ruby remains the default (`runner/`, Ruby 3.0+). The opt-in Go runner
+(`runner-go/`) builds with Go 1.27 for `linux/amd64` and `linux/arm64`; its static
+binary needs no Ruby or Go toolchain on runner hosts. macOS is for development
+and tests only. Rails and the compiler remain Ruby, and switching runners
+requires no database change.
+
+Select Go by appending `--implementation go` to the installer command; this is
+an installer option, not an environment variable. Follow the
+[Ruby-to-Go migration guide](../DEPLOY.md#ruby-to-go-runner-migration), starting
+with an idle non-deploy canary. Go is not yet the default, and availability is
+not evidence that production soak gates have passed.
+
+The installer rewrites the runner environment file. Before rerunning it,
+securely back up the installation and environment, preserve every original
+installer flag (including resource class, Docker access, idle shutdown and
+requeue settings). The installer starts the service automatically: keep the
+canary's job queue empty, stop the service after installation, restore custom
+environment values, then restart before submitting work. Protect tokens in
+both live files and backups; do not paste them into
+logs or tickets. For rollback, follow the migration guide to restore the saved
+Ruby installation from `.old` and the environment and service unit from `.bak`,
+rather than rerunning the installer with defaults. Another installer run
+overwrites these backups; retain a separate protected copy.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
@@ -54,6 +79,8 @@ first boot and kept in `secrets.yml` in the data directory.
 | `REDACT_MIN_LENGTH` | no | `8` | Env values shorter than this are not redacted from logs |
 | `DOCKER_BIN` | no | `docker` | Path to the docker CLI |
 | `BUILDX_BIN` | no | — | Path to a buildx binary the runner copies into job images that lack one, for `docker_layer_caching` builds. Set automatically by the install command's `--allow-docker` and the runner image |
+| `STEP_NO_OUTPUT_TIMEOUT` | no | `600` | Seconds without step output before interrupting the step; `0` disables |
+| `JOB_TIMEOUT` | no | `3600` | Job wall-clock limit in seconds; `0` disables |
 | `IDLE_SHUTDOWN_AFTER` | no | `0` (never) | Seconds without a job after which the runner stops claiming, runs `IDLE_SHUTDOWN_COMMAND` and exits |
 | `IDLE_SHUTDOWN_COMMAND` | no | — | Shell command run once on idle shutdown, e.g. `bin/forge-ci-asg-terminate-self` |
 | `ALLOW_DOCKER_SOCKET` | no | off | `1` lets jobs with `setup_remote_docker` use this machine's Docker socket. Such a job controls the machine, so set it only on runners trusted with that (the deploy runner); fork pull requests are always refused. The install command's `--allow-docker` sets it |

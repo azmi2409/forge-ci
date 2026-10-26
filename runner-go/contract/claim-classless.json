@@ -1,0 +1,18 @@
+{
+  "id": 1043,
+  "name": "lint",
+  "executor": { "image": "alpine:3.20" },
+  "steps": [
+    { "type": "checkout" },
+    { "type": "run", "command": "make lint" }
+  ],
+  "environment": {},
+  "pipeline": { "sha": "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3", "branch": null },
+  "trusted": true,
+  "workflow_run_id": 908,
+  "project_id": 12,
+  "repository": {
+    "url": "https://github.com/azmi2409/forge-ci.git",
+    "sha": "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3"
+  }
+}

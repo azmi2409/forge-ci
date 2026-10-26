@@ -5,8 +5,20 @@ ForgeCI ships a skill for coding agents:
 how to write `.circleci/config.yml` for ForgeCI (supported features, absolute
 paths, resource classes, test splitting), validate it, sign in with OAuth,
 and start, watch or cancel pipelines. It also covers fork-only runner pools,
-cache/credential isolation, and safe retries. Install it in each repository
-that ForgeCI builds.
+cache/credential isolation, safe retries, and implementation-specific timeout
+behavior. Install it in each repository that ForgeCI builds.
+
+For PR #28's `runner-go` branch, Ruby remains the default; Go is opt-in with
+`--implementation go`. The Rails control plane stays Ruby and switching only
+the runner needs no DB migration. The skill directs operators to the
+[Ruby-to-Go migration runbook](../DEPLOY.md#ruby-to-go-runner-migration): idle
+non-deploy canary, one service per identity, unchanged trust pools, protected
+tokens/backups, and preservation of every original installer flag and custom
+env setting because reinstall rewrites env/unit files. Rollback must preserve
+settings or restore the matching `.old` tree and env/unit `.bak` files together;
+later installs replace these backups. No merged/deployed/completed-soak status
+is implied. Go skips all remaining steps, including `on_fail`/`always`, after
+timeout interruption; do not rely on those handlers for cleanup.
 
 **Claude Code.** Install it as a project skill, so everyone working in the
 repository gets it, and commit it:
