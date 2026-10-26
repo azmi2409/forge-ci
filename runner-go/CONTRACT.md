@@ -71,6 +71,7 @@ Go structs use pointer fields wherever absence ≠ zero and must tolerate every 
 | `executor` | object | when set | `{ image, entrypoint?, command?, environment?, resource_class?, secondary_images? }`; all but `image` may be missing/null |
 | `steps` | array | always (`[]`) | ordered IR steps; may contain shapes unknown to the runner |
 | `environment` | object | when set | values are strings (stringify anything else defensively) |
+| `secret_values` | string array | current server | project-variable/context values effective in the job environment; `[]` for forks. Older servers omit it; runners treat absence as empty |
 | `pipeline` | object | always | `{ sha, branch }` (either may be null) |
 | `trusted` | bool | current server | **missing = trusted** (older servers); `false` = fork PR. Runner refuses `setup_remote_docker` only when exactly `false` |
 | `workflow_run_id` | number | when set | workspace namespace key |
@@ -79,7 +80,7 @@ Go structs use pointer fields wherever absence ≠ zero and must tolerate every 
 | `docker_build_cache` | object | when configured & requested | `{ registry, ref, username?, password? }` — username/password omitted for unauthenticated registries |
 
 Fixtures: `claim-full.json` (everything present), `claim-classless.json`,
-`claim-fork.json` (`"trusted": false`, no `docker_build_cache`, no repository token),
+`claim-fork.json` (`"trusted": false`, empty `secret_values`, no `docker_build_cache`, no repository token),
 `claim-trusted-absent.json` (older-server shape: no `trusted`, no `project_id`,
 no `workflow_run_id`, no `docker_build_cache`).
 
@@ -174,9 +175,10 @@ tarball then the manifest; attach reads the manifest then extracts each root tar
 - Skipped steps report `exit_code: 0` with identical start/finish timestamps.
 - Durations parse `30s`/`10m`/`1h`/bare seconds; unparseable → step/config default.
 - Secrets redacted from logs: every job, step, and service env value (including
-  shadowed values, plus checkout token and build-cache password)
-  ≥ `REDACT_MIN_LENGTH` (default 8) chars, longest-first exact substring →
-  `[REDACTED]` — including values split across streamed read boundaries.
+  shadowed values) ≥ `REDACT_MIN_LENGTH` (default 8), plus all `secret_values`,
+  checkout tokens, and build-cache passwords regardless of length. Matching is
+  longest-first exact substring → `[REDACTED]`, including across streamed
+  read boundaries.
 - Output bytes that are invalid UTF-8 are replaced with U+FFFD at chunk emission
   (before JSON encoding); valid multi-byte characters are never split across chunks.
 

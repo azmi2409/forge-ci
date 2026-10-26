@@ -83,7 +83,7 @@ continue working but are not listed. The page updates when refreshed.
 | `LOG_CHUNK_SIZE` | no | `65536` | Bytes per log chunk |
 | `LOG_FLUSH_INTERVAL` | no | `1` | Send buffered output at least this often (seconds), so the job page shows it live |
 | `CHECKOUT_REPO_URL` | no | — | Fallback git URL for `checkout` (the claim payload's `repository.url` is preferred) |
-| `REDACT_MIN_LENGTH` | no | `8` | Env values shorter than this are not redacted from logs |
+| `REDACT_MIN_LENGTH` | no | `8` | Minimum length for automatic env-value masking; explicit project/context secrets are always redacted regardless of length |
 | `DOCKER_BIN` | no | `docker` | Path to the docker CLI |
 | `BUILDX_BIN` | no | — | Path to a buildx binary the runner copies into job images that lack one, for `docker_layer_caching` builds. Set automatically by the install command's `--allow-docker` and the runner image |
 | `STEP_NO_OUTPUT_TIMEOUT` | no | `600` | Seconds without step output before interrupting the step; `0` disables |

@@ -30,6 +30,16 @@ func TestMinLength(t *testing.T) {
 	}
 }
 
+func TestExplicitShortSecretsAreRedacted(t *testing.T) {
+	r := New(map[string]string{"PLAIN": "test"}, 8, "s3cr3t", "")
+	if got := r.Redact("env=test token=s3cr3t"); got != "env=test token=[REDACTED]" {
+		t.Fatalf("got %q", got)
+	}
+	if r.PatternCount() != 1 {
+		t.Fatalf("pattern count %d", r.PatternCount())
+	}
+}
+
 func TestEmptyAndNoSecrets(t *testing.T) {
 	r := New(map[string]string{}, 8)
 	if r.Redact("anything") != "anything" {

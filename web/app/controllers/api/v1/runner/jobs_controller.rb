@@ -152,6 +152,7 @@ module Api
             executor: job.executor_hash,
             steps: job.steps || [],
             environment: job.merged_environment,
+            secret_values: job.secret_values,
             pipeline: { sha: pipeline.sha, branch: pipeline.branch },
             # false for fork pull requests: the runner refuses them the
             # host's Docker (setup_remote_docker).

@@ -140,9 +140,9 @@ Per claimed job:
    - `persist_to_workspace` / `attach_workspace` — layered on the cache API
      under a reserved `forge-ci-workspace/<workflow_run_id>/` namespace.
    - `store_test_results` / `add_ssh_keys` — skipped loudly, never failed.
-4. Stream redacted log chunks (every env value ≥ `REDACT_MIN_LENGTH` chars is
-   masked — secret redaction is the runner's job; the control plane stores
-   log text verbatim).
+4. Stream redacted log chunks (effective project/context secrets are explicitly
+   marked and always masked; other env values ≥ `REDACT_MIN_LENGTH` chars are
+   masked heuristically. The control plane stores log text verbatim).
 5. Always clean up containers and the network, including failures and shutdown.
    Shutdown reports `canceled` by default; `REQUEUE_ON_SHUTDOWN` can instead
    requeue eligible interrupted jobs (never enable it on deploy runners).

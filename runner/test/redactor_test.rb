@@ -14,6 +14,12 @@ class RedactorTest < Minitest::Test
     assert_equal "RAILS_ENV=test ok", r.redact("RAILS_ENV=test ok")
   end
 
+  def test_redacts_explicit_short_secret_values
+    r = ForgeCIRunner::Redactor.new({ "RAILS_ENV" => "test" }, min_length: 8,
+                                    secret_values: ["s3cr3t"])
+    assert_equal "RAILS_ENV=test token=[REDACTED]", r.redact("RAILS_ENV=test token=s3cr3t")
+  end
+
   def test_longest_first_avoids_partial_matches
     r = ForgeCIRunner::Redactor.new({ "A" => "abcdefgh", "B" => "abcdefghij" },
                                     min_length: 8)

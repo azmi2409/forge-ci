@@ -73,9 +73,11 @@ Per claimed job the runner:
 5. Always cleans up: `docker rm -f` the primary + service containers and
    removes the network, in `ensure` blocks — even on failure or signal.
 
-**Secret redaction** is the runner's job (per the project plan): every
-environment value at or above `REDACT_MIN_LENGTH` characters is redacted
-from all log chunks before POSTing, exact-substring, longest-first.
+**Secret redaction** is the runner's job: effective project-variable and
+context values in the claim's `secret_values` list are redacted regardless of
+length. Other job, step, and service environment values at or above
+`REDACT_MIN_LENGTH` are also redacted from log chunks before POSTing,
+exact-substring, longest-first.
 
 **Failure semantics:** step non-zero → `failed`; SIGTERM/SIGINT → finish the
 in-flight step, skip the rest, report `canceled`, exit cleanly (no new
@@ -173,11 +175,10 @@ No endpoints invented; nothing else assumed.
    project-scoped (`PUT/GET /api/v1/projects/:id/cache`), so `save_cache`,
    `restore_cache`, `persist_to_workspace`, and `attach_workspace` skip
    loudly until the control plane includes `project_id` in the job payload.
-3. **Secrets are not distinguished from plain env vars.** The payload
-   merges executor env with context payloads ("contexts win") with no
-   marker for which values are secrets, so the runner redacts *all*
-   values ≥ `REDACT_MIN_LENGTH` chars. A future contract should return an
-   explicit secret key list.
+3. **Some config values remain heuristic.** Project-variable and context
+   values are marked in `secret_values` and always redacted. Values defined
+   only in the pipeline config are not inherently marked secret, so the
+   runner redacts them only when they meet `REDACT_MIN_LENGTH`.
 4. **Step name collisions.** The server matches `step_results` to StepRuns
    by name (`find_by`); two steps with the same name update the same
    record (last write wins). The runner reports every step once.
