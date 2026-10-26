@@ -9,8 +9,10 @@ races, real-container integration). Run everything with:
 cd runner-go && go test -race ./...
 ```
 
-CI note: the Docker integration test skips locally without a daemon but is a
-REQUIRED job in CI (see plan Phase 8).
+CI note: the Docker integration test skips locally without a daemon. The
+[Go runner workflow](../.github/workflows/runner-go.yml) runs the suite on
+Ubuntu with Docker; a real-container pass is a required [soak gate](SOAK.md),
+not evidence supplied by this document.
 
 ## Ruby suite → Go suite
 
@@ -39,8 +41,9 @@ REQUIRED job in CI (see plan Phase 8).
 - **Contract fixtures** (`contract/*.json`): golden claim/lifecycle/cache/
   artifact payloads decoded by `internal/payload` — pins absence-vs-null
   (`trusted`, executor fields, `destination: null`), unknown-step raw
-  retention, environment stringification. Validated against a live
-  Rails/PostgreSQL control plane in the Phase 8 soak.
+  retention, environment stringification. Validation against a live
+  Rails/PostgreSQL control plane remains a [soak gate](SOAK.md); this matrix
+  does not claim it has passed.
 - **Fake-docker lifecycle** (`executor_test.go`): full job execution with
   process groups, when-semantics, redaction end-to-end, bounded cleanup
   after setup failure, script temp-dir removal.
@@ -56,9 +59,20 @@ REQUIRED job in CI (see plan Phase 8).
 
 - Ordinary TERM lets the in-flight step finish (Ruby parity); requeue TERM
   interrupts it.
+- Timeout defaults match Ruby (600s no-output / 3600s job; `0` disables),
+  but enforcement differs: Go applies the job-wide execution deadline to setup
+  and transfers, removes the primary container immediately on interruption,
+  and skips remaining steps including `on_fail`/`always`. Ruby checks deadlines
+  while streaming commands and removes containers at final cleanup. Both
+  report timeout 124; normal command failures still run failure handlers.
 - Timer flushes never expose the secret-retention tail (stricter than Ruby,
   which redacted per read and could leak split secrets).
 - Log chunks post strictly in seq order through one sender (Ruby used a
   post mutex; same observable order).
 - `docker exec` client kill is followed by explicit container removal on
   job-level interruption (Ruby relied on the ensure-block cleanup only).
+
+Ruby remains the default; `--implementation go` opts in. See the
+[migration runbook](../DEPLOY.md#ruby-to-go-runner-migration) for canary,
+env rewrite, and rollback safeguards. Coverage descriptions are not assertions
+that PR #28 is merged, deployed, or that its soak is complete.

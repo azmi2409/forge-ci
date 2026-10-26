@@ -1,8 +1,10 @@
 # forge-ci-runner (Go)
 
-The **Docker runner** for ForgeCI, rewritten from Ruby as a single static Go
-binary — no Ruby on runner hosts. Same daemon loop, same control-plane
-contract, same behavior:
+The opt-in **Docker runner** for ForgeCI on PR #28's `runner-go` branch,
+rewritten from Ruby as a single static Go binary — no Ruby needed on Go
+runner hosts. **Ruby remains the default.** The Ruby/Rails control plane
+stays unchanged; switching runners alone needs no DB migration. Same daemon
+loop and control-plane contract, with deliberate behavioral differences below:
 
 ```
 poll claim → start → execute → complete
@@ -22,6 +24,19 @@ Test-coverage mapping from the Ruby suite: [TESTING.md](TESTING.md).
 
 **Host target: Linux** (process groups, `sha256sum`, system `tar`). darwin
 builds exist for tests and local development only.
+
+For an existing host, follow the [Ruby-to-Go runner migration guide](../DEPLOY.md#ruby-to-go-runner-migration).
+Use `--implementation go` (space-separated), first on an idle non-deploy
+canary. The installer replaces the existing service, never starts both
+implementations under one identity. It rewrites the env file and unit:
+preserve **all original installer flags** and custom env settings, including
+timeouts, Docker/buildx settings, and token-file configuration. Protect tokens
+and backups; do not paste them into logs or commits. Reinstall rollback uses
+`--implementation ruby` with the same settings. Exact rollback restores
+`/opt/forge-ci-runner.old`, `/etc/forge-ci-runner.env.bak`, and
+`/etc/systemd/system/forge-ci-runner.service.bak` together, then reloads systemd
+and restarts the service; retain separate protected backups before another
+install replaces those files. Failed activation attempts automatic restoration.
 
 ## Build & test
 
@@ -50,7 +65,7 @@ Fails fast (exit 2) when the config is incomplete or `docker info` fails.
 
 ### Environment variables
 
-Identical to the Ruby runner (`runner/README.md` has the full table):
+Same configuration variables as the [Ruby runner](../runner/README.md#environment-variables):
 `CONTROL_PLANE_URL`, `RUNNER_TOKEN`/`RUNNER_TOKEN_FILE`, `RESOURCE_CLASS`,
 `POLL_INTERVAL`, `MAX_IDLE_INTERVAL`, `HEARTBEAT_INTERVAL`, `LOG_CHUNK_SIZE`,
 `LOG_FLUSH_INTERVAL`, `CHECKOUT_REPO_URL`, `REDACT_MIN_LENGTH`, `DOCKER_BIN`,
@@ -66,6 +81,12 @@ Identical to the Ruby runner (`runner/README.md` has the full table):
   and detached background steps. Killing the `docker exec` client alone never
   stops those processes. Remaining steps, including `on_fail` and `always`, are
   logged as skipped (`job interrupted`); a timeout still fails the job with 124.
+  Ruby also supports the 600s no-output timeout and 3600s job timeout (both
+  disabled with `0`), but checks deadlines while streaming commands and kills
+  the client, leaving container-side processes until cleanup. Go applies the
+  job deadline across execution, including Docker setup and transfers, and
+  stops container-side work immediately. Do not rely on timeout-triggered
+  `on_fail`/`always` steps for cleanup; normal command failure still runs them.
 - **Streaming redaction**: output is redacted at emission with a retained
   tail, so secrets split across read boundaries (or timer flushes) are still
   caught; valid UTF-8 is never split across chunks, invalid bytes become
@@ -73,14 +94,39 @@ Identical to the Ruby runner (`runner/README.md` has the full table):
 - **Four separate lifetimes** (stop claiming / interrupt execution /
   heartbeats / final reporting) instead of one flag — see
   `internal/runner/runner.go`.
-- Everything else — exit codes (124 timeout, 130 cancel), normal-failure `when`
-  semantics, key templates, workspace namespace, deferred-step warnings, step
-  naming — matches the Ruby runner.
+- Ordinary command failure semantics, key templates, workspace namespace,
+  deferred-step warnings, and step naming match the Ruby runner; timeout
+  handling is not fully interchangeable, as described above.
 
 ## Distribution
 
-The web image cross-compiles `linux/amd64` + `linux/arm64` and ships the
-binaries in `/runner.tar.gz` next to the Ruby runner; the install script
-picks one with `--implementation=go` (Ruby remains the default until the
-cutover gates pass — see the plan's Phase 8). `Dockerfile` here builds the
-containerized runner used by docker-compose at cutover.
+The root web-image `Dockerfile` cross-compiles `linux/amd64` + `linux/arm64`
+and includes both binaries and `SHA256SUMS` in the served `/runner.tar.gz`
+alongside the Ruby runner. The installer selects Go with `--implementation go`;
+Ruby stays the default until the [soak/cutover gates](SOAK.md) pass. This branch
+does not establish that PR #28 has merged, deployed, or completed its soak.
+`runner-go/Dockerfile` builds a Go runner container; compose still selects the
+Ruby runner until an explicit cutover.
+
+### Source-only control-plane deployments
+
+If deploying the Rails app from source rather than the root web image, build
+the archive's Go artifacts from the **repository root** before installing Go
+runners. Keep `runner/bin/forge-ci-runner` (the Ruby script) unchanged:
+
+```sh
+(cd runner-go && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o ../runner/bin/forge-ci-runner-linux-amd64 ./cmd/forge-ci-runner)
+(cd runner-go && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o ../runner/bin/forge-ci-runner-linux-arm64 ./cmd/forge-ci-runner)
+(cd runner/bin && sha256sum forge-ci-runner-linux-amd64 forge-ci-runner-linux-arm64 > SHA256SUMS)
+```
+
+On macOS, replace the last command with:
+
+```sh
+(cd runner/bin && shasum -a 256 forge-ci-runner-linux-amd64 forge-ci-runner-linux-arm64 > SHA256SUMS)
+```
+
+Set `FORGE_CI_RUNNER_PATH` on the control plane to this populated `runner/`
+directory (absolute path). It controls the served archive, not the runner's
+runtime settings. A Ruby-only source archive cannot satisfy `--implementation go`;
+the installer aborts before replacing the old service if its binary is absent.

@@ -3,8 +3,11 @@
 Baseline: `origin/main` @ `3ec031f` (merge of PR #27; includes fork runner-trust
 pools and context-snapshot encryption). Rails side is the source of truth; the
 Go runner is built against exactly this and never forces a Rails change to make
-a test pass. Fixtures in `contract/` are golden examples validated in the
-Phase 8 soak against a real Rails/PostgreSQL control plane.
+a test pass. Fixtures in `contract/` are golden examples; validation against
+a real Rails/PostgreSQL control plane remains a [soak gate](SOAK.md), not a
+completed-soak claim. Ruby remains the default; Go is opt-in via
+`--implementation go`. Runner-only migration needs no Rails or DB change;
+see the [operator runbook](../DEPLOY.md#ruby-to-go-runner-migration).
 
 Sources read to produce this: `web/app/controllers/api/v1/runner/jobs_controller.rb`,
 `web/app/controllers/api/v1/base_controller.rb`, `web/app/controllers/api/v1/jobs_controller.rb`,
@@ -159,6 +162,10 @@ tarball then the manifest; attach reads the manifest then extracts each root tar
   fails the job; ordinary command failures still allow `on_fail`/`always` steps.
   Ordinary TERM finishes the active step and reports canceled even if it was the
   final step; requeue shutdown interrupts instead.
+  This is Go behavior, not complete timeout parity: Ruby checks deadlines
+  while streaming commands and kills the `docker exec` client, leaving
+  container-side work until final cleanup. Both support the same timeout
+  defaults, but Go's job deadline also bounds setup and transfers.
 - Skipped steps report `exit_code: 0` with identical start/finish timestamps.
 - Durations parse `30s`/`10m`/`1h`/bare seconds; unparseable → step/config default.
 - Secrets redacted from logs: every job, step, and service env value (including

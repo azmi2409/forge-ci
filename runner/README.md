@@ -8,6 +8,12 @@ Pure Ruby, **stdlib only** (`net/http`, `json`, `open3`, `openssl`,
 out to via `Open3` with argv arrays (never through a shell). Tested on
 **Ruby 3.2.3** (requires >= 3.0).
 
+Ruby remains the **default runner** on the PR #28 `runner-go` branch. The
+[Go runner](../runner-go/README.md) is opt-in with `--implementation go`;
+this changes only the runner daemon, not the Ruby/Rails control plane or DB.
+Use the [Ruby-to-Go runner migration guide](../DEPLOY.md#ruby-to-go-runner-migration)
+for an idle, non-deploy canary, environment preservation, and rollback.
+
 ## How it works
 
 ```
@@ -84,7 +90,18 @@ The easy way is the install command under **Settings → Runners** on the
 control plane: `curl -fsSL https://ci.example.com/install-runner | sudo sh -s -- --token …`.
 It installs Docker and Ruby, downloads this directory from the control plane
 (`/runner.tar.gz`) to `/opt/forge-ci-runner` and starts the
-`forge-ci-runner` systemd service. To run it by hand:
+`forge-ci-runner` systemd service.
+
+To switch an existing host, do not append `--implementation go` to a shortened
+install command: the installer **rewrites** `/etc/forge-ci-runner.env` and the
+systemd unit. Preserve every original flag (class, idle shutdown, ASG, Docker
+access, and requeue settings) and restore custom environment settings securely;
+never print or commit the token or environment backups. Keep a separate protected
+backup before another reinstall overwrites `.old`/`.bak`. Run only one service
+per runner identity, and switch only while idle. Full procedure and restoration
+of the previous tree, env, and unit: [migration guide](../DEPLOY.md#ruby-to-go-runner-migration).
+
+To run the Ruby runner by hand:
 
 ```sh
 CONTROL_PLANE_URL="https://ci.example.com" \
@@ -113,6 +130,8 @@ if `docker info` fails.
 | `REDACT_MIN_LENGTH` | no | `8` | Env values shorter than this are not redacted |
 | `DOCKER_BIN` | no | `docker` | Path to the docker CLI |
 | `BUILDX_BIN` | no | — | Path to a buildx binary the runner copies into job images that lack one, for `docker_layer_caching` builds (`docs/configuration.md`, "Docker layer caching"). The install command's `--allow-docker` sets it |
+| `STEP_NO_OUTPUT_TIMEOUT` | no | `600` | Seconds a foreground `run` step may stay silent; step `no_output_timeout` overrides it; `0` disables |
+| `JOB_TIMEOUT` | no | `3600` | Job wall-clock limit checked while streaming commands; `0` disables. Go additionally applies a context deadline across execution |
 | `IDLE_SHUTDOWN_AFTER` | no | `0` (never) | Seconds without a job after which the runner stops claiming, runs `IDLE_SHUTDOWN_COMMAND` and exits (scale to zero) |
 | `IDLE_SHUTDOWN_COMMAND` | no | — | Shell command run once on idle shutdown; `bin/forge-ci-asg-terminate-self` removes this EC2 instance from its Auto Scaling Group |
 | `ALLOW_DOCKER_SOCKET` | no | off | `1` lets jobs with `setup_remote_docker` use this machine's Docker socket. Such a job controls the machine, so set it only on runners trusted with that (the deploy runner); fork pull requests are always refused. The install command's `--allow-docker` sets it |
@@ -189,7 +208,11 @@ contract) is fully covered without Docker.
 ## Not yet (deferred)
 
 - `store_test_results` parsing (JUnit → timing DB) and `add_ssh_keys`
-- Per-step timeouts (a hung step hangs until the process is killed)
+- Go-style job-wide deadline enforcement and immediate container removal on timeout:
+  Ruby kills the `docker exec` client and cleans up containers at job end;
+  Go removes the primary container immediately and skips every remaining step,
+  including `on_fail`/`always`. Both report timeout exit code 124. See
+  [Go behavioral differences](../runner-go/README.md#deliberate-differences-from-the-ruby-runner).
 - CPU/memory resource limits on containers
 - Multi-arch image selection
 - `machine` / `macos` executors (Docker only in v1)

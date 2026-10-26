@@ -34,6 +34,9 @@ separately.
   Interrupted steps remove the primary container before returning; remaining
   steps, including `on_fail`/`always`, are skipped because that container is
   no longer safe to reuse. Redact step and service environment secrets too.
+- Document Ruby-to-Go runner migration, configuration preservation, canary
+  validation and rollback across deployment, architecture, contributor and
+  agent guidance. Ruby remains the installer default pending soak gates.
 - `forge-ci login [--url URL]` / `forge-ci logout`: OAuth sign-in for the
   CLI. The browser opens at the server, you sign in with your web-UI
   account, and the token (authorization-code + PKCE, stored per server in

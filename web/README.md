@@ -11,6 +11,14 @@ gem, consumed here as a path gem (`gem "forge-ci", path: ".."`).
 
 > **Docs:** [architecture](../docs/architecture.md) · [API](../docs/api.md) · [configuration](../docs/configuration.md) · [troubleshooting](../docs/troubleshooting.md) · [contributing](../CONTRIBUTING.md)
 
+Runner implementation is independent of this Rails app. The web image ships
+both the default Ruby runner and opt-in static Go binaries for Linux amd64
+and arm64. Switching a host uses `--implementation go`; it does not rewrite
+the Rails control plane or require a database change by itself. Follow the
+[migration and rollback procedure](../DEPLOY.md#ruby-to-go-runner-migration)
+before upgrading hosts. Existing Compose/AWS runners remain Ruby until the
+explicit cutover gates pass.
+
 ## Versions used
 
 - Ruby **3.2.3**, Rails **8.1.4**

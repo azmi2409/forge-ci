@@ -67,10 +67,11 @@ Debian, Amazon Linux or Fedora with systemd):
 curl -fsSL https://ci.example.com/install-runner | sudo sh -s -- --token <token> --class spot
 ```
 
-The command installs Docker and Ruby (skipped when both are already there, as
-on a prepared image), downloads the runner from your server,
-and starts it as the `forge-ci-runner` service. Use
-`journalctl -u forge-ci-runner -f` to watch it.
+The default installs Docker and the Ruby runner (packages skipped when already
+present), downloads the runner from your server, and starts the
+`forge-ci-runner` service. The static Go runner is opt-in with
+`--implementation go`; it needs Docker but no Ruby on runner hosts. Both use
+the same Rails control plane. Watch `journalctl -u forge-ci-runner -f`.
 
 A runner claims jobs whose `resource_class` matches its `--class`, plus jobs
 with no class. A runner installed without `--class` claims any job.
@@ -88,6 +89,108 @@ curl -fsSL https://ci.example.com/install-runner | sudo sh -s -- --token <token>
 
 Never use it on deploy runners: a deploy cut off halfway must not run again
 by itself.
+
+### Ruby-to-Go runner migration
+
+This switches the Docker runner, not the Rails control plane or compiler.
+First deploy a web image containing the Go runner changes: `/runner.tar.gz`
+must include `bin/forge-ci-runner-linux-amd64`,
+`bin/forge-ci-runner-linux-arm64`, and `bin/SHA256SUMS`. Source-only control
+planes must build and stage those artifacts first; see
+[`runner-go/README.md`](runner-go/README.md). No database migration or pipeline
+YAML change is required solely for switching runner implementation.
+
+1. **Canary one non-deploy Linux host** (x86_64 or arm64). Pause incoming
+   work for its pool and wait for all active jobs to finish. Verify the host
+   is idle before installation: the installer stops its service, so do not
+   upgrade during a deployment. Keep Ruby installed for rollback.
+2. **Back up config and record flags.** Inspect the environment locally;
+   never paste tokens or secrets into logs, tickets, or shell history.
+
+   ```sh
+   sudo cp -p /etc/forge-ci-runner.env /etc/forge-ci-runner.env.pre-go
+   sudo cp -p /etc/systemd/system/forge-ci-runner.service \
+     /etc/systemd/system/forge-ci-runner.service.pre-go
+   curl -fsSL https://ci.example.com/install-runner -o /tmp/install-forge-ci.sh
+   ```
+
+3. **Install explicitly.** Use the existing token, class, and original flags
+   from Settings. Substitute securely; command-line tokens can be visible to
+   local process inspection. The example below is not a literal token.
+
+   ```sh
+   sudo sh /tmp/install-forge-ci.sh --implementation go \
+     --token '<existing-runner-token>' --class spot --requeue-on-shutdown
+   ```
+
+   Preserve `--idle-shutdown SECONDS --asg` for scale-to-zero hosts and
+   `--allow-docker` only for trusted Docker-enabled hosts. Use
+   `--requeue-on-shutdown` only for retry-safe jobs, never deploys. Keep the
+   same trusted/fork-only token pool; implementation does not change trust.
+
+4. **Restore custom environment before resuming work.** Installer regenerates
+   `/etc/forge-ci-runner.env`; it does not merge custom settings. While work
+   remains paused, stop the service and restore settings such as
+   `JOB_TIMEOUT`, `RUNNER_TOKEN_FILE`, polling intervals, or repository
+   overrides from the protected backup. Retain generated `BUILDX_BIN` if
+   applicable. If using `RUNNER_TOKEN_FILE`, remove generated `RUNNER_TOKEN`
+   so it cannot take precedence. Restart after editing.
+
+   ```sh
+   sudo systemctl stop forge-ci-runner
+   sudoedit /etc/forge-ci-runner.env
+   sudo systemctl start forge-ci-runner
+   /opt/forge-ci-runner/bin/forge-ci-runner --version
+   sudo systemctl is-active forge-ci-runner
+   sudo systemctl cat forge-ci-runner
+   sudo journalctl -u forge-ci-runner -n 100 --no-pager
+   ```
+
+   `ExecStart` must run the binary directly, without `ruby`. Run non-deploy
+   canaries covering checkout, logs, caches, artifacts, workspaces,
+   cancellation, and retry-safe shutdown. Interrupted Go steps remove the
+   primary container; later steps, including `on_fail`/`always`, are skipped.
+   Normal command failures still honor those conditions.
+
+5. **Rollback if necessary.** Pause work and drain again, then reinstall with
+   `--implementation ruby`, the same token/class/flags, and restore custom
+   environment settings before resuming. Automatic rollback handles failed
+   activation, not failures discovered later in real jobs. Successful upgrades
+   retain `/opt/forge-ci-runner.old`, `/etc/forge-ci-runner.env.bak`, and
+   `/etc/systemd/system/forge-ci-runner.service.bak`; subsequent installs
+   replace those backups, so keep the separate `.pre-go` copies.
+
+   Alternatively, restore the matching tree, environment and unit together
+   without downloading anything. Verify `.old` is the desired Ruby install
+   and both `.bak` files belong to that upgrade before running this. Pause
+   work and drain first; keep any failed Go tree for diagnosis:
+
+   ```sh
+   set -e
+   sudo test -d /opt/forge-ci-runner.old
+   sudo test -f /etc/forge-ci-runner.env.bak
+   sudo test -f /etc/systemd/system/forge-ci-runner.service.bak
+   sudo test ! -e /opt/forge-ci-runner.failed-go
+   sudo systemctl stop forge-ci-runner
+   sudo mv /opt/forge-ci-runner /opt/forge-ci-runner.failed-go
+   sudo mv /opt/forge-ci-runner.old /opt/forge-ci-runner
+   sudo cp -p /etc/forge-ci-runner.env.bak /etc/forge-ci-runner.env
+   sudo cp -p /etc/systemd/system/forge-ci-runner.service.bak \
+     /etc/systemd/system/forge-ci-runner.service
+   sudo systemctl daemon-reload
+   sudo systemctl start forge-ci-runner
+   sudo systemctl is-active forge-ci-runner
+   ```
+
+   Stop on any failed command. This restores configuration as it was saved,
+   unlike reinstalling with defaults. Verify a canary before resuming work.
+
+Do not run Ruby and Go simultaneously with the same runner identity. Existing
+Compose runners and AWS user-data remain Ruby during this opt-in phase;
+changing installer does not migrate existing hosts or future ASG instances
+automatically. Roll out launch templates separately after canary acceptance.
+The default remains Ruby until the week-long soak **and** every gate in
+[`runner-go/SOAK.md`](runner-go/SOAK.md) pass; CI alone is not cutover approval.
 
 ### Isolate fork pull requests
 

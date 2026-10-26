@@ -82,10 +82,14 @@ Most important first.
       `forge-ci-build` wrapper, ECR token minting; docs/configuration.md,
       "Docker layer caching"). Kamal: `builder: cache: type=registry` with
       `image: <%= ENV["FORGE_CI_BUILD_CACHE_TO"] %>`.
-- [ ] **AMI builder in the repo:** the runner image (Docker, Ruby, AWS CLI,
-      pre-pulled job images) is built with a pasted script; ship it as
+- [ ] **AMI builder in the repo:** the runner image (Docker, selected runner
+      implementation, AWS CLI, pre-pulled job images) is built with a pasted script; ship it as
       `runner/aws/build-ami.sh` (and arm64), and the Spot group setup as a
       script too.
+- [ ] **Go runner cutover:** opt-in binaries and installer are available in
+      this change; complete live canary, clean-host/rollback checks and week-long
+      soak in `runner-go/SOAK.md` before flipping defaults or removing Ruby.
+      Migration: `DEPLOY.md#ruby-to-go-runner-migration`.
 - [ ] **`circleci tests` needs bash:** the helper fails in images without bash
       (alpine). Make it POSIX sh.
 - [ ] **Run ForgeCI's own CI on ForgeCI:** GitHub Actions minutes ran out and

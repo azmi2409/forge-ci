@@ -15,12 +15,12 @@ this guide is all you need to get a change merged.
 
 ## Ground rules
 
-- **Zero dependencies in the gem and the runner.** The `forge-ci` compiler
-  gem and the runner use the Ruby standard library only. Adding a gem to
-  either needs a discussion first. The control plane is a normal Rails 8 app,
-  so regular gems are fine there.
-- **Every change ships with tests, and all three suites stay green.** CI runs
-  them on every pull request and every push to `main`.
+- **Zero dependencies in the gem and both runners.** The `forge-ci` compiler
+  gem and Ruby runner use only the Ruby standard library; the Go runner uses
+  only the Go standard library. New runtime dependencies need discussion first.
+  The control plane is a normal Rails 8 app, so regular gems are fine there.
+- **Every change ships with tests.** Keep the compiler, control-plane and both
+  runner suites green; Go runner CI also checks formatting, vet and static builds.
 - **CircleCI is the spec.** When forge-ci accepts a CircleCI feature, it
   should behave the way CircleCI documents it. When it doesn't support one,
   it should reject it with a clear error (or a warning, if ignoring it is
@@ -35,7 +35,8 @@ this guide is all you need to get a change merged.
 |---|---|
 | `lib/`, `exe/`, `test/` | The `forge-ci` gem: config compiler and CLI (stdlib only) |
 | `web/` | Rails 8 control plane: API, GitHub App, web UI, background jobs |
-| `runner/` | Docker runner daemon (stdlib only) |
+| `runner/` | Default Ruby Docker runner daemon (stdlib only) |
+| `runner-go/` | Opt-in Go Docker runner daemon (stdlib only, Go 1.27) |
 | `skills/forge-ci/SKILL.md` | The agent skill (`forge-ci skill install`); keep it in step when config support or the CLI changes |
 | `docs/` | Architecture, API, configuration, troubleshooting, README screenshots |
 | `DEPLOY.md`, `TODO.md` | Production deployment guide, remaining work |
@@ -46,8 +47,11 @@ whole repository.
 ## Set up
 
 You need Ruby 3.2.3 or newer for the control plane (3.0+ is enough for the
-gem and the runner). Postgres is the supported production database, but local
-development and tests run on SQLite.
+compiler gem and Ruby runner). Go runner development and builds require Go 1.27.
+Its static production targets are `linux/amd64` and `linux/arm64`; macOS is for
+development/tests only. Go runner hosts need no Ruby or Go toolchain.
+Postgres is the supported production database, but local development and tests
+run on SQLite. Rails stays Ruby, and a runner switch needs no database change.
 
 ```sh
 git clone https://github.com/azmi2409/forge-ci
@@ -66,17 +70,30 @@ cd runner
 CONTROL_PLANE_URL=http://localhost:3000 RUNNER_TOKEN=<token printed by db:seed> bin/forge-ci-runner
 ```
 
+Ruby remains the default. For an installed-host Go canary, use
+`--implementation go` and follow the
+[Ruby-to-Go migration guide](DEPLOY.md#ruby-to-go-runner-migration), including
+configuration preservation and rollback. Local Go build/run instructions live
+in [runner-go/README.md](runner-go/README.md); opt-in availability does not mean
+the production soak or default cutover is complete.
+
 ## Run the tests
 
 ```sh
-rake test                                                   # compiler gem
-cd web && DATABASE_URL="sqlite3:db/test.sqlite3" bin/rails test   # control plane
-cd runner && rake test                                      # runner
+rake test                                                       # compiler gem
+(cd web && DATABASE_URL="sqlite3:db/test.sqlite3" bin/rails test) # control plane
+(cd runner && rake test)                                       # Ruby runner
+(cd runner-go && go vet ./...)
+(cd runner-go && test -z "$(gofmt -l .)")
+(cd runner-go && go test -race -count=1 ./...)                   # native Linux CI includes Docker
+(cd runner-go && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/forge-ci-runner-amd64 ./cmd/forge-ci-runner)
+(cd runner-go && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/forge-ci-runner-arm64 ./cmd/forge-ci-runner)
 ```
 
-The runner's Docker integration test skips itself when no Docker daemon is
-available. The Postgres-only claim path (`FOR UPDATE SKIP LOCKED`) is guarded
-by adapter checks and has adapter-aware tests, so SQLite is enough locally.
+Both runners' Docker integration tests skip without a Docker daemon locally;
+Go CI requires Docker coverage on native Linux. The Postgres-only claim path
+(`FOR UPDATE SKIP LOCKED`) is guarded by adapter checks and has adapter-aware
+tests, so SQLite is enough locally.
 
 ## Working on each part
 
@@ -92,13 +109,17 @@ heartbeats, logs, cache) is documented in [docs/api.md](docs/api.md). Keep
 changes to it additive, update that document in the same PR, and add a
 controller test for the payload shape.
 
-**Runner (`runner/`).** The runner shells out to the Docker CLI with argv
-arrays, never through a shell string. `RecordingExecutor` in
-`runner/test/test_helper.rb` records the Docker commands instead of running
-them, so most behaviour can be tested without Docker. The `circleci` helper
-installed into job containers lives in
-`runner/lib/forge_ci_runner/circleci_cli.sh`; test it with real files (see
-its existing tests) as well as unit tests.
+**Runners (`runner/`, `runner-go/`).** Both invoke the Docker CLI with argv,
+not shell-concatenated commands. Ruby's `RecordingExecutor` in
+`runner/test/test_helper.rb` and the Go executor/API tests cover most behaviour
+without Docker. Keep changes compatible with the shared
+[runner API](docs/api.md), [Go contract](runner-go/CONTRACT.md) and
+[coverage map](runner-go/TESTING.md). The canonical `circleci_cli.sh` and
+`docker_build_wrapper.sh` live in `runner/lib/forge_ci_runner/`; copy changes
+into `runner-go/internal/executor/scripts/` for embedding, never fork them.
+Go tests enforce byte equality. Test shell helpers with real files as well as
+unit tests. Read [runner-go/SOAK.md](runner-go/SOAK.md) before proposing a
+default cutover; automated checks do not replace production soak evidence.
 
 **Configuration.** Every new environment variable goes in
 [docs/configuration.md](docs/configuration.md), and in `.env.example` or
