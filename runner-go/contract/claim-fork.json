@@ -8,6 +8,7 @@
     { "type": "setup_remote_docker" }
   ],
   "environment": { "NODE_ENV": "test" },
+  "secret_values": [],
   "pipeline": { "sha": "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", "branch": "patch-1" },
   "trusted": false,
   "workflow_run_id": 909,

@@ -18,6 +18,24 @@ class ExecutorTest < Minitest::Test
     assert_nil ex.expand_workdir("")
   end
 
+  def test_redactor_covers_short_project_secrets_and_step_service_environments
+    ex = executor(
+      "secret_values" => ["s3cr3t"],
+      "steps" => [{ "type" => "run", "environment" => { "STEP_SECRET" => "step-secret-value" } }],
+      "executor" => {
+        "image" => "cimg/ruby:3.2",
+        "secondary_images" => [
+          { "image" => "postgres:16", "environment" => { "SERVICE_SECRET" => "service-secret-value" } }
+        ]
+      }
+    )
+    redactor = ex.instance_variable_get(:@redactor)
+
+    ["s3cr3t", "step-secret-value", "service-secret-value"].each do |secret|
+      assert_equal "[REDACTED]", redactor.redact(secret)
+    end
+  end
+
   def test_env_args
     ex = executor
     assert_equal ["-e", "A=1", "-e", "B=two words"],

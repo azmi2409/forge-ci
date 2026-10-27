@@ -21,7 +21,8 @@ module ForgeCIRunner
   #   CHECKOUT_REPO_URL    fallback git URL for `checkout` steps when the claim
   #                        payload has no repository.url; may embed a token, e.g.
   #                        https://x-access-token:TOKEN@github.com/org/repo.git
-  #   REDACT_MIN_LENGTH    env values shorter than this are not redacted (default: 8)
+  #   REDACT_MIN_LENGTH    minimum length for inferred env-value redaction (default: 8);
+  #                        explicit project/context secrets are always redacted
   #   DOCKER_BIN           path to the docker CLI (default: "docker")
 #   BUILDX_BIN           path to a buildx binary (e.g. /opt/forge-ci-runner/bin/buildx,
 #                        installed by the installer) that gets copied into job

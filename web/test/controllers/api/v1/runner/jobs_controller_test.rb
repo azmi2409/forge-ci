@@ -42,6 +42,8 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     # environment: executor env merged with context payloads, contexts win
     assert_equal "test", body["environment"]["RAILS_ENV"]
     assert_equal "s3cr3t", body["environment"]["DEPLOY_KEY"]
+    assert_includes body["secret_values"], "s3cr3t"
+    assert_includes body["secret_values"], "from-context"
 
     # a pipeline from this repository (not a fork) is trusted
     assert_equal true, body["trusted"]
@@ -59,9 +61,12 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
 
   test "claim includes the project's dashboard variables, without the records" do
     @project.variables.create!(name: "FROM_DASHBOARD", value: "dash-value-1234")
+    @project.variables.create!(name: "SHORT_SECRET", value: "p@ss")
     post "/api/v1/runner/jobs/claim", headers: auth
     assert_response :ok
     assert_equal "dash-value-1234", json_body["environment"]["FROM_DASHBOARD"]
+    assert_includes json_body["secret_values"], "dash-value-1234"
+    assert_includes json_body["secret_values"], "p@ss"
     assert_not json_body.key?("variables")
   end
 
@@ -139,6 +144,7 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_response :ok
     assert_equal false, json_body["trusted"]
     assert_equal({ "RAILS_ENV" => "test" }, json_body["environment"])
+    assert_empty json_body["secret_values"]
   end
 
   test "direct fork intake discards requested contexts before copying secrets" do

@@ -23,6 +23,7 @@ type Claim struct {
 	Executor         *Executor `json:"executor"`
 	Steps            []Step    `json:"steps"`
 	Environment      Env       `json:"environment"`
+	SecretValues     []string  `json:"secret_values"`
 	Pipeline         Pipeline  `json:"pipeline"`
 	// Trusted is nil when the server did not send it (older servers);
 	// absence means trusted. Only an explicit false is untrusted.

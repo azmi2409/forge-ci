@@ -62,6 +62,9 @@ func TestParseClaimFull(t *testing.T) {
 	if c.Environment["FORGE_TOKEN"] != "s3cr3t-token-value-0001" {
 		t.Fatalf("environment: %+v", c.Environment)
 	}
+	if len(c.SecretValues) != 1 || c.SecretValues[0] != "s3cr3t-token-value-0001" {
+		t.Fatalf("secret values: %#v", c.SecretValues)
+	}
 	if c.Trusted == nil || !*c.Trusted {
 		t.Fatalf("trusted: %v", c.Trusted)
 	}
@@ -111,6 +114,9 @@ func TestParseClaimAbsenceSemantics(t *testing.T) {
 	if c.ProjectID != nil || c.WorkflowRunID != nil || c.DockerBuildCache != nil {
 		t.Fatal("absent fields must stay nil")
 	}
+	if len(c.SecretValues) != 0 {
+		t.Fatalf("absent secret_values must be empty: %#v", c.SecretValues)
+	}
 
 	// claim-fork.json: explicit trusted false; repository without token.
 	c, err = ParseClaim(fixture(t, "claim-fork.json"))
@@ -125,6 +131,9 @@ func TestParseClaimAbsenceSemantics(t *testing.T) {
 	}
 	if c.DockerBuildCache != nil {
 		t.Fatal("fork must have no docker_build_cache")
+	}
+	if len(c.SecretValues) != 0 {
+		t.Fatalf("fork must have no secret_values: %#v", c.SecretValues)
 	}
 
 	// executor-nulls.json: null executor sub-fields decode as absent;

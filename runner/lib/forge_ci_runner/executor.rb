@@ -77,11 +77,24 @@ module ForgeCIRunner
       # it), but it is still redacted from logs like any secret; so is the
       # build-cache registry password (steps DO see it — they log in with it
       # — but it must never surface in the log).
-      @redactor = Redactor.new(@environment.merge(
-                                 "__checkout_token" => @checkout_token.to_s,
-                                 "__build_cache_password" => build_cache_password
-                               ),
-                               min_length: config.redact_min_length)
+      redact_environment = @environment.dup
+      Array(payload["steps"]).each_with_index do |step, index|
+        next unless step.is_a?(Hash) && step["environment"].is_a?(Hash)
+
+        step["environment"].each { |key, value| redact_environment["__step_#{index}_#{key}"] = value }
+      end
+      executor = payload["executor"].is_a?(Hash) ? payload["executor"] : {}
+      Array(executor["secondary_images"]).each_with_index do |service, index|
+        next unless service.is_a?(Hash) && service["environment"].is_a?(Hash)
+
+        service["environment"].each { |key, value| redact_environment["__service_#{index}_#{key}"] = value }
+      end
+      redact_environment["__checkout_token"] = @checkout_token.to_s
+      redact_environment["__build_cache_password"] = build_cache_password
+      secret_values = Array(payload["secret_values"]) + [@checkout_token, build_cache_password]
+      @redactor = Redactor.new(redact_environment,
+                               min_length: config.redact_min_length,
+                               secret_values: secret_values)
       @streamer = LogStreamer.new(client, @job_id, @redactor,
                                   chunk_size: config.log_chunk_size,
                                   flush_interval: config.log_flush_interval)

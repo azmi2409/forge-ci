@@ -139,13 +139,14 @@ use a plain ordered first-row claim inside the transaction. The claim sets
                 "environment": { "RAILS_ENV": "test" } },
   "steps": [{ "type": "checkout" }, { "type": "run", "name": "Bundle", "command": "bundle install" }],
   "environment": { "RAILS_ENV": "test", "DEPLOY_KEY": "s3cr3t" },  // executor env merged with context payloads; contexts win
+  "secret_values": ["s3cr3t"],                                    // effective project/context secrets for log masking; empty for forks
   "pipeline": { "sha": "abc123def456", "branch": "main" },
   "workflow_run_id": 1,
   "project_id": 1,
   "repository": { "url": "https://github.com/acme/demo.git",       // additive & nil-safe: omitted entirely when
                   "sha": "abc123def456", "branch": "main",          // neither the GitHub repo nor project.repo_url is known
                   "token": "ghs_..." } }                            // GitHub App installation token; only for App-backed repos
-// Raw Context records are NEVER returned.
+// Raw Context records are NEVER returned; runners must redact secret_values before sending logs.
 ```
 
 ### Lifecycle

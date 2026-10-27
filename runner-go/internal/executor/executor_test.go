@@ -313,6 +313,29 @@ func TestExecuteRedaction(t *testing.T) {
 	}
 }
 
+func TestRedactorIncludesExplicitShortAndStepServiceSecrets(t *testing.T) {
+	claimJSON := `{
+      "id": 26, "name": "redaction-sources",
+      "executor": {"image": "cimg/base:current", "secondary_images": [
+        {"image": "postgres:16", "environment": {"SERVICE_SECRET": "service-secret-value"}}
+      ]},
+      "steps": [{"type": "run", "environment": {"STEP_SECRET": "step-secret-value"}}],
+      "environment": {"RAILS_ENV": "test"},
+      "secret_values": ["s3cr3t"],
+      "pipeline": {}
+    }`
+	claim, err := payload.ParseClaim([]byte(claimJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := New(testCfg(""), &fakeCP{}, claim)
+	for _, secret := range []string{"s3cr3t", "step-secret-value", "service-secret-value"} {
+		if got := e.redactor.Redact(secret); got != "[REDACTED]" {
+			t.Errorf("%q was not redacted: %q", secret, got)
+		}
+	}
+}
+
 func TestExecuteCancelMidStep(t *testing.T) {
 	claim := `{
       "id": 24, "name": "canceled",

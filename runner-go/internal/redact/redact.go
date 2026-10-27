@@ -20,14 +20,19 @@ type Redactor struct {
 	secrets []string
 }
 
-// New builds a redactor over the environment's values. Values shorter than
-// minLength are left alone: redacting e.g. "test" or "true" would make logs
-// unreadable, and real secrets are long random strings.
-func New(values map[string]string, minLength int) *Redactor {
+// New redacts inferred environment values at or above minLength, plus every
+// explicit secret value regardless of length. Empty values are always ignored.
+func New(values map[string]string, minLength int, explicit ...string) *Redactor {
 	seen := make(map[string]bool, len(values))
 	var secrets []string
 	for _, v := range values {
-		if len(v) >= minLength && !seen[v] {
+		if v != "" && len(v) >= minLength && !seen[v] {
+			seen[v] = true
+			secrets = append(secrets, v)
+		}
+	}
+	for _, v := range explicit {
+		if v != "" && !seen[v] {
 			seen[v] = true
 			secrets = append(secrets, v)
 		}

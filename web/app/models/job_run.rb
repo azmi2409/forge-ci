@@ -254,6 +254,21 @@ class JobRun < ApplicationRecord
     project.variables_environment.merge(executor_hash["environment"] || {}).merge(context_environment || {})
   end
 
+  # Explicit secret values let runners redact short project/context secrets
+  # without guessing that every short environment value is sensitive.
+  def secret_values
+    return [] if pipeline.forked?
+
+    project_values = project.variables_environment
+    context_values = context_environment || {}
+    effective = project_values.merge(executor_hash["environment"] || {}).merge(context_values)
+
+    project_values.merge(context_values).filter_map do |key, value|
+      value = value.to_s
+      value if !value.empty? && effective[key].to_s == value
+    end.uniq
+  end
+
   # --- claiming ----------------------------------------------------------------
   #
   # Postgres-first: the candidate scan takes FOR UPDATE SKIP LOCKED so two

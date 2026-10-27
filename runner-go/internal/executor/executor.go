@@ -142,7 +142,9 @@ func New(cfg *config.Config, client ControlPlane, claim *payload.Claim) *Executo
 			}
 		}
 	}
-	e.redactor = redact.New(env, cfg.RedactMinLength)
+	secretValues := append([]string(nil), claim.SecretValues...)
+	secretValues = append(secretValues, checkoutToken, buildCachePassword)
+	e.redactor = redact.New(env, cfg.RedactMinLength, secretValues...)
 	e.streamer = logstream.New(client, jobID, e.redactor, cfg.LogChunkSize, time.Duration(cfg.LogFlushInterval*float64(time.Second)))
 	return e
 }
