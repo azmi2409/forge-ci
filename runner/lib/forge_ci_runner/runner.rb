@@ -9,10 +9,9 @@ module ForgeCIRunner
   # the in-flight step is stopped too and the job is released back to the
   # queue for another runner; if the release is refused it is canceled.
   #
-  # Idle polls back off from POLL_INTERVAL up to MAX_IDLE_INTERVAL. With
-  # IDLE_SHUTDOWN_AFTER set, a runner that has had no job for that long stops
-  # claiming, runs IDLE_SHUTDOWN_COMMAND (e.g. terminate this instance) and
-  # exits, so a scale-to-zero group can shrink without cutting a job short.
+  # Idle polls back off from POLL_INTERVAL up to MAX_IDLE_INTERVAL. Once
+  # IDLE_SHUTDOWN_AFTER elapses, bounded outlook-driven linger can keep this
+  # class/pool warm for expected work; then the runner shuts down.
   class Runner
     def initialize(config)
       @config = config
@@ -21,6 +20,7 @@ module ForgeCIRunner
                              max: config.max_idle_interval)
       @shutdown = false
       @idle_since = monotonic
+      @linger_until = nil
     end
 
     def run
@@ -29,23 +29,30 @@ module ForgeCIRunner
           "(#{@config.control_plane_url}, resource_class=#{@config.resource_class || "any"})")
 
       until @shutdown
-        payload = poll_once
+        if @linger_until && monotonic >= @linger_until
+          idle_shutdown
+          break
+        end
+
+        claim_timeout = @linger_until && [@linger_until - monotonic, 0].max
+        payload = poll_once(timeout: claim_timeout)
         break if @shutdown
 
         if payload.nil?
-          # Work is coming (e.g. a deploy waiting for its checks): not idle.
-          @idle_since = monotonic if @client.upcoming.to_i.positive?
-          if idle_too_long?
-            idle_shutdown
-            break
+          if @client.no_work
+            break if idle_wait_or_shutdown
+          else
+            # Outage or error: back off, but never count it as idle.
+            pause(@backoff.tick)
           end
-          pause(@backoff.tick)
+
           next
         end
 
         @backoff.reset
         run_job(payload)
         @idle_since = monotonic
+        @linger_until = nil
       end
 
       log("forge-ci-runner stopped")
@@ -55,8 +62,12 @@ module ForgeCIRunner
 
     # The claimed job's payload, or nil when there is nothing to claim or the
     # control plane could not be reached (the caller backs off either way).
-    def poll_once
-      @client.claim_job(@config.resource_class)
+    def poll_once(timeout: nil)
+      if timeout
+        @client.claim_job(@config.resource_class, timeout: timeout)
+      else
+        @client.claim_job(@config.resource_class)
+      end
     rescue Client::HTTPError => e
       # Bad token: fail fast and loud instead of backing off forever.
       raise if e.code == "401"
@@ -71,6 +82,75 @@ module ForgeCIRunner
     def idle_too_long?
       limit = @config.idle_shutdown_after.to_f
       limit.positive? && monotonic - @idle_since >= limit
+    end
+
+    # Returns true once idle shutdown should end the process. Outlook errors
+    # are fail-closed: at base idle, an unavailable/older server means use the
+    # old immediate-shutdown behavior rather than linger without evidence.
+    def idle_wait_or_shutdown
+      if @client.upcoming.to_i.positive?
+        # Work is coming (e.g. a deploy waiting on checks): not idle.
+        @idle_since = monotonic
+        @linger_until = nil
+        pause(@backoff.tick)
+        return false
+      end
+
+      limit = @config.idle_shutdown_after.to_f
+      unless limit.positive?
+        pause(@backoff.tick)
+        return false
+      end
+
+      if @linger_until
+        remaining = @linger_until - monotonic
+        return shutdown_idle unless remaining.positive?
+        return shutdown_idle unless outlook_has_work?(timeout: remaining)
+        return shutdown_idle if monotonic >= @linger_until
+
+        pause_lingering
+        return false
+      end
+
+      unless idle_too_long?
+        pause(@backoff.tick)
+        return false
+      end
+
+      linger_max = @config.idle_linger_max.to_f
+      return shutdown_idle unless linger_max.positive?
+
+      # Measure the cap from the base-idle deadline, not the later poll that
+      # happened to notice that deadline. Bound the request by the same cap.
+      @linger_until = @idle_since + limit + linger_max
+      remaining = @linger_until - monotonic
+      return shutdown_idle unless remaining.positive?
+      return shutdown_idle unless outlook_has_work?(timeout: remaining)
+      return shutdown_idle if monotonic >= @linger_until
+
+      pause_lingering
+      false
+    end
+
+    def outlook_has_work?(timeout:)
+      outlook = @client.outlook(@config.resource_class, timeout: timeout)
+      %w[queued running pending].sum { |key| outlook[key].to_i }.positive?
+    rescue StandardError => e
+      log("runner outlook unavailable (#{e.class}: #{e.message}); shutting down at base idle")
+      false
+    end
+
+    def pause_lingering
+      remaining = @linger_until - monotonic
+      return unless remaining.positive?
+
+      interval = @config.idle_outlook_interval.to_f
+      pause([interval.positive? ? interval : 15.0, remaining].min)
+    end
+
+    def shutdown_idle
+      idle_shutdown
+      true
     end
 
     def idle_shutdown

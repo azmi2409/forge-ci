@@ -70,6 +70,14 @@ never claim fork jobs; `fork_only` tokens never claim trusted jobs, even when
 classes match or are omitted. Keep the classes this repository already uses;
 a class with no eligible runner leaves jobs queued.
 
+Scale-to-zero runners honor `IDLE_SHUTDOWN_AFTER` as the base idle timeout.
+With a positive `IDLE_LINGER_MAX`, they query the count-only runner Outlook for
+that same pool/class plus classless work, polling claims at
+`IDLE_OUTLOOK_INTERVAL` until a job is claimed or the extra-time cap expires.
+Zero work, network/404 failures, and the default zero linger maximum preserve
+immediate shutdown. Ruby and Go share this behavior; do not change trust or
+resource-class routing to influence linger.
+
 Fork jobs require dedicated, isolated hosts provisioned with a fork-only
 token from **Settings → Runners**. Never route them onto deploy hosts, share
 host storage, or reuse their hosts for trusted jobs without rebuilding.
@@ -89,7 +97,7 @@ do not assume the branch is merged, deployed, or its soak complete.
 Start with an idle, non-deploy canary. Never run both implementations under one
 runner identity, weaken fork/trusted host isolation, or change resource-class
 routing to bypass trust rules. The installer rewrites the env file and unit:
-preserve **all original flags** (class, idle shutdown, ASG, Docker access,
+preserve **all original flags** (class, idle shutdown, idle linger/outlook, ASG, Docker access,
 requeue) and securely restore custom env settings, including timeouts,
 Docker/buildx, and token-file configuration. Never print tokens, env contents,
 or credentials into logs or commits; keep independent protected backups before

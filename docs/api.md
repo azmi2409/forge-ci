@@ -109,6 +109,26 @@ another token → `403`. Default tokens claim trusted repository jobs only;
 `fork_only: true` tokens claim fork jobs only. The shared runner token is
 always trusted-only. Trust cannot be overridden by claim request parameters.
 
+### Idle outlook
+
+`GET /api/v1/runner/outlook` uses runner-token authentication (missing/invalid
+credentials return `401`; admin and personal OAuth tokens are not accepted). It
+returns only aggregate counts, never project/job data:
+
+```json
+{ "queued": 0, "running": 0, "pending": 0 }
+```
+
+Counts follow the calling token's trust pool (`trusted` or `fork_only`) and the
+resource class it can claim, including classless jobs. A token-pinned class wins;
+a classless token may pass `?resource_class=NAME` (omitting it means any class).
+`queued` counts eligible queued jobs whose project has a free `max_concurrency`
+slot, `running` includes claimed and running jobs, and `pending` includes only
+jobs in active pipelines/workflows whose required jobs have not failed or been
+canceled. Terminal pipelines/workflows and unreachable pending jobs are excluded.
+This is a best-effort hint for bounded idle linger, not a reservation; a new job
+can arrive after the count is read.
+
 ### Claim
 
 `POST /api/v1/runner/jobs/claim` — `{ "resource_class": "medium" }` (optional)

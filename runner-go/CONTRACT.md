@@ -45,10 +45,33 @@ Request: `{ "resource_class": "medium" }` (field omitted when the runner has non
 
 - `200` → job payload (below).
 - `422` → nothing claimable: `{ "error": "no claimable jobs right now", "upcoming": 3 }`.
-  `upcoming` ≥ 0; the runner treats >0 as "stay up" for idle-shutdown purposes (0 on older
-  servers, which return no such key — treat missing as 0). [fixture `claim-upcoming-422.json`]
+  `upcoming` remains an additive compatibility field (0 on older servers); current Ruby and
+  Go runners use the count-only `GET /api/v1/runner/outlook` for idle linger instead.
+  [fixture `claim-upcoming-422.json`]
 - `401` → `{ "error": "unauthorized: valid bearer token required" }` — the runner exits
   immediately (bad token never heals by backing off). [fixture `claim-unauthorized-401.json`]
+
+## GET /api/v1/runner/outlook
+
+Runner-token authenticated. Returns counts only for the token's trust pool and the
+resource class it may claim, including classless jobs. A class-pinned token's class
+wins; a classless token may pass `?resource_class=NAME` (omitted means any class).
+The response never includes project, pipeline, or job identifiers:
+
+```json
+{ "queued": 0, "running": 0, "pending": 0 }
+```
+
+- `queued`: queued jobs eligible for this token and class.
+- `running`: claimed or running jobs in the same trust pool and eligible class.
+- `pending`: pending jobs in active pipelines/workflows whose required jobs have
+  not failed or been canceled. Terminal pipelines/workflows and jobs blocked by a
+  failed/canceled prerequisite are excluded.
+- Missing or invalid runner credentials return `401`. This endpoint is runner-only;
+  admin and personal OAuth credentials do not authenticate it.
+
+The endpoint is a best-effort hint for bounded runner linger, not a claim reservation:
+work may become claimable only after the next poll, or disappear before then.
 
 Pool selection (server-side, pinned for regression coverage): fork-only tokens run only
 fork pipelines; every other token runs only trusted pipelines; a NULL class on either side
@@ -154,8 +177,14 @@ tarball then the manifest; attach reads the manifest then extracts each root tar
 
 ## Runner-level behavior pinned by fixtures
 
-- Idle backoff 5s→10s→…→60s cap on 422; reset on claim; `upcoming > 0` suppresses idle
-  shutdown (work is coming).
+- Idle backoff 5s→10s→…→60s cap on 422; reset on claim. Once
+  `IDLE_SHUTDOWN_AFTER` elapses, the runner requests Outlook only when
+  `IDLE_LINGER_MAX > 0`. Positive counts keep claim polling at
+  `IDLE_OUTLOOK_INTERVAL` (default 15s), bounded by the extra linger maximum;
+  both Outlook and claim requests are deadline-bounded to that cap. Zero
+  counts, request errors/404, or reaching the cap shut down at/after base idle.
+  A claimed job resets the idle clock. A zero linger maximum preserves
+  immediate base-idle shutdown and makes no Outlook request.
 - `when` evaluation: `on_success` runs only while no earlier step failed; `on_fail` only
   after a failure; `always` always; unknown values fall back to on_success semantics.
   Non-`run` steps follow on_success semantics.

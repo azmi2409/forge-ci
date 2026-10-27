@@ -79,6 +79,22 @@ class ClientTest < Minitest::Test
     assert_equal 2, @client.upcoming
   end
 
+  def test_outlook_gets_class_scoped_counts_with_runner_auth
+    @server.stub("GET", "/api/v1/runner/outlook?resource_class=large", "200",
+                 { "queued" => 2, "running" => 1, "pending" => 3 })
+    assert_equal({ "queued" => 2, "running" => 1, "pending" => 3 }, @client.outlook("large"))
+    request = @server.last_request
+    assert_equal "GET", request[:method]
+    assert_equal "Bearer test-token", request[:headers]["authorization"]
+    assert_equal "/api/v1/runner/outlook?resource_class=large", request[:path]
+  end
+
+  def test_outlook_404_is_an_error_for_fail_closed_idle_handling
+    @server.stub("GET", "/api/v1/runner/outlook", "404", { "error" => "not found" })
+    error = assert_raises(ForgeCIRunner::Client::HTTPError) { @client.outlook(nil) }
+    assert_equal "404", error.code
+  end
+
   def test_claim_raises_on_401
     @server.stub("POST", "/api/v1/runner/jobs/claim", "401",
                  { "error" => "bad token" })

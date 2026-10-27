@@ -3,6 +3,7 @@
 require "net/http"
 require "json"
 require "uri"
+require "timeout"
 require "securerandom"
 require "socket"
 
@@ -37,20 +38,30 @@ module ForgeCIRunner
     # or nil when the server answers 422 (nothing claimable).
     # Jobs of this runner's class waiting on earlier jobs, from the last
     # claim that found nothing (0 from older servers).
-    attr_reader :upcoming
+    attr_reader :upcoming, :no_work
 
-    def claim_job(resource_class)
+    def claim_job(resource_class, timeout: nil)
       body = {}
       body["resource_class"] = resource_class if resource_class
       @upcoming = 0
-      post("/api/v1/runner/jobs/claim", body)
+      @no_work = false
+      post("/api/v1/runner/jobs/claim", body, timeout: timeout)
     rescue HTTPError => e
       if e.code == "422"
+        @no_work = true
         @upcoming = (JSON.parse(e.body.to_s)["upcoming"].to_i rescue 0)
         return nil
       end
 
       raise
+    end
+
+    # GET /api/v1/runner/outlook — aggregate counts scoped to this token's
+    # trust pool and the runner's class (plus classless jobs).
+    def outlook(resource_class, timeout: nil)
+      path = "/api/v1/runner/outlook"
+      path += "?#{URI.encode_www_form(resource_class: resource_class)}" unless resource_class.to_s.empty?
+      get(path, timeout: timeout)
     end
 
     # POST /api/v1/runner/jobs/:id/start
@@ -147,17 +158,22 @@ module ForgeCIRunner
 
     private
 
-    def get(path)
+    def get(path, timeout: nil)
       uri = URI.join(@base + "/", path.sub(%r{\A/}, ""))
       request = Net::HTTP::Get.new(uri)
       request["Authorization"] = "Bearer #{@token}"
       request["Accept"] = "application/json"
-
-      response = Net::HTTP.start(uri.host, uri.port,
-                                 use_ssl: uri.scheme == "https",
-                                 open_timeout: 10, read_timeout: 60) do |http|
-        http.request(request)
+      request_timeout = timeout.to_f if timeout
+      request_timeout = nil unless request_timeout&.positive?
+      http_request = lambda do
+        Net::HTTP.start(uri.host, uri.port,
+                        use_ssl: uri.scheme == "https",
+                        open_timeout: request_timeout ? [10.0, request_timeout].min : 10,
+                        read_timeout: request_timeout ? [60.0, request_timeout].min : 60) do |http|
+          http.request(request)
+        end
       end
+      response = request_timeout ? Timeout.timeout(request_timeout, &http_request) : http_request.call
 
       parse_response(response)
     end
@@ -181,7 +197,7 @@ module ForgeCIRunner
       parse_response(response)
     end
 
-    def post(path, payload)
+    def post(path, payload, timeout: nil)
       uri = URI.join(@base + "/", path.sub(%r{\A/}, ""))
       request = Net::HTTP::Post.new(uri)
       request["Authorization"] = "Bearer #{@token}"
@@ -191,12 +207,17 @@ module ForgeCIRunner
       request["X-Forge-Runner-Hostname"] = @runner_hostname
       request["X-Forge-Runner-Implementation"] = "ruby"
       request.body = JSON.generate(payload)
-
-      response = Net::HTTP.start(uri.host, uri.port,
-                                 use_ssl: uri.scheme == "https",
-                                 open_timeout: 10, read_timeout: 60) do |http|
-        http.request(request)
+      request_timeout = timeout.to_f if timeout
+      request_timeout = nil unless request_timeout&.positive?
+      http_request = lambda do
+        Net::HTTP.start(uri.host, uri.port,
+                        use_ssl: uri.scheme == "https",
+                        open_timeout: request_timeout ? [10.0, request_timeout].min : 10,
+                        read_timeout: request_timeout ? [60.0, request_timeout].min : 60) do |http|
+          http.request(request)
+        end
       end
+      response = request_timeout ? Timeout.timeout(request_timeout, &http_request) : http_request.call
 
       parse_response(response)
     end

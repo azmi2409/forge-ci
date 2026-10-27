@@ -42,6 +42,9 @@ func TestDefaults(t *testing.T) {
 	if c.AllowDockerSocket || c.RequeueOnShutdown || c.IdleShutdownAfter != 0 {
 		t.Fatal("flag defaults must be off")
 	}
+	if c.IdleLingerMax != 0 || c.IdleOutlookInterval != 15 {
+		t.Fatalf("idle outlook defaults: max=%v interval=%v", c.IdleLingerMax, c.IdleOutlookInterval)
+	}
 	if c.ResourceClass != "" || c.BuildxBin != "" {
 		t.Fatal("optional strings default to empty")
 	}
@@ -116,6 +119,19 @@ func TestRubyStyleNumberParsing(t *testing.T) {
 	}
 	if c.PollInterval != 5 {
 		t.Fatalf("default poll interval: %v", c.PollInterval)
+	}
+}
+
+func TestIdleOutlookOverrides(t *testing.T) {
+	c, err := fromEnv(testEnv(map[string]string{
+		"CONTROL_PLANE_URL": "https://ci.example.com", "RUNNER_TOKEN": "test-token",
+		"IDLE_LINGER_MAX": "600", "IDLE_OUTLOOK_INTERVAL": "20",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.IdleLingerMax != 600 || c.IdleOutlookInterval != 20 {
+		t.Fatalf("idle config: max=%v interval=%v", c.IdleLingerMax, c.IdleOutlookInterval)
 	}
 }
 

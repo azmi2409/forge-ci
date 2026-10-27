@@ -31,7 +31,7 @@ not evidence supplied by this document.
 | `multipart_test.rb` | `internal/api` | replaced by mime multipart with computed length (never chunked) |
 | `redactor_test.rb` | `internal/redact` | longest-first literal, min length, dedupe, MaxSecretLen |
 | `requeue_on_shutdown_test.rb` | `internal/runner/runner_test.go` + `internal/executor/executor_test.go` | requeue mid-step: interrupt → containers stopped → logs drained → release; release failure → canceled fallback; released job never continues locally |
-| `runner_loop_test.rb` | `internal/runner/runner_test.go` | claim→start→heartbeat→complete; idle backoff, upcoming suppression, idle shutdown, 401 exit; PLUS the five required races: signal during claim, signal after claim before start (hook-injected), cancel vs completion (complete once), release response lost, heartbeat in flight at finalization (bounded 2s) |
+| `runner_loop_test.rb` | `internal/runner/runner_test.go` | claim→start→heartbeat→complete; idle backoff, Outlook-driven bounded linger, zero/error/404 fallback, max-cap shutdown, zero-max compatibility, 401 exit; PLUS the five required races: signal during claim, signal after claim before start (hook-injected), cancel vs completion (complete once), release response lost, heartbeat in flight at finalization (bounded 2s) |
 | `step_planner_test.rb` | `internal/planner` | ordering, display names, `when` semantics |
 | `tarball_test.rb` | `internal/tarutil` | create/extract, missing-path warnings, nothing-to-archive |
 | `timeout_cancel_test.rb` | `internal/executor/executor_test.go` + `proc_test.go` | no-output 124, job deadline 124, cancel 130, process-group TERM→KILL, ctx cancellation of arbitrary docker ops |

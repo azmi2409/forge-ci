@@ -10,6 +10,8 @@ CONTROL_PLANE_URL="https://ci.example.com"
 RESOURCE_CLASS="spot"                       # this group's class, e.g. spot or deploy
 RUNNER_TOKEN_PARAMETER="/forge-ci/runner-token"
 IDLE_SHUTDOWN_AFTER=600                     # seconds without a job before the instance removes itself
+IDLE_LINGER_MAX=0                            # extra seconds to wait only when eligible work is expected
+IDLE_OUTLOOK_INTERVAL=15                     # seconds between claim/outlook polls during linger
 REQUEUE_ON_SHUTDOWN=0                       # 1 on Spot groups with retry-safe jobs (never deploy): a reclaimed
                                             # instance puts its job back in the queue instead of canceling it
 
@@ -34,4 +36,7 @@ requeue=""
 
 # The same installer as the command on the Runners page.
 curl -fsSL "$CONTROL_PLANE_URL/install-runner" | sh -s -- \
-  --token "$runner_token" --class "$RESOURCE_CLASS" --idle-shutdown "$IDLE_SHUTDOWN_AFTER" --asg $requeue
+  --token "$runner_token" --class "$RESOURCE_CLASS" \
+  --idle-shutdown "$IDLE_SHUTDOWN_AFTER" \
+  --idle-linger-max "$IDLE_LINGER_MAX" \
+  --idle-outlook-interval "$IDLE_OUTLOOK_INTERVAL" --asg $requeue

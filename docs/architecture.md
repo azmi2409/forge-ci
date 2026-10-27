@@ -92,6 +92,17 @@ A job whose heartbeat is older than 120s (`JobRun::STALE_HEARTBEAT_AFTER`) is
 reclaimed to `queued` by a Solid Queue recurring job (every 60s) — a crashed
 runner never wedges the queue.
 
+### Smart idle shutdown
+
+After `IDLE_SHUTDOWN_AFTER`, Ruby and Go runners may query the
+runner-authenticated `GET /api/v1/runner/outlook`. The server returns only
+queued, claimed/running, and viable pending counts for the token's trust pool
+and claimable class plus classless jobs. A positive outlook keeps the runner
+polling at `IDLE_OUTLOOK_INTERVAL`, but only until a claim resets idle or
+`IDLE_LINGER_MAX` expires; zero counts, older-server/network errors, or a zero
+linger maximum preserve immediate shutdown. This is advisory rather than a
+reservation: the claim endpoint remains the authority and enforces routing.
+
 ### GitHub App (component 3)
 
 `push` / `pull_request` webhooks → HMAC-verified → `Github::SyncPipelineJob`

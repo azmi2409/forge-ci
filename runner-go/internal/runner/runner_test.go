@@ -36,6 +36,12 @@ type fakeRunnerCP struct {
 	claimHook func()
 	// idleUpcoming is the upcoming count returned with ErrIdle (default 0).
 	idleUpcoming int
+	// Outlook replies/errors are scripted independently of claim responses.
+	outlookReplies []*api.Outlook
+	outlookErrors  []error
+	outlookDefault *api.Outlook
+	outlookCalls   int
+	outlookLatency time.Duration
 	// heartbeatLatency makes heartbeats slow to test finalization races.
 	heartbeatLatency  time.Duration
 	heartbeatHook     func()
@@ -90,6 +96,39 @@ func (f *fakeRunnerCP) Claim(ctx context.Context, resourceClass string) (*payloa
 		hook()
 	}
 	return claim, 0, nil
+}
+
+func (f *fakeRunnerCP) Outlook(ctx context.Context, _ string) (*api.Outlook, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	i := f.outlookCalls
+	f.outlookCalls++
+	var reply *api.Outlook
+	var err error
+	if i < len(f.outlookErrors) && f.outlookErrors[i] != nil {
+		err = f.outlookErrors[i]
+	} else if i < len(f.outlookReplies) {
+		reply = f.outlookReplies[i]
+	} else {
+		reply = f.outlookDefault
+	}
+	latency := f.outlookLatency
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if latency > 0 {
+		timer := time.NewTimer(latency)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return reply, nil
 }
 
 func (f *fakeRunnerCP) Start(ctx context.Context, jobID int64) error {
@@ -450,12 +489,12 @@ func TestUnauthorizedExits(t *testing.T) {
 	}
 }
 
-// Idle shutdown: after enough idle time the runner exits (running the
-// command is out of scope here — empty command).
+// Idle shutdown: without a linger window the runner exits at base idle.
 func TestIdleShutdown(t *testing.T) {
-	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{nil}, idleUpcoming: 0} // always idle
+	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{nil}}
 	cfg := runnerCfg(t)
 	cfg.IdleShutdownAfter = 0.2
+	cfg.IdleLingerMax = 0
 	r := New(cfg, f)
 	start := time.Now()
 	if err := r.Run(context.Background()); err != nil {
@@ -463,6 +502,9 @@ func TestIdleShutdown(t *testing.T) {
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Fatal("idle shutdown took too long")
+	}
+	if f.outlookCalls != 0 {
+		t.Fatalf("zero linger should not request outlook, calls=%d", f.outlookCalls)
 	}
 }
 
@@ -490,6 +532,137 @@ func TestUpcomingSuppressesIdleShutdown(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("did not stop")
+	}
+}
+
+// A control-plane outage is not "no work": errors other than ErrIdle must not
+// count toward idle shutdown, or an outage could terminate the instance.
+func TestClaimOutageDoesNotCountAsIdle(t *testing.T) {
+	errs := make([]error, 300)
+	for i := range errs {
+		errs[i] = errors.New("offline")
+	}
+	f := &fakeRunnerCP{t: t, claimErrs: errs}
+	cfg := runnerCfg(t)
+	cfg.IdleShutdownAfter = 0.1
+	r := New(cfg, f)
+
+	done := make(chan error, 1)
+	go func() { done <- r.Run(context.Background()) }()
+	select {
+	case err := <-done:
+		t.Fatalf("runner exited during an outage: %v", err)
+	case <-time.After(1 * time.Second):
+		r.beginShutdown(nil)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("did not stop")
+	}
+}
+
+func TestOutlookWorkLingersUntilJobIsClaimed(t *testing.T) {
+	f := &fakeRunnerCP{
+		t:              t,
+		claims:         []*payload.Claim{nil, nil, mustClaim(t, 108, "true")},
+		outlookReplies: []*api.Outlook{{Pending: 1}},
+	}
+	cfg := runnerCfg(t)
+	cfg.IdleShutdownAfter = 0.05
+	cfg.IdleLingerMax = 1
+	cfg.IdleOutlookInterval = 0.01
+	r := New(cfg, f)
+	runOnce(t, r, f, 108)
+	if f.outlookCalls != 1 {
+		t.Fatalf("outlook calls=%d, want 1 before claiming", f.outlookCalls)
+	}
+	if !f.hasStarted(108) {
+		t.Fatal("job was not claimed while lingering")
+	}
+}
+
+func TestZeroOutlookShutsDownAtBaseIdle(t *testing.T) {
+	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{nil}, outlookReplies: []*api.Outlook{{}}}
+	cfg := runnerCfg(t)
+	cfg.IdleShutdownAfter = 0.05
+	cfg.IdleLingerMax = 1
+	r := New(cfg, f)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if f.outlookCalls != 1 {
+		t.Fatalf("outlook calls=%d, want 1", f.outlookCalls)
+	}
+}
+
+func TestPositiveOutlookCannotExceedLingerMax(t *testing.T) {
+	f := &fakeRunnerCP{t: t, outlookDefault: &api.Outlook{Pending: 1}}
+	cfg := runnerCfg(t)
+	cfg.IdleShutdownAfter = 0.05
+	cfg.IdleLingerMax = 0.15
+	cfg.IdleOutlookInterval = 0.03
+	r := New(cfg, f)
+	start := time.Now()
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	elapsed := time.Since(start)
+	if elapsed < 180*time.Millisecond || elapsed > time.Second {
+		t.Fatalf("shutdown elapsed=%v, want near 200ms", elapsed)
+	}
+	if f.outlookCalls < 2 {
+		t.Fatalf("only %d outlook requests during linger", f.outlookCalls)
+	}
+}
+
+func TestSlowOutlookCannotExceedLingerMax(t *testing.T) {
+	f := &fakeRunnerCP{t: t, outlookDefault: &api.Outlook{Pending: 1}, outlookLatency: time.Second}
+	cfg := runnerCfg(t)
+	cfg.IdleShutdownAfter = 0.05
+	cfg.IdleLingerMax = 0.15
+	cfg.IdleOutlookInterval = 0.03
+	r := New(cfg, f)
+	start := time.Now()
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 350*time.Millisecond {
+		t.Fatalf("slow Outlook exceeded the base-idle plus linger cap: %v", elapsed)
+	}
+	if f.outlookCalls != 1 {
+		t.Fatalf("outlook calls=%d, want one deadline-bounded call", f.outlookCalls)
+	}
+}
+
+func TestOutlookErrorFallsBackToBaseIdle(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "404 older server", err: &api.APIError{Code: 404, Body: "not found"}},
+		{name: "network error", err: errors.New("offline")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeRunnerCP{t: t, outlookErrors: []error{tc.err}}
+			cfg := runnerCfg(t)
+			cfg.IdleShutdownAfter = 0.05
+			cfg.IdleLingerMax = 1
+			r := New(cfg, f)
+			start := time.Now()
+			if err := r.Run(context.Background()); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
+				t.Fatalf("fallback took too long: %v", elapsed)
+			}
+			if f.outlookCalls != 1 {
+				t.Fatalf("outlook calls=%d, want 1", f.outlookCalls)
+			}
+		})
 	}
 }
 
