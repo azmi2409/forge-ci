@@ -6,6 +6,11 @@ separately.
 
 ## Unreleased
 
+- Ruby and Go runners check cache metadata before `save_cache`: existing exact
+  keys skip archive creation and upload; prefix matches and misses still save.
+  Lookup failures warn and skip saving without failing the job. Workspace writes
+  remain replaceable. Concurrent first writers can still upload the same key;
+  this avoids a new reservation protocol. Upgrade runner processes to activate.
 - Add runner-authenticated `GET /api/v1/runner/outlook` with queued, claimed/running,
   and viable pending counts scoped to the token's trust pool and claimable resource
   class, including classless jobs. Pending work blocked by a failed prerequisite or

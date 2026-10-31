@@ -726,6 +726,16 @@ module ForgeCIRunner
       paths = Array(step["paths"]).map(&:to_s).reject(&:empty?)
       return warn_zero("save_cache has no paths; skipping") if paths.empty?
 
+      begin
+        hit = @client.get_cache(@project_id, [key])
+      rescue StandardError => e
+        return warn_zero("save_cache lookup failed: #{e.class}: #{e.message}")
+      end
+      if hit && hit["key"] == key
+        log_line("[forge-ci] save_cache: exact key already exists; skipping upload")
+        return 0
+      end
+
       workdir = @workdir || "/root/project"
       container_tgz = "/tmp/forge-ci-cache-#{SecureRandom.hex(6)}.tgz"
       _out, code = run_docker(*tar_create_argv(container_tgz, paths, workdir))
