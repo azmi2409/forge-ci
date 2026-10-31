@@ -319,6 +319,15 @@ func (e *Executor) executeSaveCache(step *payload.Step) int {
 		return e.warnZero("save_cache has no paths; skipping")
 	}
 
+	hit, err := e.client.GetCache(e.uploadCtx(), *e.projectID, []string{key})
+	if err != nil {
+		return e.warnZero("save_cache lookup failed: %v", err)
+	}
+	if hit != nil && hit.Key == key {
+		e.logf("[forge-ci] save_cache: exact key already exists; skipping upload")
+		return 0
+	}
+
 	containerTgz := e.containerTemp("cache")
 	res, err := e.runLogged(e.tarCreateArgs(containerTgz, paths, e.workdir())...)
 	if err != nil || res.exitCode != 0 {
@@ -336,7 +345,7 @@ func (e *Executor) executeSaveCache(step *payload.Step) int {
 	if err := e.cpFromContainer(containerTgz, hostTgz); err != nil {
 		return e.warnZero("save_cache failed: %v", err)
 	}
-	hit, err := e.client.PutCache(e.uploadCtx(), *e.projectID, key, hostTgz)
+	hit, err = e.client.PutCache(e.uploadCtx(), *e.projectID, key, hostTgz)
 	if err != nil {
 		return e.warnZero("save_cache failed: %v", err)
 	}

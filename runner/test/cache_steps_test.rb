@@ -123,6 +123,27 @@ class CacheStepsTest < Minitest::Test
     assert_includes cmd[1].join(" "), "https://fallback.example/r.git"
   end
 
+  def test_save_cache_skips_only_exact_existing_key
+    ["gems-v1", "gems-v1-newer", nil, :error].each do |existing|
+      tgz, dir = fixture_tgz("vendor/a.txt" => "v")
+      begin
+        ex, client = runner("steps" => [{ "type" => "save_cache", "keys" => ["gems-v1"], "paths" => ["vendor"] }])
+        ex.fixture_tgz = tgz
+        client.define_singleton_method(:get_cache) do |*|
+          raise "lookup unavailable" if existing == :error
+          existing && { "key" => existing, "download_url" => "unused" }
+        end
+        status, = ex.execute
+        assert_equal "success", status
+        should_upload = existing.nil? || existing == "gems-v1-newer"
+        assert_equal should_upload, client.calls.any? { |c| c[0] == :put_cache }, existing.inspect
+        assert_equal should_upload, ex.commands.any? { |c| c[0] == :fetch_tarball }, existing.inspect
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   def test_save_cache_resolves_key_and_uploads
     tgz, dir = fixture_tgz("vendor/a.txt" => "v")
     begin

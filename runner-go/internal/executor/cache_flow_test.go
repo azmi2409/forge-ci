@@ -111,6 +111,48 @@ func cacheFlowClaim(t *testing.T, workdir string, steps string) *payload.Claim {
 	return c
 }
 
+type cacheLookupCP struct {
+	*cacheFlowCP
+	hit *api.CacheHit
+	err error
+}
+
+func (f *cacheLookupCP) GetCache(context.Context, int64, []string) (*api.CacheHit, error) {
+	return f.hit, f.err
+}
+
+func TestSaveCacheExactKeyPreflight(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		hit    *api.CacheHit
+		err    error
+		upload bool
+	}{
+		{name: "exact", hit: &api.CacheHit{Key: "gems-v1"}},
+		{name: "prefix", hit: &api.CacheHit{Key: "gems-v1-newer"}, upload: true},
+		{name: "miss", upload: true},
+		{name: "error", err: fmt.Errorf("lookup unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin, _ := fakeDocker(t)
+			workdir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(workdir, "gem"), []byte("dependency"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cp := &cacheLookupCP{cacheFlowCP: newCacheFlowCP(t), hit: tc.hit, err: tc.err}
+			e := New(testCfg(bin), cp, cacheFlowClaim(t, workdir, `[{"type":"save_cache","key":"gems-v1","paths":["gem"]}]`))
+			status, _ := e.Execute(context.Background(), func() bool { return false }, func() bool { return false })
+			if status != StatusSuccess {
+				t.Fatalf("status %s", status)
+			}
+			_, uploaded := cp.store["gems-v1"]
+			if uploaded != tc.upload {
+				t.Fatalf("uploaded=%v, want %v", uploaded, tc.upload)
+			}
+		})
+	}
+}
+
 func TestCacheSaveRestoreFlow(t *testing.T) {
 	bin, _ := fakeDocker(t)
 	cfg := testCfg(bin)
