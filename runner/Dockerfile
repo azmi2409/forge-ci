@@ -1,7 +1,7 @@
 # ForgeCI Docker runner. Stdlib-only Ruby plus the docker CLI.
 # Run with the host's Docker socket mounted so it can drive the daemon:
 #   docker run -v /var/run/docker.sock:/var/run/docker.sock ...
-FROM ruby:3.3-slim
+FROM ruby:3.3.13-slim
 
 # buildx is copied into job images that lack it, for docker_layer_caching
 # builds (see docs/configuration.md); keep it fresh when bumping.

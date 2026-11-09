@@ -6,7 +6,7 @@ polls the control plane, claims jobs, and executes them in Docker containers.
 Pure Ruby, **stdlib only** (`net/http`, `json`, `open3`, `openssl`,
 `shellwords`, `securerandom`, `time`) — no gems. The `docker` CLI is shelled
 out to via `Open3` with argv arrays (never through a shell). Tested on
-**Ruby 3.2.3** (requires >= 3.0).
+**Ruby 3.3.13** (requires >= 3.0).
 
 Ruby remains the **default runner** on the PR #28 `runner-go` branch. The
 [Go runner](../runner-go/README.md) is opt-in with `--implementation go`;

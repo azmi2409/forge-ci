@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.2.3"
+          ruby-version: "3.3.13"
           bundler-cache: true
           working-directory: web
       - name: Prepare database
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3"
+          ruby-version: "3.3.13"
       - name: Install test deps
         run: gem install rake minitest
       - name: Run tests
