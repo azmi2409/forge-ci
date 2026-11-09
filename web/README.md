@@ -21,7 +21,7 @@ explicit cutover gates pass.
 
 ## Versions used
 
-- Ruby **3.2.3**, Rails **8.1.4**
+- Ruby **3.3.13**, Rails **8.1.4.1**
 - **PostgreSQL is the supported database** (9.5+). The atomic runner-claim
   path uses `SELECT … FOR UPDATE SKIP LOCKED`, which is Postgres-only.
 - This VM has **no Postgres server** (no `psql`, and `apt-get install

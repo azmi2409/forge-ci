@@ -5,7 +5,7 @@
 # This Dockerfile understands the monorepo layout, where the forge-ci gem
 # lives at the repo root (copied to /forge-ci for the path-gem reference).
 
-ARG RUBY_VERSION=3.2.3
+ARG RUBY_VERSION=3.3.13
 FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
 
 WORKDIR /rails
