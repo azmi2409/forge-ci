@@ -57,7 +57,7 @@ class Pipeline < ApplicationRecord
 
     reset = 0
     transaction do
-      workflow_runs.includes(:job_runs).each do |workflow|
+      workflow_runs.order(:id).lock.includes(:job_runs).each do |workflow|
         by_name = workflow.job_runs.group_by(&:name)
         rerun_names = by_name.keys.select { |name| !only_failed || !by_name[name].all?(&:success?) }
         next if rerun_names.empty?

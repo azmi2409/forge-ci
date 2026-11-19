@@ -102,7 +102,11 @@ module Api
 
         def with_job_lock
           @locked_job = JobRun.find(params[:id])
-          @locked_job.with_lock { yield }
+          if %w[complete release].include?(action_name)
+            @locked_job.with_workflow_job_lock { yield }
+          else
+            @locked_job.with_lock { yield }
+          end
         rescue ActiveRecord::RecordNotFound
           render json: { error: "job not found" }, status: :not_found
         end
