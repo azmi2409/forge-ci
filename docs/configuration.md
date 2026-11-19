@@ -110,6 +110,23 @@ to 5 seconds, and are reaped. A timed-out/interrupted step removes its primary
 container under a fresh cleanup budget and skips remaining steps, including
 `when: always`; final container/network cleanup still runs.
 
+Ruby keeps enforcing deadlines and cancellation until both the Docker client
+and its output reader finish. After client exit, output continues draining to
+EOF. With `JOB_TIMEOUT=0`, a five-second idle wait for pipe data bounds drain
+from descendants; arriving data resets this wait, and callback/upload time
+does not count as pipe-idle time. An active job deadline still counts callback
+time. Interruption kills the process group, closes the pipe and bounds reader
+teardown. Service containers use generated host names and job ownership labels;
+job-supplied service names remain network aliases, and cleanup verifies the
+label before removing a service by its immutable container ID.
+
+On SIGTERM/SIGINT, a claimed job that has not started is released back to the
+queue, regardless of `REQUEUE_ON_SHUTDOWN`. This includes a claim response that
+arrives after shutdown begins. If release is refused (including 409) or fails,
+the runner uses the existing cancellation-report fallback. The flag controls
+shutdown of jobs already executing, not handoff of unstarted claims. A lost
+claim response with no known job ID still relies on stale-job recovery.
+
 Completion reports include step results and are retried only on network errors
 and 5xx responses: at most three attempts with 1s then 2s backoff, a 5-second
 deadline per attempt, and a 20-second total budget. All 4xx responses stop retries;
