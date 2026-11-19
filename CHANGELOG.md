@@ -10,6 +10,10 @@ separately.
   runners send `X-Forge-Attempt` on per-job requests; stale attempts receive
   403 before changing lifecycle state or logs. Requests without the header
   remain compatible. Deploy the `job_runs.attempt_token` migration first.
+- Ruby runner Docker operations now honor the job deadline, including image
+  pulls, setup and transfers. Startup checks, checksum queries and cleanup have
+  separate bounded budgets matching Go. Timed-out CLI process groups are killed
+  and reaped; interrupted steps remove their container and skip remaining steps.
 - Ruby and Go runners release claimed-but-not-started jobs when shutdown races
   a claim, regardless of `REQUEUE_ON_SHUTDOWN`, instead of abandoning or canceling
   them. Release failures use the existing cancellation fallback.
