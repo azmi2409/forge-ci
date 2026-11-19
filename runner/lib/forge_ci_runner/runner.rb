@@ -13,6 +13,8 @@ module ForgeCIRunner
   # IDLE_SHUTDOWN_AFTER elapses, bounded outlook-driven linger can keep this
   # class/pool warm for expected work; then the runner shuts down.
   class Runner
+    class ShutdownCommandFailed < StandardError; end
+
     def initialize(config)
       @config = config
       @client = Client.new(config)
@@ -160,7 +162,7 @@ module ForgeCIRunner
 
       log("running IDLE_SHUTDOWN_COMMAND")
       ok = system(command)
-      raise "IDLE_SHUTDOWN_COMMAND failed (exit #{$?&.exitstatus}); exiting for service restart" unless ok
+      raise ShutdownCommandFailed, "IDLE_SHUTDOWN_COMMAND failed (exit #{$?&.exitstatus}); exiting for service restart" unless ok
     end
 
     # Seams for tests.

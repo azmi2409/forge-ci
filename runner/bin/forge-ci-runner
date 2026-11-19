@@ -17,4 +17,9 @@ unless ForgeCIRunner::Executor.docker_available?(config.docker_bin)
   exit 2
 end
 
-ForgeCIRunner::Runner.new(config).run
+begin
+  ForgeCIRunner::Runner.new(config).run
+rescue ForgeCIRunner::Runner::ShutdownCommandFailed => e
+  $stderr.puts "forge-ci-runner: #{e.message}"
+  exit 1
+end

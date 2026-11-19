@@ -119,7 +119,7 @@ class RunnerLoopTest < Minitest::Test
     [false, nil].each do |result|
       r = runner([], on_empty: -> { nil }, idle_shutdown_after: 1.0, idle_shutdown_command: "terminate-me")
       r.define_singleton_method(:system) { |_command| result }
-      error = assert_raises(StandardError) { r.run }
+      error = assert_raises(ForgeCIRunner::Runner::ShutdownCommandFailed) { r.run }
       assert_match(/IDLE_SHUTDOWN_COMMAND failed/, error.message)
     end
   end
