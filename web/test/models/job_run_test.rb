@@ -76,6 +76,18 @@ class JobRunTest < ActiveSupport::TestCase
     end
   end
 
+  test "unblocking does not lock dependents whose requirements are unsatisfied" do
+    job = build_job(status: "success")
+    dependent = job.workflow_run.job_runs.create!(name: "deploy", requires: ["unfinished"],
+                                                  executor: { "type" => "docker" })
+    pending_snapshot(job, dependent)
+    dependent.define_singleton_method(:with_lock) { raise "locked an unready dependent" }
+
+    job.send(:unblock_dependents!)
+
+    assert dependent.reload.pending?
+  end
+
   test "unreachable cascade skips dependents already moved since selection" do
     %w[queued canceled].each do |status|
       job = build_job(status: "failed")

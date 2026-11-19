@@ -470,15 +470,18 @@ class JobRun < ApplicationRecord
   end
 
   def cancel_unreachable_dependents!
+    dead = workflow_run.job_runs.where(status: %w[failed canceled]).pluck(:name).to_set
+    pending = workflow_run.job_runs.pending.to_a
+    doomed = []
     loop do
-      dead = workflow_run.job_runs.where(status: %w[failed canceled]).pluck(:name).to_set
-      doomed = workflow_run.job_runs.pending.select { |j| j.requires_list.any? { |r| dead.include?(r) } }
-      break if doomed.empty?
+      unreachable, pending = pending.partition { |j| j.requires_list.any? { |r| dead.include?(r) } }
+      break if unreachable.empty?
 
-      doomed.each do |job|
-        job.with_lock { job.cancel! if job.pending? }
-      end
+      doomed.concat(unreachable)
+      dead.merge(unreachable.map(&:name))
     end
+    JobRun.where(workflow_run_id: workflow_run_id, id: doomed.map(&:id))
+          .pending.order(:id).lock.each(&:cancel!)
   end
 
   # A required job counts as successful only once every one of its
@@ -489,6 +492,8 @@ class JobRun < ApplicationRecord
                              .select { |_name, rows| rows.all? { |_n, status| status == "success" } }
                              .keys.to_set
     workflow_run.job_runs.pending.find_each do |job|
+      next unless job.pending? && job.requires_list.all? { |r| successful.include?(r) }
+
       job.with_lock do
         next unless job.pending?
 
