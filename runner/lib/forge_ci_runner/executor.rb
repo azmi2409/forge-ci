@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "open3"
+require_relative "docker_process"
 require "shellwords"
 require "securerandom"
 require "time"
@@ -107,8 +107,8 @@ module ForgeCIRunner
     end
 
     def self.docker_available?(docker_bin = "docker")
-      _out, status = Open3.capture2e(docker_bin, "info")
-      status.success?
+      _out, status, reason = DockerProcess.capture([docker_bin, "info"], deadline: DockerProcess.monotonic + 10)
+      !reason && status.success?
     rescue StandardError
       false
     end
@@ -126,6 +126,7 @@ module ForgeCIRunner
       @cancel_check = cancel_check
       @requeue_check = @config.requeue_on_shutdown ? shutdown_check : -> { false }
       @stopped_for_requeue = false
+      @step_interrupted = false
       @job_deadline = @config.job_timeout.to_f.positive? ? monotonic + @config.job_timeout : nil
 
       @streamer.start
@@ -135,6 +136,11 @@ module ForgeCIRunner
         setup_containers
 
         StepPlanner.plan(@payload["steps"]).each do |entry|
+          if @step_interrupted || (@job_deadline && monotonic >= @job_deadline)
+            failed = true
+            results << skipped_result(entry, "job interrupted")
+            next
+          end
           if shutdown_check.call || @cancel_check.call
             shutting_down = true
             results << skipped_result(entry, @cancel_check.call ? "job canceled" : "runner shutting down")
@@ -151,6 +157,7 @@ module ForgeCIRunner
           results << result
           failed = true unless result.exit_code.zero?
         end
+        failed = true if @job_deadline && monotonic >= @job_deadline
       rescue StandardError => e
         log_line("[forge-ci] ERROR: #{e.class}: #{e.message}")
         failed = true
@@ -358,11 +365,12 @@ module ForgeCIRunner
 
     # Returns [service_name, argv].
     def service_run_args(svc, index)
-      name = svc["name"] || "forge-ci-svc-#{index}-#{@suffix}"
+      name = "forge-ci-svc-#{index}-#{@suffix}"
       args = [@config.docker_bin, "run", "-d",
               "--name", name,
+              "--label", "forge-ci.runner-job=#{@container}",
               "--network", @network,
-              "--network-alias", name]
+              "--network-alias", svc["name"] || name]
       args += env_args(svc["environment"] || {})
       args += ["--entrypoint", svc["entrypoint"]] if svc["entrypoint"]
       args << svc["image"]
@@ -391,9 +399,10 @@ module ForgeCIRunner
     # Runs a docker CLI command, streaming combined output to the log.
     # Returns [output, exit_code].
     def run_docker(*args)
-      out, status = Open3.capture2e(*args)
-      @streamer.write(out) unless out.nil? || out.empty?
-      [out, status.exitstatus]
+      out, status, reason = docker_capture(args)
+      @streamer.write(out) unless out.empty?
+      log_line("[forge-ci] docker operation stopped: #{reason}") if reason
+      [out, reason ? interruption_exit(reason) : status.exitstatus]
     end
 
     TIMEOUT_EXIT = 124
@@ -404,74 +413,52 @@ module ForgeCIRunner
     # deadline passes, and (returning 130) when the job is canceled or, with
     # REQUEUE_ON_SHUTDOWN, the runner is shutting down.
     # The `docker exec` client is what gets killed; the process inside the
-    # container dies with the job container at cleanup.
+    # container dies when the interrupted job container is removed.
     def stream_exec(argv, no_output_timeout: @config.step_no_output_timeout)
-      exit_code = nil
-      last_output = monotonic
-      Open3.popen3(*argv) do |stdin, stdout, stderr, wait_thr|
-        stdin.close
-        readers = [stdout, stderr].map do |io|
-          Thread.new do
-            begin
-              io.each_line do |line|
-                last_output = monotonic
-                @streamer.write(line)
-              end
-            rescue IOError
-              # stream closed; done
-            end
-          end
-        end
-
-        reason = nil
-        until wait_thr.join(0.5)
-          now = monotonic
-          if @cancel_check&.call
-            reason = :canceled
-          elsif @requeue_check&.call
-            reason = :requeue
-          elsif no_output_timeout.to_f.positive? && now - last_output > no_output_timeout
-            reason = :no_output
-          elsif @job_deadline && now > @job_deadline
-            reason = :job_timeout
-          end
-          next unless reason
-
-          kill_process(wait_thr)
-          # A grandchild may still hold the pipes open; don't wait on it.
-          [stdout, stderr].each { |io| io.close unless io.closed? }
-          break
-        end
-
-        readers.each { |t| t.join(5) }
-        status = wait_thr.value
-        exit_code = status.exitstatus || TIMEOUT_EXIT
-        case reason
-        when :canceled
-          log_line("[forge-ci] step stopped: job was canceled")
-          exit_code = CANCEL_EXIT
-        when :requeue
-          log_line("[forge-ci] step stopped: runner shutting down; the job goes back to the queue")
-          @stopped_for_requeue = true
-          exit_code = CANCEL_EXIT
-        when :no_output
-          log_line("[forge-ci] step killed: no output for #{no_output_timeout.to_i}s (no_output_timeout)")
-          exit_code = TIMEOUT_EXIT
-        when :job_timeout
-          log_line("[forge-ci] step killed: job exceeded #{@config.job_timeout.to_i}s (JOB_TIMEOUT)")
-          exit_code = TIMEOUT_EXIT
+      pending = +""
+      _out, status, reason = docker_capture(argv, no_output_timeout: no_output_timeout, capture_output: false) do |chunk|
+        pending << chunk
+        while (newline = pending.index("\n"))
+          @streamer.write(pending.slice!(0, newline + 1))
         end
       end
-      exit_code
+      @streamer.write(pending) unless pending.empty?
+      if reason
+        @step_interrupted = true
+        stop_container
+      end
+      case reason
+      when :canceled
+        log_line("[forge-ci] step stopped: job was canceled")
+      when :requeue
+        log_line("[forge-ci] step stopped: runner shutting down; the job goes back to the queue")
+      when :no_output
+        log_line("[forge-ci] step killed: no output for #{no_output_timeout.to_i}s (no_output_timeout)")
+      when :job_timeout
+        log_line("[forge-ci] step killed: job exceeded #{@config.job_timeout.to_i}s (JOB_TIMEOUT)")
+      end
+      reason ? interruption_exit(reason) : (status.exitstatus || TIMEOUT_EXIT)
     end
 
-    def kill_process(wait_thr)
-      Process.kill("TERM", wait_thr.pid)
-      return if wait_thr.join(5)
+    def docker_capture(argv, deadline: @cleanup_deadline || @job_deadline, **options, &block)
+      stop_check = unless @cleanup_deadline
+                     -> { @cancel_check&.call ? :canceled : (@requeue_check&.call ? :requeue : nil) }
+                   end
+      result = DockerProcess.capture(argv, deadline: deadline, stop_check: stop_check, **options, &block)
+      @stopped_for_requeue = true if result[2] == :requeue
+      result
+    end
 
-      Process.kill("KILL", wait_thr.pid)
-    rescue Errno::ESRCH
-      nil
+    def interruption_exit(reason)
+      [:canceled, :requeue].include?(reason) ? CANCEL_EXIT : TIMEOUT_EXIT
+    end
+
+    def stop_container
+      _out, status, reason = DockerProcess.capture([@config.docker_bin, "rm", "-f", @container],
+                                                  deadline: monotonic + cleanup_budget)
+      log_line("[forge-ci] WARNING: interrupted container removal failed") if reason || !status.success?
+    rescue StandardError => e
+      log_line("[forge-ci] WARNING: interrupted container removal failed: #{e.message}")
     end
 
     def monotonic
@@ -503,10 +490,9 @@ module ForgeCIRunner
       Array(ex["secondary_images"]).each_with_index do |svc, i|
         name, args = service_run_args(svc, i)
         log_line("[forge-ci] starting service #{name} (#{svc["image"]})")
+        @services << name
         _out, code = run_docker(*args)
         raise "service #{name} failed to start (exit #{code})" unless code.zero?
-
-        @services << name
       end
 
       @workdir = expand_workdir(@payload["working_directory"])
@@ -537,10 +523,21 @@ module ForgeCIRunner
     end
 
     def cleanup_containers
-      ([@container] + @services).each do |name|
+      @cleanup_deadline = monotonic + cleanup_budget
+      [@container].each do |name|
         run_docker(@config.docker_bin, "rm", "-f", name)
       rescue StandardError => e
         $stderr.puts "[forge-ci-runner] cleanup: rm -f #{name} failed: #{e.message}"
+      end
+      @services.each do |name|
+        out, code = run_docker(@config.docker_bin, "inspect", "--format",
+                              '{{index .Config.Labels "forge-ci.runner-job"}} {{.Id}}', name)
+        owner, id = out.split
+        next unless code.zero? && owner == @container && id&.match?(/\A[0-9a-f]{64}\z/)
+
+        run_docker(@config.docker_bin, "rm", "-f", id)
+      rescue StandardError => e
+        $stderr.puts "[forge-ci-runner] cleanup: service #{name} failed: #{e.message}"
       end
       if @buildx_created
         begin
@@ -552,6 +549,12 @@ module ForgeCIRunner
       run_docker(@config.docker_bin, "network", "rm", @network)
     rescue StandardError => e
       $stderr.puts "[forge-ci-runner] cleanup: network rm failed: #{e.message}"
+    ensure
+      @cleanup_deadline = nil
+    end
+
+    def cleanup_budget
+      60
     end
 
     def execute_step(step, entry)
@@ -680,7 +683,9 @@ module ForgeCIRunner
 
     # Open3 without streaming to the job log (small queries like sha256sum).
     def capture_silent(*args)
-      Open3.capture2e(*args)
+      deadline = [@job_deadline, monotonic + 30].compact.min
+      out, status, = docker_capture(args, deadline: deadline)
+      [out, status]
     end
 
     # Pure argv builders for container-side tar (unit-tested).

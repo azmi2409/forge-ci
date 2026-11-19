@@ -96,6 +96,30 @@ continue working but are not listed. The page updates when refreshed.
 | `REQUEUE_ON_SHUTDOWN` | no | off | `1`: on SIGTERM/SIGINT mid-job, stop the running step and put the job back in the queue instead of reporting it canceled (at most twice per job). For Spot/preemptible runners whose jobs are safe to retry; never on deploy runners. The install command's `--requeue-on-shutdown` sets it |
 | `DOCKER_SOCKET_PATH` | no | `/var/run/docker.sock` | The socket mounted for `setup_remote_docker` |
 
+Both runners apply `JOB_TIMEOUT` to Docker operations throughout the job,
+including image pulls, container/network setup, exec, transfers and buildx.
+Pulls use the remaining job budget rather than a short fixed timeout. Run steps
+also honor their `no_output_timeout` override (or `STEP_NO_OUTPUT_TIMEOUT`).
+`JOB_TIMEOUT=0` explicitly disables the job-wide deadline, so Docker operations
+without a separate limit may then wait indefinitely. Docker availability checks
+have a 10-second limit; checksum queries have a 30-second limit, capped by the
+remaining job budget. Cleanup uses its own shared 60-second budget, independent
+of cancellation or an expired job deadline. These internal limits are not
+configurable. Interrupted CLI process groups receive TERM, then KILL after up
+to 5 seconds, and are reaped. A timed-out/interrupted step removes its primary
+container under a fresh cleanup budget and skips remaining steps, including
+`when: always`; final container/network cleanup still runs.
+
+Ruby keeps enforcing deadlines and cancellation until both the Docker client
+and its output reader finish. After client exit, output continues draining to
+EOF. With `JOB_TIMEOUT=0`, a five-second idle wait for pipe data bounds drain
+from descendants; arriving data resets this wait, and callback/upload time
+does not count as pipe-idle time. An active job deadline still counts callback
+time. Interruption kills the process group, closes the pipe and bounds reader
+teardown. Service containers use generated host names and job ownership labels;
+job-supplied service names remain network aliases, and cleanup verifies the
+label before removing a service by its immutable container ID.
+
 On SIGTERM/SIGINT, a claimed job that has not started is released back to the
 queue, regardless of `REQUEUE_ON_SHUTDOWN`. This includes a claim response that
 arrives after shutdown begins. If release is refused (including 409) or fails,
