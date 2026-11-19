@@ -50,6 +50,88 @@ class JobRunTest < ActiveSupport::TestCase
     assert job.canceled?
   end
 
+  test "cancellation leaves jobs completed since selection alone and can be repeated" do
+    job = build_job(status: "running")
+    JobRun.find(job.id).complete_with_results!(status: "success")
+    job.cancel!
+    assert job.reload.success?
+
+    job = build_job(status: "queued")
+    job.cancel!
+    job.cancel!
+    assert job.reload.canceled?
+  end
+
+  test "unblocking skips dependents already queued or canceled since selection" do
+    %w[queued canceled].each do |status|
+      job = build_job(status: "success")
+      dependent = job.workflow_run.job_runs.create!(name: "deploy", requires: [job.name],
+                                                    executor: { "type" => "docker" })
+      pending_snapshot(job, dependent)
+      JobRun.find(dependent.id).update!(status: status)
+
+      job.send(:unblock_dependents!)
+
+      assert_equal status, dependent.reload.status
+    end
+  end
+
+  test "unblocking does not lock dependents whose requirements are unsatisfied" do
+    job = build_job(status: "success")
+    dependent = job.workflow_run.job_runs.create!(name: "deploy", requires: ["unfinished"],
+                                                  executor: { "type" => "docker" })
+    pending_snapshot(job, dependent)
+    dependent.define_singleton_method(:with_lock) { raise "locked an unready dependent" }
+
+    job.send(:unblock_dependents!)
+
+    assert dependent.reload.pending?
+  end
+
+  test "unreachable cascade skips dependents already moved since selection" do
+    %w[queued canceled].each do |status|
+      job = build_job(status: "failed")
+      dependent = job.workflow_run.job_runs.create!(name: "deploy", requires: [job.name],
+                                                    executor: { "type" => "docker" })
+      pending_snapshot(job, dependent)
+      JobRun.find(dependent.id).update!(status: status)
+
+      job.send(:cancel_unreachable_dependents!)
+
+      assert_equal status, dependent.reload.status
+    end
+  end
+
+  test "rerun reset leaves jobs already reset or started since selection alone" do
+    %w[pending queued claimed running].each do |status|
+      job = build_job(status: "failed")
+      step = job.step_runs.create!(name: "run", status: "success", exit_code: 0)
+      job.log_chunks.create!(seq: 0, chunk: "new attempt output\n")
+      JobRun.find(job.id).update!(status: status, claimed_by: "new-runner")
+
+      assert_equal false, job.reset_for_rerun!
+      assert_equal status, job.reload.status
+      assert_equal "new-runner", job.claimed_by
+      assert step.reload.success?
+      assert_equal "new attempt output\n", job.log_text
+    end
+  end
+
+  def pending_snapshot(job, dependent)
+    snapshot = [dependent]
+    snapshot.define_singleton_method(:find_each) { |&block| each(&block) }
+    fresh = JobRun.where(workflow_run_id: job.workflow_run_id).pending
+    selected = false
+    job.workflow_run.job_runs.define_singleton_method(:pending) do
+      if selected
+        fresh
+      else
+        selected = true
+        snapshot
+      end
+    end
+  end
+
   # --- illegal transitions raise ---------------------------------------------
 
   test "pending -> running raises IllegalTransition" do
@@ -129,6 +211,88 @@ class JobRunTest < ActiveSupport::TestCase
 
   # --- reclaim -----------------------------------------------------------------
 
+  test "reclaim leaves a claim that started after the stale scan alone" do
+    job = build_job(status: "claimed")
+    job.update_columns(claimed_by: "runner-1", heartbeat_at: 5.minutes.ago)
+    JobRun.find(job.id).mark_running!
+
+    job.reclaim_stale!
+
+    assert job.reload.running?
+    assert_equal "runner-1", job.claimed_by
+    assert_empty job.log_chunks
+  end
+
+  test "reclaim leaves claims and running jobs with refreshed heartbeats alone" do
+    %w[claimed running].each do |status|
+      job = build_job(status: status)
+      job.update_columns(claimed_by: "runner-1", heartbeat_at: 5.minutes.ago)
+      heartbeat = Time.current
+      JobRun.find(job.id).update!(heartbeat_at: heartbeat)
+
+      job.reclaim_stale!
+
+      assert_equal status, job.reload.status
+      assert_in_delta heartbeat.to_f, job.heartbeat_at.to_f, 0.001
+      assert_equal "runner-1", job.claimed_by
+      assert_empty job.log_chunks
+    end
+  end
+
+  test "reclaim leaves a running job completed after the stale scan alone" do
+    job = build_job(status: "running")
+    job.update_columns(heartbeat_at: 5.minutes.ago)
+    job.log_chunks.create!(seq: 0, chunk: "finished successfully\n")
+    JobRun.find(job.id).complete_with_results!(status: "success")
+
+    job.reclaim_stale!
+
+    assert job.reload.success?
+    assert_equal "finished successfully\n", job.log_text
+    assert job.workflow_run.reload.success?
+  end
+
+  test "reclaim ignores jobs without a stale active heartbeat" do
+    %w[pending queued success failed canceled claimed running].each do |status|
+      job = build_job(status: status)
+      job.reclaim_stale!
+      assert_equal status, job.reload.status
+      assert_empty job.log_chunks
+    end
+  end
+
+  test "reclaim only acts strictly before the supplied cutoff" do
+    cutoff = 1.minute.ago.change(usec: 0)
+    job = build_job(status: "claimed")
+    job.update_columns(heartbeat_at: cutoff)
+    job.reclaim_stale!(cutoff: cutoff)
+    assert job.reload.claimed?
+
+    JobRun.reclaim_stale!(older_than: 30.seconds)
+    assert job.reload.queued?
+  end
+
+  test "stale release instances honor the persisted release limit" do
+    job = build_job(status: "running")
+    JobRun.find(job.id).update!(releases: JobRun::MAX_RELEASES)
+
+    assert_equal false, job.release!
+    assert job.reload.running?
+    assert_equal JobRun::MAX_RELEASES, job.releases
+  end
+
+  test "stale lifecycle instances cannot overwrite newer persisted states" do
+    %i[mark_running! release! complete_with_results!].each do |operation|
+      job = build_job(status: "claimed")
+      JobRun.find(job.id).complete_with_results!(status: "success")
+
+      assert_raises(JobRun::IllegalTransition, operation.to_s) do
+        operation == :complete_with_results! ? job.complete_with_results!(status: "failed") : job.public_send(operation)
+      end
+      assert job.reload.success?
+    end
+  end
+
   test "reclaim_stale! returns stale claimed/running jobs to queued" do
     stale = build_job(status: "claimed")
     stale.update_columns(claimed_by: "runner-1", claimed_at: 5.minutes.ago, heartbeat_at: 5.minutes.ago)
@@ -168,7 +332,7 @@ class JobRunTest < ActiveSupport::TestCase
     [a, b].each { |j| j.update_columns(heartbeat_at: 5.minutes.ago) }
     failing = a.id
     JobRun.class_eval { alias_method :orig_reclaim, :reclaim_stale! }
-    JobRun.define_method(:reclaim_stale!) { id == failing ? raise("boom") : orig_reclaim }
+    JobRun.define_method(:reclaim_stale!) { |**kwargs| id == failing ? raise("boom") : orig_reclaim(**kwargs) }
     JobRun.reclaim_stale!
     assert b.reload.queued?
   ensure

@@ -20,6 +20,9 @@ class PipelineRerunTest < ActiveSupport::TestCase
   end
 
   def run!(job, status)
+    job.reload
+    return if job.canceled?
+
     job.mark_queued! if job.pending?
     job.mark_claimed!(claimed_by: "r")
     job.mark_running!

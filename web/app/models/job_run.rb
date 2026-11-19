@@ -77,18 +77,20 @@ class JobRun < ApplicationRecord
 
   def transition_to!(new_status, **attrs)
     new_status = new_status.to_s
-    allowed = ALLOWED_TRANSITIONS.fetch(status)
-    unless allowed.include?(new_status)
-      raise IllegalTransition, "cannot transition job #{id} (#{name}) from #{status} to #{new_status}"
+    with_lock do
+      allowed = ALLOWED_TRANSITIONS.fetch(status)
+      unless allowed.include?(new_status)
+        raise IllegalTransition, "cannot transition job #{id} (#{name}) from #{status} to #{new_status}"
+      end
+
+      update!(attrs.merge(status: new_status))
+      # Durable log store: once terminal, the blob holds the final log and the
+      # ingestion rows are dropped (see #finalize_log_blob!).
+      return unless TERMINAL_STATUSES.include?(new_status)
+
+      finalize_log_blob!
+      JobLogChannel.notify(id, event: "done", status: new_status)
     end
-
-    update!(attrs.merge(status: new_status))
-    # Durable log store: once terminal, the blob holds the final log and the
-    # ingestion rows are dropped (see #finalize_log_blob!).
-    return unless TERMINAL_STATUSES.include?(new_status)
-
-    finalize_log_blob!
-    JobLogChannel.notify(id, event: "done", status: new_status)
   end
 
   # "test" or, for a parallel job, "test [2/4]" (1-based for people).
@@ -109,8 +111,12 @@ class JobRun < ApplicationRecord
   end
 
   def cancel!
-    transition_to!("canceled")
-    step_runs.where(status: "pending").update_all(status: StepRun.statuses.fetch("canceled"))
+    with_lock do
+      return if terminal?
+
+      transition_to!("canceled")
+      step_runs.where(status: "pending").update_all(status: StepRun.statuses.fetch("canceled"))
+    end
   end
 
   def terminal?
@@ -191,12 +197,16 @@ class JobRun < ApplicationRecord
   # or step results. Deliberately outside the state machine, which only moves
   # forward. Pipeline#rerun! queues it again once its requires are met.
   def reset_for_rerun!
-    log_chunks.delete_all
-    artifacts.destroy_all
-    log_blob.purge if log_blob.attached?
-    step_runs.update_all(status: StepRun.statuses.fetch("pending"), exit_code: nil,
-                         started_at: nil, finished_at: nil, updated_at: Time.current)
-    update_columns(status: "pending", claimed_by: nil, claimed_at: nil, heartbeat_at: nil, updated_at: Time.current)
+    with_lock do
+      return false unless terminal?
+
+      log_chunks.delete_all
+      artifacts.destroy_all
+      log_blob.purge if log_blob.attached?
+      step_runs.update_all(status: StepRun.statuses.fetch("pending"), exit_code: nil,
+                           started_at: nil, finished_at: nil, updated_at: Time.current)
+      update_columns(status: "pending", claimed_by: nil, claimed_at: nil, heartbeat_at: nil, updated_at: Time.current)
+    end
   end
 
   # --- release ------------------------------------------------------------------
@@ -212,12 +222,12 @@ class JobRun < ApplicationRecord
   # MAX_RELEASES times. Only valid from claimed/running; anything else
   # raises IllegalTransition.
   def release!(reason: nil)
-    unless ACTIVE_STATUSES.include?(status)
-      raise IllegalTransition, "cannot release job #{id} (#{name}) from #{status}"
-    end
-    return false if releases >= MAX_RELEASES
+    with_lock do
+      unless ACTIVE_STATUSES.include?(status)
+        raise IllegalTransition, "cannot release job #{id} (#{name}) from #{status}"
+      end
+      return false if releases >= MAX_RELEASES
 
-    transaction do
       log_chunks.delete_all
       artifacts.destroy_all
       log_blob.purge if log_blob.attached?
@@ -377,7 +387,11 @@ class JobRun < ApplicationRecord
       raise IllegalTransition, "complete requires a terminal status, got #{status.inspect}"
     end
 
-    transaction do
+    with_lock do
+      unless ALLOWED_TRANSITIONS.fetch(self.status).include?(status)
+        raise IllegalTransition, "cannot transition job #{id} (#{name}) from #{self.status} to #{status}"
+      end
+
       Array(step_results).each do |sr|
         # Accept plain hashes (Ruby callers) and ActionController::Parameters
         # (HTTP) alike.
@@ -414,24 +428,31 @@ class JobRun < ApplicationRecord
   #    "Rerun failed jobs" is one click away.
   # Each job is handled on its own, so one can't stop the rest. Idempotent.
   def self.reclaim_stale!(older_than: STALE_HEARTBEAT_AFTER)
+    cutoff = older_than.ago
     where(status: ACTIVE_STATUSES)
-      .where("heartbeat_at < ?", older_than.ago)
+      .where("heartbeat_at < ?", cutoff)
       .find_each do |job|
-        job.reclaim_stale!
+        job.reclaim_stale!(cutoff: cutoff)
       rescue StandardError => e
         Rails.logger.error("[reclaim] job #{job.id} (#{job.name}): #{e.class}: #{e.message}")
       end
   end
 
-  def reclaim_stale!
-    if claimed?
-      transition_to!("queued", claimed_by: nil, claimed_at: nil, heartbeat_at: nil)
-    else
-      seq = log_chunks.maximum(:seq).to_i + 1
-      log_chunks.create!(seq: seq, chunk: "\n[forge-ci] the runner (#{claimed_by}) stopped responding " \
-                                         "while this job was running; marking it failed. Rerun it to try again.\n")
-      step_runs.where(status: %w[pending running]).update_all(status: StepRun.statuses.fetch("canceled"))
-      complete_with_results!(status: "failed")
+  def reclaim_stale!(cutoff: STALE_HEARTBEAT_AFTER.ago)
+    scanned_status = status
+    with_lock do
+      return unless status == scanned_status && ACTIVE_STATUSES.include?(status)
+      return unless heartbeat_at && heartbeat_at < cutoff
+
+      if claimed?
+        transition_to!("queued", claimed_by: nil, claimed_at: nil, heartbeat_at: nil)
+      else
+        seq = log_chunks.maximum(:seq).to_i + 1
+        log_chunks.create!(seq: seq, chunk: "\n[forge-ci] the runner (#{claimed_by}) stopped responding " \
+                                           "while this job was running; marking it failed. Rerun it to try again.\n")
+        step_runs.where(status: %w[pending running]).update_all(status: StepRun.statuses.fetch("canceled"))
+        complete_with_results!(status: "failed")
+      end
     end
   end
 
@@ -453,13 +474,18 @@ class JobRun < ApplicationRecord
   end
 
   def cancel_unreachable_dependents!
+    dead = workflow_run.job_runs.where(status: %w[failed canceled]).pluck(:name).to_set
+    pending = workflow_run.job_runs.pending.to_a
+    doomed = []
     loop do
-      dead = workflow_run.job_runs.where(status: %w[failed canceled]).pluck(:name).to_set
-      doomed = workflow_run.job_runs.pending.select { |j| j.requires_list.any? { |r| dead.include?(r) } }
-      break if doomed.empty?
+      unreachable, pending = pending.partition { |j| j.requires_list.any? { |r| dead.include?(r) } }
+      break if unreachable.empty?
 
-      doomed.each(&:cancel!)
+      doomed.concat(unreachable)
+      dead.merge(unreachable.map(&:name))
     end
+    JobRun.where(workflow_run_id: workflow_run_id, id: doomed.map(&:id))
+          .pending.order(:id).lock.each(&:cancel!)
   end
 
   # A required job counts as successful only once every one of its
@@ -470,7 +496,13 @@ class JobRun < ApplicationRecord
                              .select { |_name, rows| rows.all? { |_n, status| status == "success" } }
                              .keys.to_set
     workflow_run.job_runs.pending.find_each do |job|
-      job.mark_queued! if job.requires_list.all? { |r| successful.include?(r) }
+      next unless job.pending? && job.requires_list.all? { |r| successful.include?(r) }
+
+      job.with_lock do
+        next unless job.pending?
+
+        job.mark_queued! if job.requires_list.all? { |r| successful.include?(r) }
+      end
     end
   end
 end

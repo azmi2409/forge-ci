@@ -8,6 +8,7 @@ module Api
       #   (or release, when a REQUEUE_ON_SHUTDOWN runner shuts down mid-job)
       class JobsController < BaseController
         before_action :validate_runner_identity!
+        around_action :with_job_lock, only: %i[start heartbeat complete release]
 
         # POST /api/v1/runner/jobs/claim { resource_class: "medium" }
         # Atomically claims the oldest queued job matching the token's
@@ -99,6 +100,13 @@ module Api
 
         private
 
+        def with_job_lock
+          @locked_job = JobRun.find(params[:id])
+          @locked_job.with_lock { yield }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "job not found" }, status: :not_found
+        end
+
         def validate_runner_identity!
           id = request.headers["X-Forge-Runner-ID"]
           return if id.nil? && request.headers["X-Forge-Runner-Hostname"].nil? &&
@@ -133,7 +141,7 @@ module Api
         end
 
         def find_owned_job
-          job = JobRun.find(params[:id])
+          job = @locked_job || JobRun.find(params[:id])
           require_job_owner!(job)
           # require_job_owner! renders 403 on mismatch; halt in that case.
           return if performed?

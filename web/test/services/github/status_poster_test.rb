@@ -64,6 +64,9 @@ class GithubStatusPosterTest < ActiveJob::TestCase
   def drive_all_jobs(pipeline, status)
     until pipeline.reload.job_runs.all?(&:terminal?)
       pipeline.job_runs.where(status: %w[pending queued]).each do |job|
+        job.reload
+        next if job.canceled?
+
         job.mark_queued! if job.pending?
         job.mark_claimed!(claimed_by: "test")
         job.mark_running!

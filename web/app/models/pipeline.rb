@@ -41,11 +41,9 @@ class Pipeline < ApplicationRecord
   # marked canceled here; the runner notices on its next heartbeat and
   # stops the container. Returns self.
   def cancel!
-    transaction do
-      job_runs.where.not(status: JobRun::TERMINAL_STATUSES).find_each(&:cancel!)
-      workflow_runs.each(&:recompute_status!)
-      recompute_status!
-    end
+    job_runs.where.not(status: JobRun::TERMINAL_STATUSES).find_each(&:cancel!)
+    workflow_runs.each(&:recompute_status!)
+    recompute_status!
     self
   end
 
@@ -67,9 +65,12 @@ class Pipeline < ApplicationRecord
         done = by_name.keys - rerun_names
         rerun_names.each do |name|
           by_name[name].each do |job|
-            job.reset_for_rerun!
-            job.mark_queued! if job.requires_list.all? { |r| done.include?(r) }
-            reset += 1
+            job.with_lock do
+              next unless job.reset_for_rerun!
+
+              job.mark_queued! if job.requires_list.all? { |r| done.include?(r) }
+              reset += 1
+            end
           end
         end
         workflow.recompute_status!
