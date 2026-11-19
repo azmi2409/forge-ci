@@ -75,6 +75,10 @@ class JobRun < ApplicationRecord
 
   # --- guarded transitions -------------------------------------------------
 
+  def with_workflow_job_lock(&block)
+    workflow_run.with_lock { with_lock(&block) }
+  end
+
   def transition_to!(new_status, **attrs)
     new_status = new_status.to_s
     with_lock do
@@ -222,7 +226,7 @@ class JobRun < ApplicationRecord
   # MAX_RELEASES times. Only valid from claimed/running; anything else
   # raises IllegalTransition.
   def release!(reason: nil)
-    with_lock do
+    with_workflow_job_lock do
       unless ACTIVE_STATUSES.include?(status)
         raise IllegalTransition, "cannot release job #{id} (#{name}) from #{status}"
       end
@@ -387,7 +391,7 @@ class JobRun < ApplicationRecord
       raise IllegalTransition, "complete requires a terminal status, got #{status.inspect}"
     end
 
-    with_lock do
+    with_workflow_job_lock do
       unless ALLOWED_TRANSITIONS.fetch(self.status).include?(status)
         raise IllegalTransition, "cannot transition job #{id} (#{name}) from #{self.status} to #{status}"
       end
@@ -440,7 +444,7 @@ class JobRun < ApplicationRecord
 
   def reclaim_stale!(cutoff: STALE_HEARTBEAT_AFTER.ago)
     scanned_status = status
-    with_lock do
+    with_workflow_job_lock do
       return unless status == scanned_status && ACTIVE_STATUSES.include?(status)
       return unless heartbeat_at && heartbeat_at < cutoff
 
