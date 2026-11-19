@@ -340,6 +340,121 @@ func TestCompleteNilResultsSentAsEmptyArray(t *testing.T) {
 	}
 }
 
+func TestCompleteRetriesTransientFailures(t *testing.T) {
+	for _, first := range []string{"503", "disconnect", "lost response"} {
+		t.Run(first, func(t *testing.T) {
+			var mu sync.Mutex
+			attempts, accepted := 0, 0
+			var reports []string
+			cp := newFakeCP(t, func(w http.ResponseWriter, r *http.Request) bool {
+				mu.Lock()
+				defer mu.Unlock()
+				body, _ := io.ReadAll(r.Body)
+				reports = append(reports, string(body))
+				attempts++
+				if attempts == 1 {
+					if first == "503" {
+						w.WriteHeader(503)
+						return true
+					}
+					if first == "lost response" {
+						accepted++
+					}
+					conn, _, err := w.(http.Hijacker).Hijack()
+					if err != nil {
+						t.Error(err)
+						return true
+					}
+					conn.Close()
+					return true
+				}
+				if accepted > 0 {
+					w.WriteHeader(422)
+					return true
+				}
+				accepted++
+				fmt.Fprint(w, `{"status":"success"}`)
+				return true
+			})
+			steps := []StepResult{{Name: "run", ExitCode: 0}}
+			err := clientFor(t, cp.URL()).Complete(context.Background(), 9, "success", steps)
+			if first == "lost response" {
+				var apiErr *APIError
+				if !errors.As(err, &apiErr) || apiErr.Code != 422 {
+					t.Fatalf("lost response retry: got %v, want 422", err)
+				}
+			} else if err != nil {
+				t.Fatalf("complete: %v", err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if attempts != 2 || accepted != 1 {
+				t.Fatalf("attempts=%d accepted=%d, want 2 and 1", attempts, accepted)
+			}
+			if reports[0] != reports[1] {
+				t.Fatalf("retry changed report: %v", reports)
+			}
+			var report struct {
+				Status string       `json:"status"`
+				Steps  []StepResult `json:"step_results"`
+			}
+			if err := json.Unmarshal([]byte(reports[1]), &report); err != nil || report.Status != "success" || len(report.Steps) != 1 || report.Steps[0] != steps[0] {
+				t.Fatalf("accepted report = %+v, error = %v", report, err)
+			}
+		})
+	}
+}
+
+func TestCompleteDoesNotRetryClientRejections(t *testing.T) {
+	for _, code := range []int{400, 401, 403, 404, 422} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			cp := newFakeCP(t, func(w http.ResponseWriter, r *http.Request) bool {
+				w.WriteHeader(code)
+				return true
+			})
+			err := clientFor(t, cp.URL()).Complete(context.Background(), 9, "success", nil)
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.Code != code {
+				t.Fatalf("got %v, want HTTP %d", err, code)
+			}
+			if got := cp.count("/api/v1/runner/jobs/9/complete"); got != 1 {
+				t.Fatalf("requests = %d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestCompleteRetryLimit(t *testing.T) {
+	cp := newFakeCP(t, func(w http.ResponseWriter, r *http.Request) bool {
+		w.WriteHeader(503)
+		return true
+	})
+	err := clientFor(t, cp.URL()).Complete(context.Background(), 9, "success", nil)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != 503 {
+		t.Fatalf("got %v, want HTTP 503", err)
+	}
+	if got := cp.count("/api/v1/runner/jobs/9/complete"); got != 3 {
+		t.Fatalf("requests = %d, want 3", got)
+	}
+}
+
+func TestCompleteRetryHonorsCallerDeadline(t *testing.T) {
+	cp := newFakeCP(t, func(w http.ResponseWriter, r *http.Request) bool {
+		w.WriteHeader(503)
+		return true
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err := clientFor(t, cp.URL()).Complete(ctx, 9, "success", nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("got %v, want context deadline", err)
+	}
+	if got := cp.count("/api/v1/runner/jobs/9/complete"); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+}
+
 func TestHeartbeatCanceledReply(t *testing.T) {
 	cp := newFakeCP(t, func(w http.ResponseWriter, r *http.Request) bool {
 		fmt.Fprint(w, `{"id":1042,"status":"canceled","heartbeat_at":"2026-10-25T09:30:42Z"}`)

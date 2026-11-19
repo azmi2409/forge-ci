@@ -123,6 +123,79 @@ class ClientTest < Minitest::Test
     assert_equal({ "seq" => 3, "chunk" => "hello\n" }, body)
   end
 
+  def test_complete_retries_transient_failures_without_changing_the_report
+    ["503", nil].each do |first_code|
+      reports = []
+      accepted = 0
+      @server.stub("POST", "/api/v1/runner/jobs/9/complete") do |body|
+        reports << JSON.parse(body)
+        if reports.size == 1
+          first_code && FakeControlPlane::Response.new(first_code, {})
+        else
+          accepted += 1
+          FakeControlPlane::Response.new("200", { "status" => "success" })
+        end
+      end
+      steps = [{ "name" => "run", "exit_code" => 0 }]
+
+      result = @client.complete_job(9, "success", steps)
+
+      assert_equal "success", result["status"]
+      assert_equal 1, accepted
+      assert_equal 2, reports.size
+      assert_equal reports.first, reports.last
+      assert_equal steps, reports.last["step_results"]
+    end
+  end
+
+  def test_complete_does_not_retry_client_rejections
+    %w[400 401 403 404 422].each do |code|
+      @server.stub("POST", "/api/v1/runner/jobs/9/complete", code, {})
+      before = @server.requests.size
+
+      error = assert_raises(ForgeCIRunner::Client::HTTPError) { @client.complete_job(9, "success", []) }
+
+      assert_equal code, error.code
+      assert_equal 1, @server.requests.size - before
+    end
+  end
+
+  def test_complete_response_lost_after_commit_stops_on_422_without_applying_twice
+    attempts = 0
+    accepted = 0
+    @server.stub("POST", "/api/v1/runner/jobs/9/complete") do |_body|
+      attempts += 1
+      if attempts == 1
+        accepted += 1
+        nil
+      else
+        FakeControlPlane::Response.new("422", { "error" => "already terminal" })
+      end
+    end
+
+    error = assert_raises(ForgeCIRunner::Client::HTTPError) { @client.complete_job(9, "success", []) }
+
+    assert_equal "422", error.code
+    assert_equal 2, attempts
+    assert_equal 1, accepted
+  end
+
+  def test_complete_retry_budget_limits_attempts_and_timeouts
+    attempts = 0
+    delays = []
+    @client.define_singleton_method(:post) do |_path, _body, timeout:|
+      attempts += 1
+      raise "unbounded completion attempt" unless timeout <= 5
+
+      raise ForgeCIRunner::Client::HTTPError.new("503", "unavailable")
+    end
+    @client.define_singleton_method(:sleep) { |delay| delays << delay }
+
+    assert_raises(ForgeCIRunner::Client::HTTPError) { @client.complete_job(9, "success", []) }
+    assert_equal 3, attempts
+    assert_equal [1, 2], delays
+  end
+
   def test_release_posts_the_reason
     @server.stub("POST", "/api/v1/runner/jobs/9/release", "200", { "id" => 9, "status" => "queued" })
     @client.release_job(9, "runner shutting down (SIGTERM)")

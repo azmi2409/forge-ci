@@ -36,8 +36,8 @@ class FakeControlPlane
 
   attr_reader :port
 
-  def stub(method, path, code, body)
-    @stubs[[method, path]] = Response.new(code, body)
+  def stub(method, path, code = nil, body = nil, &handler)
+    @stubs[[method, path]] = handler || Response.new(code, body)
   end
 
   def stub_raw(method, path, code, content_type, body)
@@ -95,6 +95,9 @@ class FakeControlPlane
       end
     else
       stub = @stubs[[method, path]] || Response.new("404", { "error" => "no stub" })
+      stub = stub.call(body) if stub.respond_to?(:call)
+      return unless stub
+
       payload = JSON.generate(stub.body)
       sock.write("HTTP/1.1 #{stub.code} OK\r\n" \
                  "Content-Type: application/json\r\n" \

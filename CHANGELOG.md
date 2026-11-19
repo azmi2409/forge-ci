@@ -6,6 +6,10 @@ separately.
 
 ## Unreleased
 
+- Ruby and Go runners retry completion reports on network errors and 5xx, with
+  three attempts, 1s/2s backoff, and a 20-second total deadline. Reports preserve
+  status and step results; 4xx responses are not retried. Ruby no longer reports
+  a successful job as failed when delivering its completion exhausts retries.
 - Ruby and Go runners exit nonzero when `IDLE_SHUTDOWN_COMMAND` fails, so
   installed systemd services restart after 10 seconds and resume polling instead
   of leaving a stopped runner counted as provisioned capacity. Successful idle

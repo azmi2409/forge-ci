@@ -191,22 +191,24 @@ module ForgeCIRunner
         if status == "requeue"
           release_job(job_id, step_results)
         else
-          @client.complete_job(job_id, status, step_results)
-          log("job ##{job_id} #{status}")
+          report_completion(job_id, status, step_results)
         end
       rescue Client::HTTPError => e
         # e.g. 403 because the job was reclaimed after our heartbeats died.
         log("could not report job ##{job_id}: HTTP #{e.code}")
       rescue StandardError => e
         log("job ##{job_id} runner error: #{e.class}: #{e.message}")
-        begin
-          @client.complete_job(job_id, "failed", [])
-        rescue StandardError => e2
-          log("could not report failure for job ##{job_id}: #{e2.message}")
-        end
+        report_completion(job_id, "failed", [])
       ensure
         stop_heartbeat(heartbeat)
       end
+    end
+
+    def report_completion(job_id, status, step_results)
+      @client.complete_job(job_id, status, step_results)
+      log("job ##{job_id} #{status}")
+    rescue StandardError => e
+      log("could not report job ##{job_id}: #{e.class}: #{e.message}")
     end
 
     # Back to the queue, so another runner runs it from the start. When the
@@ -217,8 +219,7 @@ module ForgeCIRunner
       log("job ##{job_id} released back to the queue")
     rescue StandardError => e
       log("could not release job ##{job_id} (#{e.message}); reporting it canceled")
-      @client.complete_job(job_id, "canceled", step_results)
-      log("job ##{job_id} canceled")
+      report_completion(job_id, "canceled", step_results)
     end
 
     def start_heartbeat(job_id)

@@ -4,6 +4,7 @@ require "net/http"
 require "json"
 require "uri"
 require "timeout"
+require "openssl"
 require "securerandom"
 require "socket"
 
@@ -12,6 +13,8 @@ module ForgeCIRunner
   # Built exactly against the contract documented in web/README.md —
   # no invented endpoints.
   class Client
+    class CompletionTimeout < StandardError; end
+
     class HTTPError < StandardError
       attr_reader :code, :body
 
@@ -78,8 +81,23 @@ module ForgeCIRunner
     # status: "success" | "failed" | "canceled"
     # step_results: [{ "name", "exit_code", "started_at", "finished_at" }]
     def complete_job(job_id, status, step_results)
-      post("/api/v1/runner/jobs/#{job_id}/complete",
-           { "status" => status, "step_results" => step_results })
+      payload = { "status" => status, "step_results" => step_results }
+      backoff = Backoff.new(base: 1, max: 2)
+      attempts = 0
+      Timeout.timeout(20, CompletionTimeout) do
+        begin
+          attempts += 1
+          post("/api/v1/runner/jobs/#{job_id}/complete", payload, timeout: 5)
+        rescue HTTPError, IOError, SystemCallError, SocketError, Timeout::Error, OpenSSL::SSL::SSLError => e
+          transient = !e.is_a?(HTTPError) || e.code.to_i.between?(500, 599)
+          raise unless transient && attempts < 3
+
+          delay = backoff.tick
+          warn "[forge-ci-runner] completion failed for job ##{job_id}: #{e.message}; retrying in #{delay}s"
+          sleep delay
+          retry
+        end
+      end
     end
 
     # POST /api/v1/runner/jobs/:id/release { reason } — hand a claimed or
@@ -217,7 +235,7 @@ module ForgeCIRunner
           http.request(request)
         end
       end
-      response = request_timeout ? Timeout.timeout(request_timeout, &http_request) : http_request.call
+      response = request_timeout ? Timeout.timeout(request_timeout) { http_request.call } : http_request.call
 
       parse_response(response)
     end

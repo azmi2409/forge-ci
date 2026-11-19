@@ -29,10 +29,11 @@ Sources read to produce this: `web/app/controllers/api/v1/runner/jobs_controller
   - Multipart uploads and signed downloads: dial + response-header timeouts only plus a
     context deadline; **never** a short total `Client.Timeout` that can kill a healthy
     long transfer.
-- Retry policy: **only log-chunk POSTs are retried** (server upserts on `(job_id, seq)`,
-  so a retried POST cannot duplicate). Claim/start/heartbeat/complete/release, cache and
-  artifact uploads are **never** blindly retried; callers decide (the runner loop's
-  backoff is a new poll, not a retry of an in-flight request).
+- Retry policy: log-chunk POSTs are retried using their idempotent `(job_id, seq)`.
+  Completion POSTs retry only network errors and 5xx: three attempts, 1s/2s backoff,
+  5s per attempt, 20s total. A repeated terminal completion returns 422, which is
+  logged without retrying. Claim/start/heartbeat/release, cache and artifact uploads
+  are not blindly retried (the runner loop's backoff is a new poll).
 - Additive presence headers on lifecycle JSON requests are documented in
   [the API reference](../docs/api.md#runner-presence). Each client process has
   one UUID, a hostname and implementation (`go`). Old servers may ignore them;
@@ -137,9 +138,11 @@ attach_workspace store_artifacts store_test_results add_ssh_keys setup_remote_do
 - `step_results[]`: `{ name, exit_code, started_at, finished_at }` — timestamps RFC3339 UTC
   with second precision (`2026-10-25T09:30:12Z`, matching Ruby `Time#iso8601` on a UTC time).
   `exit_code.to_i.zero?` → step success server-side.
-- Idempotency: none of these are idempotent — complete/release/start fire **once**; a lost
-  response is not retried (a released job must never continue executing locally regardless
-  of whether the release response arrived).
+- Completion replay is state-safe: under a row lock, terminal jobs reject completion
+  with 422 before step results are written. The client retries transient completion
+  failures with the identical report, then stops on any 4xx (including 403/404 for
+  lost ownership/missing jobs). Start/release still fire once; a released job must
+  never continue executing locally regardless of whether its response arrived.
 - Heartbeat cadence ≤ 120s (`STALE_HEARTBEAT_AFTER`); Ruby default 15s. A claimed-but-never-
   started job is requeued by the server's stale reaper; a running one is failed.
 
