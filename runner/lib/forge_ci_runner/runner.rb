@@ -222,20 +222,25 @@ module ForgeCIRunner
     end
 
     def start_heartbeat(job_id)
-      @heartbeat_stop = false
       @job_canceled = false
       Thread.new do
-        until @heartbeat_stop
+        loop do
           sleep @config.heartbeat_interval
-          break if @heartbeat_stop
 
           begin
             reply = @client.heartbeat(job_id)
-            # The control plane cancels a job (pipeline canceled) by flipping
-            # its status; the heartbeat reply tells us to stop.
-            if reply.is_a?(Hash) && reply["status"] == "canceled" && !@job_canceled
-              log("job ##{job_id} was canceled by the control plane; stopping")
+            status = reply["status"] if reply.is_a?(Hash)
+            if status.is_a?(String) && !status.empty? && !%w[claimed running].include?(status)
+              log("job ##{job_id} is no longer active (#{status}); stopping")
               @job_canceled = true
+              break
+            end
+          rescue Client::HTTPError => e
+            log("heartbeat failed for job ##{job_id}: #{e.message}")
+            if %w[401 403 404].include?(e.code.to_s)
+              log("job ##{job_id} heartbeat rejected (HTTP #{e.code}); stopping")
+              @job_canceled = true
+              break
             end
           rescue StandardError => e
             log("heartbeat failed for job ##{job_id}: #{e.class}: #{e.message}")
@@ -245,8 +250,8 @@ module ForgeCIRunner
     end
 
     def stop_heartbeat(thread)
-      @heartbeat_stop = true
-      thread&.join(5)
+      thread&.kill
+      thread&.join
     end
 
     def trap_signals

@@ -30,6 +30,8 @@ type fakeRunnerCP struct {
 
 	// heartbeatReply is returned for every heartbeat ("" = running).
 	heartbeatStatus string
+	heartbeatErr    error
+	completionErr   error
 	// claimHook, when set, runs inside Claim just before a claim is
 	// returned — a deterministic way to inject a shutdown between the
 	// claim response and the runner's Start call.
@@ -162,6 +164,9 @@ func (f *fakeRunnerCP) Heartbeat(ctx context.Context, jobID int64) (*api.Heartbe
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.heartbeats = append(f.heartbeats, jobID)
+	if f.heartbeatErr != nil {
+		return nil, f.heartbeatErr
+	}
 	return &api.HeartbeatReply{ID: jobID, Status: f.heartbeatStatus}, nil
 }
 
@@ -169,7 +174,7 @@ func (f *fakeRunnerCP) Complete(ctx context.Context, jobID int64, status string,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.completions = append(f.completions, completion{jobID, status})
-	return nil
+	return f.completionErr
 }
 
 func (f *fakeRunnerCP) Release(ctx context.Context, jobID int64, reason string) error {
@@ -400,6 +405,53 @@ func TestServerCancelRacingCompletion(t *testing.T) {
 	}
 	if got[0] != "canceled" {
 		t.Fatalf("canceled job reported as %q", got[0])
+	}
+}
+
+func TestHeartbeatLossStopsExecution(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status string
+		err    error
+		stop   bool
+	}{
+		{name: "failed", status: "failed", stop: true},
+		{name: "success", status: "success", stop: true},
+		{name: "canceled", status: "canceled", stop: true},
+		{name: "queued", status: "queued", stop: true},
+		{name: "pending", status: "pending", stop: true},
+		{name: "unauthorized", err: &api.APIError{Code: 401}, stop: true},
+		{name: "not yours", err: &api.APIError{Code: 403}, stop: true},
+		{name: "not found", err: &api.APIError{Code: 404}, stop: true},
+		{name: "claimed", status: "claimed"},
+		{name: "running", status: "running"},
+		{name: "empty"},
+		{name: "server error", err: &api.APIError{Code: 503}},
+		{name: "network error", err: errors.New("connection reset")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			entered := filepath.Join(dir, "entered")
+			finished := filepath.Join(dir, "finished")
+			command := fmt.Sprintf("touch %q; sleep 0.3; touch %q", entered, finished)
+			f := &fakeRunnerCP{t: t, heartbeatStatus: tc.status, heartbeatErr: tc.err}
+			f.heartbeatHook = func() { waitForFile(t, entered) }
+			if tc.stop {
+				f.completionErr = &api.APIError{Code: 422}
+			}
+			r := New(runnerCfg(t), f)
+			r.runJob(context.Background(), mustClaim(t, 105, command))
+			want := "success"
+			if tc.stop {
+				want = "canceled"
+				if _, err := os.Stat(finished); !os.IsNotExist(err) {
+					t.Error("inactive job's shell command was not stopped")
+				}
+			}
+			if got := f.completionsFor(105); len(got) != 1 || got[0] != want {
+				t.Fatalf("completions = %v, want [%s]", got, want)
+			}
+		})
 	}
 }
 
