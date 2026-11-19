@@ -6,6 +6,9 @@ separately.
 
 ## Unreleased
 
+- Ruby and Go runners release claimed-but-not-started jobs when shutdown races
+  a claim, regardless of `REQUEUE_ON_SHUTDOWN`, instead of abandoning or canceling
+  them. Release failures use the existing cancellation fallback.
 - Ruby and Go runners retry completion reports on network errors and 5xx, with
   three attempts, 1s/2s backoff, and a 20-second total deadline. Reports preserve
   status and step results; 4xx responses are not retried. Ruby no longer reports

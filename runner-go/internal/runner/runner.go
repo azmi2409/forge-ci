@@ -9,6 +9,8 @@
 //	finalize/report     bounded client calls, usable after shutdown
 //
 // Shutdown semantics (matching the Ruby runner exactly):
+//   - claimed but not started: RELEASE regardless of REQUEUE_ON_SHUTDOWN;
+//     use the same cancellation fallback if release fails.
 //   - ordinary TERM: stop claiming; the in-flight step FINISHES; remaining
 //     steps are skipped; the job is reported canceled; exit cleanly.
 //   - requeue TERM (REQUEUE_ON_SHUTDOWN): interrupt execution, stop
@@ -182,9 +184,8 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 
 		// A signal raced with the in-flight claim.
-		if r.shuttingDown.Load() {
-			r.logf("claimed job #%d after shutdown; reporting it canceled without starting", claim.ID)
-			r.reportCanceled(claim.ID)
+		if r.shuttingDown.Load() || ctx.Err() != nil {
+			r.releaseUnstarted(claim.ID)
 			break
 		}
 
@@ -276,10 +277,10 @@ func (r *Runner) pause(d time.Duration) {
 func (r *Runner) runJob(ctx context.Context, claim *payload.Claim) {
 	r.logf("claimed job #%d (%s)", claim.ID, claim.Name)
 
-	// Signal after claim but before start: report canceled immediately —
+	// Signal after claim but before start: release immediately —
 	// containers never come up, start is never sent.
-	if r.shuttingDown.Load() {
-		r.reportCanceled(claim.ID)
+	if r.shuttingDown.Load() || ctx.Err() != nil {
+		r.releaseUnstarted(claim.ID)
 		return
 	}
 
@@ -416,16 +417,13 @@ func (r *Runner) releaseJob(ctx context.Context, jobID int64, stepResults []api.
 	}
 }
 
-// reportCanceled completes a claimed-but-not-started job as canceled
+// releaseUnstarted releases a claimed-but-not-started job
 // (bounded, own context: usable after shutdown).
-func (r *Runner) reportCanceled(jobID int64) {
+func (r *Runner) releaseUnstarted(jobID int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), api.JSONDeadline())
 	defer cancel()
-	if err := r.client.Complete(ctx, jobID, "canceled", nil); err != nil {
-		r.logf("could not report job #%d: %v", jobID, err)
-	} else {
-		r.logf("job #%d canceled", jobID)
-	}
+	r.logf("releasing claimed job #%d after shutdown without starting", jobID)
+	r.releaseJob(ctx, jobID, nil)
 }
 
 func (r *Runner) logf(format string, args ...any) {
