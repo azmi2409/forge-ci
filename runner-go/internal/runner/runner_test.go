@@ -2,10 +2,14 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -15,6 +19,80 @@ import (
 	"github.com/azmi2409/forge-ci/runner-go/internal/config"
 	"github.com/azmi2409/forge-ci/runner-go/internal/payload"
 )
+
+func TestRunnerSendsAttemptOnLifecycleAndReleaseFallback(t *testing.T) {
+	for _, shutdownAfterClaim := range []bool{false, true} {
+		t.Run(fmt.Sprintf("shutdown_after_claim=%v", shutdownAfterClaim), func(t *testing.T) {
+			claim := mustClaim(t, 77, "echo fenced; sleep 0.1")
+			claim.AttemptToken = "attempt-a"
+			var runner *Runner
+			var mu sync.Mutex
+			seen := map[string]int{}
+			completions := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				path := request.URL.Path
+				seen[path]++
+				if strings.HasSuffix(path, "/claim") {
+					if request.Header.Get("X-Forge-Attempt") != "" {
+						t.Error("claim must not carry an attempt header")
+					}
+					if shutdownAfterClaim {
+						runner.beginShutdown(syscall.SIGTERM)
+					}
+					json.NewEncoder(w).Encode(claim)
+					return
+				}
+				if got := request.Header.Get("X-Forge-Attempt"); got != "attempt-a" {
+					t.Errorf("%s attempt header=%q", path, got)
+				}
+				if strings.HasSuffix(path, "/release") {
+					w.WriteHeader(409)
+					fmt.Fprint(w, `{}`)
+					return
+				}
+				if strings.HasSuffix(path, "/complete") {
+					completions++
+					if !shutdownAfterClaim && completions == 1 {
+						w.WriteHeader(503)
+						fmt.Fprint(w, `{}`)
+						return
+					}
+					runner.beginShutdown(nil)
+				}
+				fmt.Fprint(w, `{"status":"running"}`)
+			}))
+			defer server.Close()
+			client := api.New(server.URL, "runner-token")
+			defer client.CloseIdleConnections()
+			cfg := runnerCfg(t)
+			cfg.HeartbeatInterval = 0.01
+			runner = New(cfg, client)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := runner.Run(ctx); err != nil {
+				t.Fatal(err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			expected := []string{"/api/v1/runner/jobs/77/complete"}
+			if shutdownAfterClaim {
+				expected = append(expected, "/api/v1/runner/jobs/77/release")
+			} else {
+				expected = append(expected, "/api/v1/runner/jobs/77/start", "/api/v1/runner/jobs/77/heartbeat", "/api/v1/jobs/77/log_chunks")
+				if completions != 2 {
+					t.Fatalf("completion attempts=%d, want 2", completions)
+				}
+			}
+			for _, path := range expected {
+				if seen[path] == 0 {
+					t.Errorf("missing request: %s", path)
+				}
+			}
+		})
+	}
+}
 
 // fakeRunnerCP is a scripted control plane for runner-loop tests.
 type fakeRunnerCP struct {

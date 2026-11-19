@@ -4,6 +4,35 @@ require "test_helper"
 require "tempfile"
 
 class ClientTest < Minitest::Test
+  def test_attempt_header_is_scoped_to_each_claim_and_all_per_job_calls
+    @server.stub("POST", "/api/v1/runner/jobs/claim", "200", { "id" => 7, "name" => "build", "attempt_token" => "attempt-a" })
+    claim = @client.claim_job(nil)
+    first = @client.for_attempt(claim["id"], claim["attempt_token"])
+    second = @client.for_attempt(7, "attempt-b")
+    [first, second, first].zip(%w[attempt-a attempt-b attempt-a]).each do |client, token|
+      %w[start heartbeat complete release].each do |action|
+        @server.stub("POST", "/api/v1/runner/jobs/7/#{action}", "200", { "status" => "running" })
+      end
+      @server.stub("POST", "/api/v1/jobs/7/log_chunks", "200", {})
+      [-> { client.start_job(7) }, -> { client.heartbeat(7) }, -> { client.complete_job(7, "success", []) },
+       -> { client.release_job(7, "shutdown") }, -> { client.post_log_chunk(7, 0, "output") }].each do |call|
+        call.call
+        assert_equal token, @server.last_request[:headers]["x-forge-attempt"]
+      end
+    end
+    @client.heartbeat(7)
+    assert_nil @server.last_request[:headers]["x-forge-attempt"], "legacy/unscoped requests omit the header"
+    first.heartbeat(8) rescue ForgeCIRunner::Client::HTTPError
+    assert_nil @server.last_request[:headers]["x-forge-attempt"], "attempt token must not leak to another job"
+    @server.stub("POST", "/api/v1/jobs/7/artifacts", "201", {})
+    Tempfile.create("artifact") do |file|
+      file.write("artifact data")
+      file.flush
+      first.post_artifact(7, file.path, path: "output")
+      assert_equal "attempt-a", @server.last_request[:headers]["x-forge-attempt"]
+    end
+  end
+
   def setup
     @server = FakeControlPlane.new
     @client = ForgeCIRunner::Client.new(runner_config_for(@server))

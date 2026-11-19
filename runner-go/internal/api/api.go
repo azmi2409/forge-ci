@@ -75,13 +75,22 @@ func (e *UpcomingError) Error() string {
 }
 
 type Client struct {
-	base      string
-	token     string
-	runnerID  string
-	hostname  string
-	api       *http.Client // authenticated; redirects disabled
-	download  *http.Client // unauthenticated; signed URLs only
-	transport *http.Transport
+	attemptJobID int64
+	attemptToken string
+	base         string
+	token        string
+	runnerID     string
+	hostname     string
+	api          *http.Client // authenticated; redirects disabled
+	download     *http.Client // unauthenticated; signed URLs only
+	transport    *http.Transport
+}
+
+func (c *Client) ForAttempt(jobID int64, token string) *Client {
+	client := *c
+	client.attemptJobID = jobID
+	client.attemptToken = token
+	return &client
 }
 
 func New(baseURL, token string) *Client {
@@ -138,7 +147,6 @@ func New(baseURL, token string) *Client {
 			},
 		},
 	}
-
 }
 
 func (c *Client) CloseIdleConnections() { c.transport.CloseIdleConnections() }
@@ -513,6 +521,10 @@ func (c *Client) doUpload(ctx context.Context, method, path string, body io.Read
 }
 
 func (c *Client) auth(req *http.Request) {
+	if c.attemptToken != "" && (strings.HasPrefix(req.URL.Path, fmt.Sprintf("/api/v1/jobs/%d/", c.attemptJobID)) ||
+		strings.HasPrefix(req.URL.Path, fmt.Sprintf("/api/v1/runner/jobs/%d/", c.attemptJobID))) {
+		req.Header.Set("X-Forge-Attempt", c.attemptToken)
+	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
 }

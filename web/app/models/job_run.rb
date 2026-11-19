@@ -87,6 +87,7 @@ class JobRun < ApplicationRecord
         raise IllegalTransition, "cannot transition job #{id} (#{name}) from #{status} to #{new_status}"
       end
 
+      attrs[:attempt_token] = nil unless ACTIVE_STATUSES.include?(new_status)
       update!(attrs.merge(status: new_status))
       # Durable log store: once terminal, the blob holds the final log and the
       # ingestion rows are dropped (see #finalize_log_blob!).
@@ -107,7 +108,8 @@ class JobRun < ApplicationRecord
   end
 
   def mark_claimed!(claimed_by:)
-    transition_to!("claimed", claimed_by: claimed_by, claimed_at: Time.current, heartbeat_at: Time.current)
+    transition_to!("claimed", claimed_by: claimed_by, claimed_at: Time.current, heartbeat_at: Time.current,
+                   attempt_token: SecureRandom.uuid)
   end
 
   def mark_running!
@@ -209,7 +211,7 @@ class JobRun < ApplicationRecord
       log_blob.purge if log_blob.attached?
       step_runs.update_all(status: StepRun.statuses.fetch("pending"), exit_code: nil,
                            started_at: nil, finished_at: nil, updated_at: Time.current)
-      update_columns(status: "pending", claimed_by: nil, claimed_at: nil, heartbeat_at: nil, updated_at: Time.current)
+      update_columns(status: "pending", claimed_by: nil, claimed_at: nil, heartbeat_at: nil, attempt_token: nil, updated_at: Time.current)
     end
   end
 

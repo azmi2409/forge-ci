@@ -6,6 +6,10 @@ separately.
 
 ## Unreleased
 
+- Fence runner job attempts with a fresh claim token. Updated Ruby and Go
+  runners send `X-Forge-Attempt` on per-job requests; stale attempts receive
+  403 before changing lifecycle state or logs. Requests without the header
+  remain compatible. Deploy the `job_runs.attempt_token` migration first.
 - Ruby runner Docker operations now honor the job deadline, including image
   pulls, setup and transfers. Startup checks, checksum queries and cleanup have
   separate bounded budgets matching Go. Timed-out CLI process groups are killed

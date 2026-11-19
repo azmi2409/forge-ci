@@ -12,6 +12,43 @@ class JobRunTest < ActiveSupport::TestCase
 
   # --- legal transitions ----------------------------------------------------
 
+  test "attempt tokens rotate on claim and clear on release completion cancel stale recovery and rerun" do
+    job = build_job
+    job.mark_queued!
+    job.mark_claimed!(claimed_by: "runner")
+    first = job.attempt_token
+    assert_match(/\A[0-9a-f-]{36}\z/, first)
+    job.mark_running!
+    assert_equal first, job.reload.attempt_token
+    job.release!
+    assert_nil job.reload.attempt_token
+    job.mark_claimed!(claimed_by: "runner")
+    assert_not_equal first, job.attempt_token
+    job.cancel!
+    assert_nil job.reload.attempt_token
+    job.update_column(:attempt_token, "legacy-leftover")
+    job.reset_for_rerun!
+    assert_nil job.reload.attempt_token
+
+    %w[success failed canceled].each do |status|
+      job = build_job(status: "queued")
+      job.mark_claimed!(claimed_by: "runner")
+      assert_not_nil job.attempt_token
+      job.complete_with_results!(status: status)
+      assert_nil job.reload.attempt_token
+    end
+
+    %w[claimed running].each do |status|
+      job = build_job(status: "queued")
+      job.mark_claimed!(claimed_by: "runner")
+      job.mark_running! if status == "running"
+      job.update_column(:heartbeat_at, 5.minutes.ago)
+      job.reclaim_stale!
+      assert_equal status == "claimed" ? "queued" : "failed", job.reload.status
+      assert_nil job.attempt_token
+    end
+  end
+
   test "pending -> queued -> claimed -> running -> success is legal" do
     job = build_job
     job.mark_queued!

@@ -36,6 +36,10 @@ module Api
       # The job must belong to the token making the request; otherwise 403.
       # (A token can only ever claim jobs, so non-owners get "forbidden".)
       def require_job_owner!(job)
+        attempt = request.headers["X-Forge-Attempt"]
+        if !attempt.nil? && attempt != job.attempt_token
+          return render json: { error: "stale attempt" }, status: :forbidden
+        end
         return if job.claimed_by == current_runner_token.name
 
         render json: { error: "forbidden: job is owned by another token" }, status: :forbidden

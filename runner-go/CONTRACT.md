@@ -17,6 +17,17 @@ Sources read to produce this: `web/app/controllers/api/v1/runner/jobs_controller
 
 ## Transport & auth
 
+- Additive attempt fencing: claims may include `attempt_token` (opaque string;
+  absent on old servers). Bind it immutably to the claimed execution and send
+  `X-Forge-Attempt` on every per-job request, including logs, artifacts,
+  completion retries and release/cancellation fallbacks. Never reuse a newer
+  attempt's token for an older execution. The server checks it under the job
+  lock for start, heartbeat, complete, release and log ingestion; mismatches
+  return 403 `{ "error": "stale attempt" }`. Every claim rotates the token;
+  leaving claimed/running or resetting for rerun clears it. A replayed applied
+  completion can therefore return 403 rather than 422, both non-retryable.
+  Missing headers remain accepted for backward compatibility (not fenced).
+  Deploy the nullable `job_runs.attempt_token` migration with the server first.
 - Base URL from `CONTROL_PLANE_URL` (trailing slashes stripped). All API paths under `/api/v1/`.
 - Every control-plane request carries `Authorization: Bearer <token>` (scheme match is
   case-insensitive server-side; send `Bearer`), `Accept: application/json`.

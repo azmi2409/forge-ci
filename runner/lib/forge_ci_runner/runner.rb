@@ -40,7 +40,7 @@ module ForgeCIRunner
         claim_timeout = @linger_until && [@linger_until - monotonic, 0].max
         payload = poll_once(timeout: claim_timeout)
         if @shutdown
-          release_job(payload["id"], []) if payload
+          with_attempt(payload) { release_job(payload["id"], []) } if payload
           break
         end
 
@@ -183,6 +183,18 @@ module ForgeCIRunner
     end
 
     def run_job(payload)
+      with_attempt(payload) { execute_job(payload) }
+    end
+
+    def with_attempt(payload)
+      original = @client
+      @client = original.for_attempt(payload["id"], payload["attempt_token"]) if original.respond_to?(:for_attempt)
+      yield
+    ensure
+      @client = original
+    end
+
+    def execute_job(payload)
       job_id = payload["id"]
       log("claimed job ##{job_id} (#{payload["name"]})")
 
@@ -233,12 +245,13 @@ module ForgeCIRunner
 
     def start_heartbeat(job_id)
       @job_canceled = false
+      client = @client
       Thread.new do
         loop do
           sleep @config.heartbeat_interval
 
           begin
-            reply = @client.heartbeat(job_id)
+            reply = client.heartbeat(job_id)
             status = reply["status"] if reply.is_a?(Hash)
             if status.is_a?(String) && !status.empty? && !%w[claimed running].include?(status)
               log("job ##{job_id} is no longer active (#{status}); stopping")

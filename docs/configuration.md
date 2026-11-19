@@ -127,10 +127,23 @@ the runner uses the existing cancellation-report fallback. The flag controls
 shutdown of jobs already executing, not handoff of unstarted claims. A lost
 claim response with no known job ID still relies on stale-job recovery.
 
+Each new claim includes an opaque `attempt_token`. Updated Ruby and Go runners
+bind it to that execution and send `X-Forge-Attempt` on per-job requests,
+including heartbeat, logs, artifacts, completion retries and release/cancellation
+fallbacks. A mismatched header receives HTTP 403 `{ "error": "stale attempt" }`
+without changing lifecycle state or logs. Tokens are replaced on every claim
+and cleared on release, stale recovery, terminal transitions and rerun reset.
+Deploy the `job_runs.attempt_token` database migration with the control plane
+before upgrading runners. Older runners that omit the header remain accepted
+and are **not attempt-fenced**; upgrade all runners in a token group for the
+protection to be complete. New runners also work with old servers that omit
+`attempt_token`. No additional runner configuration is required.
+
 Completion reports include step results and are retried only on network errors
 and 5xx responses: at most three attempts with 1s then 2s backoff, a 5-second
 deadline per attempt, and a 20-second total budget. All 4xx responses stop retries;
-an already-applied completion returns 422 without changing the saved result.
+an already-applied completion returns 403 for a cleared attempt token (422 for
+legacy requests without attempt headers), without changing the saved result.
 Rejections and exhausted retries are logged and the runner moves on without
 changing the reported status. Ruby keeps heartbeating during completion; Go stops
 heartbeating first, but the retry budget is well below the server's 120-second
