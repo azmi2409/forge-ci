@@ -12,3 +12,5 @@
 .flow-stage { position: absolute; top: -26px; left: 0; color: var(--muted); font: 10px var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
 .pipeline-diagram .react-flow__handle { width: 7px; height: 7px; background: var(--surface); border: 1.5px solid var(--job-state); pointer-events: none; }
 .pipeline-diagram .react-flow__controls { box-shadow: none; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; }
+.pipeline-diagram .react-flow__attribution { background: transparent; }
+.pipeline-diagram .react-flow__attribution a { color: var(--muted); }
