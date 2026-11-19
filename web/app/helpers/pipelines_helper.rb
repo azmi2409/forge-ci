@@ -4,17 +4,22 @@ module PipelinesHelper
   def workflow_diagram(workflow)
     stages = workflow.stages
     nodes = stages.each_with_index.flat_map do |stage, column|
+      y = 0
       stage.each_with_index.map do |jobs, row|
         job = jobs.first
+        height = workflow_diagram_node_height(jobs)
+        position = { x: column * 296, y: y }
+        y += height + 28
         {
           id: job.name,
           type: "job",
-          position: { x: column * 296, y: row * 152 },
+          position: position,
           data: {
             name: job.name,
             status: group_status(jobs),
             resource_class: job.resource_class || "any runner",
             parallel: jobs.size,
+            estimated_height: height,
             href: job_run_path(job),
             stage: column,
             stage_start: row.zero?,
@@ -50,8 +55,28 @@ module PipelinesHelper
     end
     width = nodes.map { |node| node[:position][:x] + 248 }.max || 0
     height = nodes.map do |node|
-      node[:position][:y] + (node[:data][:parallel] > 1 ? 124 : 90)
+      node[:position][:y] + node[:data][:estimated_height]
     end.max || 0
     { nodes: nodes, edges: edges, width: width, height: height }
+  end
+
+  private
+
+  def workflow_diagram_node_height(jobs)
+    return 90 if jobs.size == 1
+
+    rows = 1
+    row_width = 0
+    jobs.each do |job|
+      pill_width = 29 + (job.node_index + 1).to_s.length * 7
+      width = row_width.zero? ? pill_width : row_width + 4 + pill_width
+      if width > 220
+        rows += 1
+        row_width = pill_width
+      else
+        row_width = width
+      end
+    end
+    124 + (rows - 1) * 26
   end
 end

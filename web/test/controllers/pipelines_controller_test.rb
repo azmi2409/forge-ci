@@ -78,6 +78,27 @@ class PipelinesControllerTest < ActionDispatch::IntegrationTest
     assert_select "meta[http-equiv=refresh][content='5']"
   end
 
+  test "workflow diagram stacks a large parallel group without overlapping the next job" do
+    job = @pipeline.job_runs.find_by!(name: "test")
+    job.update!(parallelism: 16)
+    15.times do |index|
+      copy = job.dup
+      copy.update!(node_index: index + 1)
+    end
+    following = job.dup
+    following.update!(name: "lint", parallelism: 1, node_index: 0)
+
+    get "/projects/#{@project.id}/pipelines/#{@pipeline.id}"
+    graph = JSON.parse(css_select("[data-workflow-diagram]").first["data-workflow-diagram"])
+    parallel = graph["nodes"].find { |node| node["id"] == "test" }
+    lint = graph["nodes"].find { |node| node["id"] == "lint" }
+    assert_equal parallel["position"]["x"], lint["position"]["x"]
+    assert_equal 202, parallel["data"]["estimated_height"]
+    parallel_bottom = parallel["position"]["y"] + parallel["data"]["estimated_height"]
+    assert_equal parallel_bottom + 28, lint["position"]["y"]
+    assert_equal lint["position"]["y"] + lint["data"]["estimated_height"], graph["height"]
+  end
+
   test "workflow diagram distinguishes dependencies that skip a stage" do
     @pipeline.job_runs.find_by!(name: "deploy").update!(requires: %w[build test])
     get "/projects/#{@project.id}/pipelines/#{@pipeline.id}"
