@@ -508,6 +508,26 @@ func TestIdleShutdown(t *testing.T) {
 	}
 }
 
+func TestIdleShutdownCommand(t *testing.T) {
+	for _, command := range []string{"true", "false", "forge-ci-nonexistent-termination-command"} {
+		t.Run(command, func(t *testing.T) {
+			f := &fakeRunnerCP{t: t, claims: []*payload.Claim{nil}}
+			cfg := runnerCfg(t)
+			cfg.IdleShutdownAfter = 0.01
+			cfg.IdleLingerMax = 0
+			cfg.IdleShutdownCommand = command
+			err := New(cfg, f).Run(context.Background())
+			if command == "true" {
+				if err != nil {
+					t.Fatalf("successful command: %v", err)
+				}
+			} else if err == nil {
+				t.Fatal("failed shutdown command returned success")
+			}
+		})
+	}
+}
+
 // Upcoming>0 must suppress the idle shutdown (work is coming).
 func TestUpcomingSuppressesIdleShutdown(t *testing.T) {
 	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{nil}, idleUpcoming: 2}

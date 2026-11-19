@@ -91,7 +91,7 @@ continue working but are not listed. The page updates when refreshed.
 | `IDLE_SHUTDOWN_AFTER` | no | `0` (never) | Base seconds without a job before the runner checks outlook and may shut down |
 | `IDLE_LINGER_MAX` | no | `0` | Maximum extra seconds after base idle to stay when outlook reports eligible work. Zero preserves immediate shutdown |
 | `IDLE_OUTLOOK_INTERVAL` | no | `15` | Seconds between job-claim and outlook checks while lingering |
-| `IDLE_SHUTDOWN_COMMAND` | no | — | Shell command run once on idle shutdown, e.g. `bin/forge-ci-asg-terminate-self` |
+| `IDLE_SHUTDOWN_COMMAND` | no | — | Shell command run once on idle shutdown, e.g. `bin/forge-ci-asg-terminate-self`. Failure exits nonzero; installed systemd services restart after 10 seconds and resume polling. Success (or no command) exits zero and stays stopped |
 | `ALLOW_DOCKER_SOCKET` | no | off | `1` lets jobs with `setup_remote_docker` use this machine's Docker socket. Such a job controls the machine, so set it only on runners trusted with that (the deploy runner); fork pull requests are always refused. The install command's `--allow-docker` sets it |
 | `REQUEUE_ON_SHUTDOWN` | no | off | `1`: on SIGTERM/SIGINT mid-job, stop the running step and put the job back in the queue instead of reporting it canceled (at most twice per job). For Spot/preemptible runners whose jobs are safe to retry; never on deploy runners. The install command's `--requeue-on-shutdown` sets it |
 | `DOCKER_SOCKET_PATH` | no | `/var/run/docker.sock` | The socket mounted for `setup_remote_docker` |

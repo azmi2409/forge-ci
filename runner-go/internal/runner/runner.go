@@ -121,8 +121,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		var cancelClaim context.CancelFunc
 		if !lingerUntil.IsZero() {
 			if !time.Now().Before(lingerUntil) {
-				r.idleShutdown()
-				return nil
+				return r.idleShutdown()
 			}
 			claimCtx, cancelClaim = context.WithDeadline(ctx, lingerUntil)
 		}
@@ -155,28 +154,24 @@ func (r *Runner) Run(ctx context.Context) error {
 
 		if errors.Is(err, api.ErrIdle) && r.cfg.IdleShutdownAfter > 0 && r.idleTooLong() {
 			if r.cfg.IdleLingerMax <= 0 {
-				r.idleShutdown()
-				return nil
+				return r.idleShutdown()
 			}
 			if lingerUntil.IsZero() {
 				baseDeadline := r.idleSince.Add(seconds(r.cfg.IdleShutdownAfter))
 				lingerUntil = baseDeadline.Add(seconds(r.cfg.IdleLingerMax))
 			}
 			if !time.Now().Before(lingerUntil) {
-				r.idleShutdown()
-				return nil
+				return r.idleShutdown()
 			}
 			outlookCtx, cancelOutlook := context.WithDeadline(ctx, lingerUntil)
 			outlook, outlookErr := r.client.Outlook(outlookCtx, r.cfg.ResourceClass)
 			cancelOutlook()
 			if outlookErr != nil {
 				r.logf("runner outlook unavailable (%v); shutting down at base idle", outlookErr)
-				r.idleShutdown()
-				return nil
+				return r.idleShutdown()
 			}
 			if !outlook.HasWork() || !time.Now().Before(lingerUntil) {
-				r.idleShutdown()
-				return nil
+				return r.idleShutdown()
 			}
 			r.pause(lingerPause(r.cfg.IdleOutlookInterval, time.Until(lingerUntil)))
 			continue
@@ -252,18 +247,19 @@ func lingerPause(interval float64, remaining time.Duration) time.Duration {
 
 // idleShutdown runs the scale-to-zero command (e.g. ASG self-terminate) and
 // returns; Run then exits.
-func (r *Runner) idleShutdown() {
+func (r *Runner) idleShutdown() error {
 	r.logf("idle for %ds; shutting down", int(r.cfg.IdleShutdownAfter))
 	if r.cfg.IdleShutdownCommand == "" {
-		return
+		return nil
 	}
 	r.logf("running IDLE_SHUTDOWN_COMMAND")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", r.cfg.IdleShutdownCommand)
 	if err := cmd.Run(); err != nil {
-		r.logf("IDLE_SHUTDOWN_COMMAND failed: %v", err)
+		return fmt.Errorf("IDLE_SHUTDOWN_COMMAND failed; exiting for service restart: %w", err)
 	}
+	return nil
 }
 
 // pause sleeps for d, but a signal ends it early so shutdown is prompt.

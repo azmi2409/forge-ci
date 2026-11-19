@@ -6,6 +6,10 @@ separately.
 
 ## Unreleased
 
+- Ruby and Go runners exit nonzero when `IDLE_SHUTDOWN_COMMAND` fails, so
+  installed systemd services restart after 10 seconds and resume polling instead
+  of leaving a stopped runner counted as provisioned capacity. Successful idle
+  shutdown and idle shutdown without a command still exit successfully.
 - Ruby and Go runners check cache metadata before `save_cache`: existing exact
   keys skip archive creation and upload; prefix matches and misses still save.
   Lookup failures warn and skip saving without failing the job. Workspace writes
