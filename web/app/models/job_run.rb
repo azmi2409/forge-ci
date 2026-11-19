@@ -388,6 +388,10 @@ class JobRun < ApplicationRecord
     end
 
     with_lock do
+      unless ALLOWED_TRANSITIONS.fetch(self.status).include?(status)
+        raise IllegalTransition, "cannot transition job #{id} (#{name}) from #{self.status} to #{status}"
+      end
+
       Array(step_results).each do |sr|
         # Accept plain hashes (Ruby callers) and ActionController::Parameters
         # (HTTP) alike.

@@ -397,6 +397,24 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity
   end
 
+  test "completing a canceled job leaves step results unchanged" do
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    job = JobRun.find(json_body["id"])
+    job.cancel!
+    before = job.step_runs.order(:id).map(&:attributes)
+
+    post "/api/v1/runner/jobs/#{job.id}/complete",
+         params: { status: "success",
+                   step_results: [{ name: "Install dependencies", exit_code: 0,
+                                    started_at: 1.minute.ago, finished_at: Time.current }] },
+         headers: auth, as: :json
+
+    assert_response :unprocessable_entity
+    assert job.reload.canceled?
+    assert_equal before, job.step_runs.reload.order(:id).map(&:attributes)
+  end
+
   test "complete by a non-owning token returns 403" do
     post "/api/v1/runner/jobs/claim", headers: auth
     build_id = json_body["id"]
