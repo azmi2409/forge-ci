@@ -65,10 +65,50 @@ class ExecutorTest < Minitest::Test
     name, args = ex.service_run_args(
       { "image" => "postgres:16", "name" => "db",
         "environment" => { "POSTGRES_PASSWORD" => "pw" } }, 0)
-    assert_equal "db", name
+    assert_match(/\Aforge-ci-svc-0-/, name)
     assert_includes args, "--network-alias"
     assert_includes args, "db"
     assert_includes args, "POSTGRES_PASSWORD=pw"
+  end
+
+  def test_service_start_conflict_does_not_remove_an_unrelated_container
+    ex = executor
+    def ex.run_docker(*args)
+      @commands << [:run_docker, args]
+      return ["", 1] if args[1] == "run"
+      return ["another-job #{'f' * 64}\n", 0] if args[1] == "inspect"
+
+      ["", 0]
+    end
+
+    status, = ex.execute
+    assert_equal "failed", status
+    commands = ex.commands.map(&:last)
+    service = commands.find { |args| args[1] == "run" }
+    name = service[service.index("--name") + 1]
+    refute commands.include?(["docker", "rm", "-f", name]), "must not remove a conflicting host container"
+    refute commands.include?(["docker", "rm", "-f", "f" * 64]), "must check ownership before removing by ID"
+  end
+
+  def test_service_cleanup_removes_only_a_matching_labeled_container_id
+    ["matching", "different", "missing"].each do |ownership|
+      ex = executor
+      owner = ex.instance_variable_get(:@container)
+      ex.instance_variable_set(:@services, ["service"])
+      ex.define_singleton_method(:run_docker) do |*args|
+        @commands << [:run_docker, args]
+        if args[1] == "inspect"
+          next ["", 1] if ownership == "missing"
+
+          next ["#{ownership == 'matching' ? owner : 'another-job'} #{'a' * 64}\n", 0]
+        end
+        ["", 0]
+      end
+      ex.send(:cleanup_containers)
+      removed = ex.commands.map(&:last).select { |args| args[1, 2] == ["rm", "-f"] }.map(&:last)
+      refute_includes removed, "service"
+      assert_equal ownership == "matching", removed.include?("a" * 64)
+    end
   end
 
   def test_exec_argv_splits_shell

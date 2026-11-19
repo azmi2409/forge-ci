@@ -18,6 +18,11 @@ class DockerTimeoutTest < Minitest::Test
         require "json"
         trap("TERM", "IGNORE") if #{ignore_term.inspect}
         File.open(#{calls.inspect}, "a") { |f| f.puts(JSON.generate([Process.pid, ARGV, Process.clock_gettime(Process::CLOCK_MONOTONIC)])) }
+        if ARGV.first == "inspect"
+          calls = File.readlines(#{calls.inspect}).map { |line| JSON.parse(line)[1] }
+          run = calls.find { |args| args.first == "run" && args.include?(ARGV.last) }
+          puts "\#{run[run.index('--label') + 1].split('=', 2).last} #{'a' * 64}" if run && run.include?("--label")
+        end
         if ARGV.include?(#{hang_on.inspect})
           if #{spawn_child.inspect}
             child = Process.spawn(#{RbConfig.ruby.inspect}, "-e", "sleep 300")
@@ -100,7 +105,8 @@ class DockerTimeoutTest < Minitest::Test
       run = args.find { |a| a.first == "run" }
       refute_nil run, "service startup must be reached"
       service_name = run[run.index("--name") + 1]
-      assert args.include?(["rm", "-f", service_name]), "remove service even when its start response times out"
+      assert args.any? { |a| a.first == "inspect" && a.last == service_name }
+      assert args.include?(["rm", "-f", "a" * 64]), "remove owned service even when its start response times out"
     end
   end
 

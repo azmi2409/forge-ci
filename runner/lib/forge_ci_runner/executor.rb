@@ -365,11 +365,12 @@ module ForgeCIRunner
 
     # Returns [service_name, argv].
     def service_run_args(svc, index)
-      name = svc["name"] || "forge-ci-svc-#{index}-#{@suffix}"
+      name = "forge-ci-svc-#{index}-#{@suffix}"
       args = [@config.docker_bin, "run", "-d",
               "--name", name,
+              "--label", "forge-ci.runner-job=#{@container}",
               "--network", @network,
-              "--network-alias", name]
+              "--network-alias", svc["name"] || name]
       args += env_args(svc["environment"] || {})
       args += ["--entrypoint", svc["entrypoint"]] if svc["entrypoint"]
       args << svc["image"]
@@ -523,10 +524,20 @@ module ForgeCIRunner
 
     def cleanup_containers
       @cleanup_deadline = monotonic + cleanup_budget
-      ([@container] + @services).each do |name|
+      [@container].each do |name|
         run_docker(@config.docker_bin, "rm", "-f", name)
       rescue StandardError => e
         $stderr.puts "[forge-ci-runner] cleanup: rm -f #{name} failed: #{e.message}"
+      end
+      @services.each do |name|
+        out, code = run_docker(@config.docker_bin, "inspect", "--format",
+                              '{{index .Config.Labels "forge-ci.runner-job"}} {{.Id}}', name)
+        owner, id = out.split
+        next unless code.zero? && owner == @container && id&.match?(/\A[0-9a-f]{64}\z/)
+
+        run_docker(@config.docker_bin, "rm", "-f", id)
+      rescue StandardError => e
+        $stderr.puts "[forge-ci-runner] cleanup: service #{name} failed: #{e.message}"
       end
       if @buildx_created
         begin
