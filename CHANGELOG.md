@@ -6,6 +6,10 @@ separately.
 
 ## Unreleased
 
+- Ruby runner Docker operations now honor the job deadline, including image
+  pulls, setup and transfers. Startup checks, checksum queries and cleanup have
+  separate bounded budgets matching Go. Timed-out CLI process groups are killed
+  and reaped; interrupted steps remove their container and skip remaining steps.
 - Ruby and Go runners retry completion reports on network errors and 5xx, with
   three attempts, 1s/2s backoff, and a 20-second total deadline. Reports preserve
   status and step results; 4xx responses are not retried. Ruby no longer reports
