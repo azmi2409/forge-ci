@@ -2,8 +2,35 @@
 
 require "test_helper"
 require "rbconfig"
+require "tmpdir"
 
 class DockerProcessTest < Minitest::Test
+  def test_successful_exit_drains_all_output_despite_a_slow_callback
+    Dir.mktmpdir("forge-ci-slow-output") do |dir|
+      gate = File.join(dir, "reading")
+      delivered = +""
+      first = true
+      script = <<~RUBY
+        STDOUT.sync = true
+        puts "first"
+        sleep 0.01 until File.exist?(ARGV.first)
+        print "tail\\n" * 40
+      RUBY
+      output, status, reason = ForgeCIRunner::DockerProcess.capture([RbConfig.ruby, "-e", script, gate]) do |chunk|
+        if first
+          first = false
+          File.write(gate, "ready")
+          sleep 6
+        end
+        delivered << chunk
+      end
+      assert status.success?
+      assert_nil reason
+      assert_equal "first\n" + "tail\n" * 40, output
+      assert_equal output, delivered
+    end
+  end
+
   def test_permanently_blocked_callback_is_ended_within_a_bound
     resume = Queue.new
     entered = Queue.new

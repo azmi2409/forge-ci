@@ -21,7 +21,6 @@ module ForgeCIRunner
       Open3.popen2e(*argv, pgroup: true) do |stdin, pipe, wait_thr|
         stdin.close
         last_output = monotonic
-        exited_at = nil
         reader = Thread.new do
           Thread.current.report_on_exception = false
           loop do
@@ -36,29 +35,37 @@ module ForgeCIRunner
         rescue IOError
           raise unless pipe.closed?
         end
-        begin
-          loop do
-            now = monotonic
-            reason = stop_check&.call
-            reason ||= :job_timeout if deadline && now >= deadline
-            reason ||= :no_output if no_output_timeout.to_f.positive? && now - last_output >= no_output_timeout
-            break if reason
-
-            if wait_thr.join(0)
-              exited_at ||= now
-              break if !reader.alive? || now - exited_at >= KILL_GRACE
+        watcher = Thread.new do
+          Thread.current.report_on_exception = false
+          completed = false
+          begin
+            until wait_thr.join(POLL_INTERVAL)
+              now = monotonic
+              reason = stop_check&.call
+              reason ||= :job_timeout if deadline && now >= deadline
+              reason ||= :no_output if no_output_timeout.to_f.positive? && now - last_output >= no_output_timeout
+              break if reason
             end
-            reader.value if !reader.alive?
-            sleep POLL_INTERVAL
+            completed = true
+          ensure
+            if reason || !completed
+              terminate(wait_thr)
+              reader.join(KILL_GRACE) if completed
+              reader.kill.join if reader.alive?
+            end
           end
-        ensure
-          if reason || !wait_thr.join(0) || reader.alive?
-            terminate(wait_thr)
-          end
-          pipe.close unless pipe.closed?
-          reader.join(KILL_GRACE)
-          reader.kill.join if reader.alive?
+        end
+        begin
+          reader.value
           status = wait_thr.value
+        ensure
+          begin
+            terminate(wait_thr) unless wait_thr.join(0)
+            watcher.value
+          ensure
+            reader.kill.join if reader.alive?
+            pipe.close unless pipe.closed?
+          end
         end
       end
       [output, status, reason]
