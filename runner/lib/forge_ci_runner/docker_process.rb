@@ -22,7 +22,20 @@ module ForgeCIRunner
         stdin.close
         last_output = monotonic
         exited_at = nil
-        eof = false
+        reader = Thread.new do
+          Thread.current.report_on_exception = false
+          loop do
+            chunk = pipe.readpartial(16_384)
+            chunk.force_encoding(Encoding.default_external)
+            last_output = monotonic
+            output << chunk if capture_output
+            yield chunk if block_given?
+          end
+        rescue EOFError
+          nil
+        rescue IOError
+          raise unless pipe.closed?
+        end
         begin
           loop do
             now = monotonic
@@ -33,29 +46,18 @@ module ForgeCIRunner
 
             if wait_thr.join(0)
               exited_at ||= now
-              break if eof || now - exited_at >= KILL_GRACE
+              break if !reader.alive? || now - exited_at >= KILL_GRACE
             end
-            if eof
-              wait_thr.join(POLL_INTERVAL)
-              next
-            end
-            next unless IO.select([pipe], nil, nil, POLL_INTERVAL)
-
-            chunk = pipe.read_nonblock(16_384, exception: false)
-            if chunk.nil?
-              eof = true
-            elsif chunk != :wait_readable
-              chunk.force_encoding(Encoding.default_external)
-              last_output = monotonic
-              output << chunk if capture_output
-              yield chunk if block_given?
-            end
+            reader.value if !reader.alive?
+            sleep POLL_INTERVAL
           end
         ensure
-          if reason || !wait_thr.join(0) || !eof
+          if reason || !wait_thr.join(0) || reader.alive?
             terminate(wait_thr)
           end
           pipe.close unless pipe.closed?
+          reader.join(KILL_GRACE)
+          reader.kill.join if reader.alive?
           status = wait_thr.value
         end
       end
