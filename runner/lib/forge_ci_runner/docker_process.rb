@@ -21,10 +21,13 @@ module ForgeCIRunner
       Open3.popen2e(*argv, pgroup: true) do |stdin, pipe, wait_thr|
         stdin.close
         last_output = monotonic
+        reader_waiting_since = nil
         reader = Thread.new do
           Thread.current.report_on_exception = false
           loop do
+            reader_waiting_since = monotonic
             chunk = pipe.readpartial(16_384)
+            reader_waiting_since = nil
             chunk.force_encoding(Encoding.default_external)
             last_output = monotonic
             output << chunk if capture_output
@@ -39,17 +42,28 @@ module ForgeCIRunner
           Thread.current.report_on_exception = false
           completed = false
           begin
-            until wait_thr.join(POLL_INTERVAL)
+            exited_at = nil
+            loop do
+              exited = wait_thr.join(0)
+              break if exited && !reader.alive?
+
               now = monotonic
+              exited_at ||= now if exited
               reason = stop_check&.call
               reason ||= :job_timeout if deadline && now >= deadline
               reason ||= :no_output if no_output_timeout.to_f.positive? && now - last_output >= no_output_timeout
+              if !deadline && exited_at && reader_waiting_since && now - [exited_at, reader_waiting_since].max >= KILL_GRACE
+                reason ||= :drain_timeout
+              end
               break if reason
+
+              sleep POLL_INTERVAL
             end
             completed = true
           ensure
             if reason || !completed
               terminate(wait_thr)
+              pipe.close unless pipe.closed?
               reader.join(KILL_GRACE) if completed
               reader.kill.join if reader.alive?
             end
