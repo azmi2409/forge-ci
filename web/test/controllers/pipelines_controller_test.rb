@@ -67,11 +67,23 @@ class PipelinesControllerTest < ActionDispatch::IntegrationTest
       assert_equal 1, data["stage"]
       assert_equal [["build", "test"], ["test", "deploy"]], graph["edges"].map { |edge| edge.values_at("source", "target") }
       assert_equal "success", graph["edges"][0]["data"]["status"]
+      assert_equal "default", graph["edges"][0]["type"]
+      assert_equal "build", graph["edges"][0]["targetHandle"]
+      assert_equal 840, graph["width"]
+      assert_equal 124, graph["height"]
       assert graph["edges"][0]["animated"]
       assert_not graph["edges"][1]["animated"]
     end
     assert_select ".graph .jobnode", count: 3
     assert_select "meta[http-equiv=refresh][content='5']"
+  end
+
+  test "workflow diagram distinguishes dependencies that skip a stage" do
+    @pipeline.job_runs.find_by!(name: "deploy").update!(requires: %w[build test])
+    get "/projects/#{@project.id}/pipelines/#{@pipeline.id}"
+    graph = JSON.parse(css_select("[data-workflow-diagram]").first["data-workflow-diagram"])
+    assert_equal ["build"], graph["nodes"].last["data"]["long_requires"]
+    assert_equal 3, graph["edges"].size
   end
 
   test "workflow diagram handles empty workflows and unknown dependencies" do
@@ -80,6 +92,8 @@ class PipelinesControllerTest < ActionDispatch::IntegrationTest
     graph = JSON.parse(css_select("[data-workflow-diagram]").first["data-workflow-diagram"])
     assert_empty graph["nodes"]
     assert_empty graph["edges"]
+    assert_equal 0, graph["width"]
+    assert_equal 0, graph["height"]
 
     @pipeline.workflow_runs.first.job_runs.create!(name: "orphan <job>", requires: ["missing"], status: :failed)
     get "/projects/#{@project.id}/pipelines/#{@pipeline.id}"
