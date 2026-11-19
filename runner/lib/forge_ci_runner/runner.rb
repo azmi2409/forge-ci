@@ -8,6 +8,7 @@ module ForgeCIRunner
   # as "canceled". Exits cleanly. With REQUEUE_ON_SHUTDOWN (Spot runners)
   # the in-flight step is stopped too and the job is released back to the
   # queue for another runner; if the release is refused it is canceled.
+  # A claim received during shutdown is released without starting, either way.
   #
   # Idle polls back off from POLL_INTERVAL up to MAX_IDLE_INTERVAL. Once
   # IDLE_SHUTDOWN_AFTER elapses, bounded outlook-driven linger can keep this
@@ -38,7 +39,10 @@ module ForgeCIRunner
 
         claim_timeout = @linger_until && [@linger_until - monotonic, 0].max
         payload = poll_once(timeout: claim_timeout)
-        break if @shutdown
+        if @shutdown
+          release_job(payload["id"], []) if payload
+          break
+        end
 
         if payload.nil?
           if @client.no_work
@@ -181,6 +185,11 @@ module ForgeCIRunner
     def run_job(payload)
       job_id = payload["id"]
       log("claimed job ##{job_id} (#{payload["name"]})")
+
+      if @shutdown
+        release_job(job_id, [])
+        return
+      end
 
       executor = build_executor(payload)
       @client.start_job(job_id)

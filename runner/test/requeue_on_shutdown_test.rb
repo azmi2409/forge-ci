@@ -165,4 +165,55 @@ class RequeueOnShutdownTest < Minitest::Test
 
     assert_equal [[:start, 5], [:complete, 5, "success"]], client.calls
   end
+
+  def test_shutdown_with_an_unstarted_claim_releases_it_without_executing
+    [false, true].product([:during_claim, :before_start], [nil, ForgeCIRunner::Client::HTTPError.new("409", "{}"), IOError.new("connection reset")]).each do |requeue, timing, error|
+      client = FakeClient.new(release_error: error)
+      runner = TestRunner.new(test_config(requeue_on_shutdown: requeue))
+      runner.instance_variable_set(:@client, client)
+      runner.instance_variable_set(:@shutdown_signal, "SIGTERM")
+      runner.define_singleton_method(:trap_signals) {}
+      executed = false
+      executor = Object.new
+      executor.define_singleton_method(:execute) do |*_args, **_kwargs|
+        executed = true
+        ["success", []]
+      end
+      runner.define_singleton_method(:build_executor) { |_payload| executor }
+      payload = { "id" => 5, "name" => "test" }
+
+      if timing == :during_claim
+        client.define_singleton_method(:claim_job) do |_resource_class|
+          runner.instance_variable_set(:@shutdown, true)
+          payload
+        end
+        runner.run
+      else
+        runner.instance_variable_set(:@shutdown, true)
+        runner.send(:run_job, payload)
+      end
+
+      expected = [[:release, 5, "runner shutting down (SIGTERM)"]]
+      expected << [:complete, 5, "canceled"] if error
+      assert_equal expected, client.calls, "requeue=#{requeue}, timing=#{timing}, error=#{error.inspect}"
+      refute executed
+    end
+  end
+
+  def test_shutdown_during_an_empty_or_failed_claim_has_nothing_to_release
+    [nil, IOError.new("connection reset")].each do |error|
+      client = FakeClient.new
+      runner = TestRunner.new(test_config)
+      runner.instance_variable_set(:@client, client)
+      runner.define_singleton_method(:trap_signals) {}
+      client.define_singleton_method(:claim_job) do |_resource_class|
+        runner.instance_variable_set(:@shutdown, true)
+        raise error if error
+      end
+
+      runner.run
+
+      assert_empty client.calls
+    end
+  end
 end

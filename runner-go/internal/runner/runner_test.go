@@ -52,7 +52,8 @@ type fakeRunnerCP struct {
 	heartbeatDoneOnce sync.Once
 
 	// releaseErr, when set, is returned by Release.
-	releaseErr error
+	releaseErr     error
+	releaseCtxErrs []error
 
 	// claimStarted/closed coordinate delayed claims (signal-during-claim).
 	claimGate chan struct{}
@@ -181,6 +182,7 @@ func (f *fakeRunnerCP) Release(ctx context.Context, jobID int64, reason string) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.releases = append(f.releases, release{jobID, reason})
+	f.releaseCtxErrs = append(f.releaseCtxErrs, ctx.Err())
 	return f.releaseErr
 }
 
@@ -315,7 +317,7 @@ func TestJobLifecycleSuccess(t *testing.T) {
 	}
 }
 
-// Race 1+2: signal after claim, before start → canceled, never started.
+// Race 1+2: signal after claim, before start → released, never started.
 func TestShutdownAfterClaimBeforeStart(t *testing.T) {
 	f := &fakeRunnerCP{t: t, claims: []*payload.Claim{mustClaim(t, 102, "true")}}
 	cfg := runnerCfg(t)
@@ -346,9 +348,91 @@ func TestShutdownAfterClaimBeforeStart(t *testing.T) {
 	if f.hasStarted(102) {
 		t.Fatal("job must not be started after shutdown")
 	}
-	// The claimed job must still be reported (canceled), not abandoned.
-	if got := f.completionsFor(102); len(got) != 1 || got[0] != "canceled" {
+	if len(f.releases) != 1 || f.releases[0].jobID != 102 {
+		t.Fatalf("releases: %+v", f.releases)
+	}
+	if got := f.completionsFor(102); len(got) != 0 {
 		t.Fatalf("completions: %v", got)
+	}
+}
+
+func TestShutdownBeforeStartReleasesClaim(t *testing.T) {
+	for _, requeue := range []bool{false, true} {
+		for _, releaseErr := range []error{nil, &api.APIError{Code: 409}, errors.New("connection reset")} {
+			t.Run(fmt.Sprintf("requeue=%v/error=%v", requeue, releaseErr), func(t *testing.T) {
+				f := &fakeRunnerCP{t: t, releaseErr: releaseErr}
+				cfg := runnerCfg(t)
+				cfg.RequeueOnShutdown = requeue
+				r := New(cfg, f)
+				r.beginShutdown(syscall.SIGTERM)
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+
+				r.runJob(ctx, mustClaim(t, 102, "true"))
+
+				if f.hasStarted(102) {
+					t.Fatal("unstarted job must not execute")
+				}
+				if len(f.releases) != 1 || f.releases[0].jobID != 102 || f.releaseCtxErrs[0] != nil {
+					t.Fatalf("releases: %+v, context errors: %v", f.releases, f.releaseCtxErrs)
+				}
+				got := f.completionsFor(102)
+				if releaseErr == nil && len(got) != 0 {
+					t.Fatalf("successful release also completed: %v", got)
+				}
+				if releaseErr != nil && (len(got) != 1 || got[0] != "canceled") {
+					t.Fatalf("failed release fallback: %v", got)
+				}
+			})
+		}
+	}
+}
+
+type timingOutReleaseCP struct {
+	*fakeRunnerCP
+	fallbackContextErr  error
+	fallbackHasDeadline bool
+}
+
+func (f *timingOutReleaseCP) Release(ctx context.Context, jobID int64, reason string) error {
+	f.fakeRunnerCP.Release(ctx, jobID, reason)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (f *timingOutReleaseCP) Complete(ctx context.Context, jobID int64, status string, results []api.StepResult) error {
+	f.fallbackContextErr = ctx.Err()
+	_, f.fallbackHasDeadline = ctx.Deadline()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.fakeRunnerCP.Complete(ctx, jobID, status, results)
+}
+
+func TestReleaseTimeoutStillReportsCanceled(t *testing.T) {
+	for _, started := range []bool{false, true} {
+		t.Run(fmt.Sprintf("started=%v", started), func(t *testing.T) {
+			f := &timingOutReleaseCP{fakeRunnerCP: &fakeRunnerCP{t: t}}
+			r := New(runnerCfg(t), f)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+			defer cancel()
+			var results []api.StepResult
+			if started {
+				results = []api.StepResult{{Name: "interrupted", ExitCode: 130}}
+			}
+
+			r.releaseJob(ctx, 102, results)
+
+			if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.Fatal("release must exhaust its context deadline")
+			}
+			if got := f.completionsFor(102); len(got) != 1 || got[0] != "canceled" {
+				t.Fatalf("fallback completions: %v, context error: %v", got, f.fallbackContextErr)
+			}
+			if f.fallbackContextErr != nil || !f.fallbackHasDeadline {
+				t.Fatalf("fallback context: error=%v bounded=%v", f.fallbackContextErr, f.fallbackHasDeadline)
+			}
+		})
 	}
 }
 

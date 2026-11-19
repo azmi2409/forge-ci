@@ -96,6 +96,13 @@ continue working but are not listed. The page updates when refreshed.
 | `REQUEUE_ON_SHUTDOWN` | no | off | `1`: on SIGTERM/SIGINT mid-job, stop the running step and put the job back in the queue instead of reporting it canceled (at most twice per job). For Spot/preemptible runners whose jobs are safe to retry; never on deploy runners. The install command's `--requeue-on-shutdown` sets it |
 | `DOCKER_SOCKET_PATH` | no | `/var/run/docker.sock` | The socket mounted for `setup_remote_docker` |
 
+On SIGTERM/SIGINT, a claimed job that has not started is released back to the
+queue, regardless of `REQUEUE_ON_SHUTDOWN`. This includes a claim response that
+arrives after shutdown begins. If release is refused (including 409) or fails,
+the runner uses the existing cancellation-report fallback. The flag controls
+shutdown of jobs already executing, not handoff of unstarted claims. A lost
+claim response with no known job ID still relies on stale-job recovery.
+
 Completion reports include step results and are retried only on network errors
 and 5xx responses: at most three attempts with 1s then 2s backoff, a 5-second
 deadline per attempt, and a 20-second total budget. All 4xx responses stop retries;
