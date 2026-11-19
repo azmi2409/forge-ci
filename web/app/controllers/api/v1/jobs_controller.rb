@@ -22,7 +22,7 @@ module Api
 
       before_action :find_job_or_404, only: %i[stream logs]
       before_action :authenticate_stream!, only: %i[stream logs]
-      before_action :find_owned_job, except: %i[stream logs]
+      around_action :with_owned_job_lock, only: :create_log_chunk
 
       # `stream` has its own dual auth (Bearer token OR UI session);
       # skip the base class's Bearer-only check for it.
@@ -104,9 +104,12 @@ module Api
         render json: { error: "job not found" }, status: :not_found
       end
 
-      def find_owned_job
+      def with_owned_job_lock
         @job = JobRun.find(params[:id])
-        require_job_owner!(@job)
+        @job.with_lock do
+          require_job_owner!(@job)
+          yield unless performed?
+        end
       rescue ActiveRecord::RecordNotFound
         render json: { error: "job not found" }, status: :not_found
       end

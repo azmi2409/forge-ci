@@ -165,6 +165,7 @@ module Api
           pipeline = job.pipeline
           {
             id: job.id,
+            attempt_token: job.attempt_token,
             name: job.name,
             node_index: job.node_index,
             parallelism: job.parallelism,

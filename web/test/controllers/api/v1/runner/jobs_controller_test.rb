@@ -23,6 +23,60 @@ class Api::V1::Runner::JobsControllerTest < ActionDispatch::IntegrationTest
 
   # --- claim -------------------------------------------------------------------
 
+  %w[start heartbeat complete release log_chunks].each do |action|
+    test "attempt fencing rejects stale #{action} from the same runner token" do
+      post "/api/v1/runner/jobs/claim", headers: auth
+      assert_response :ok
+      id = json_body.fetch("id")
+      first = json_body.fetch("attempt_token", "attempt-a")
+      post "/api/v1/runner/jobs/#{id}/release", headers: auth.merge("X-Forge-Attempt" => first), as: :json
+      assert_response :ok
+      post "/api/v1/runner/jobs/claim", headers: auth
+      assert_response :ok
+      assert_equal id, json_body.fetch("id")
+      second = json_body.fetch("attempt_token", "attempt-b")
+      refute_equal first, second
+      path = action == "log_chunks" ? "/api/v1/jobs/#{id}/log_chunks" : "/api/v1/runner/jobs/#{id}/#{action}"
+      body = case action
+             when "complete" then { status: "success", step_results: [{ name: "Bundle", exit_code: 0 }] }
+             when "log_chunks" then { seq: 0, chunk: "new attempt log" }
+             else {}
+             end
+      job = JobRun.find(id)
+      before = [job.attributes, job.step_runs.map(&:attributes), job.log_chunks.map(&:attributes)]
+      post path, params: body, headers: auth.merge("X-Forge-Attempt" => first), as: :json
+      assert_response :forbidden
+      assert_equal({ "error" => "stale attempt" }, json_body)
+      assert_equal before, [job.reload.attributes, job.step_runs.reload.map(&:attributes), job.log_chunks.reload.map(&:attributes)]
+
+      post path, params: body, headers: auth.merge("X-Forge-Attempt" => second), as: :json
+      assert_response :ok
+      assert_equal second, job.reload.attempt_token if %w[start heartbeat log_chunks].include?(action)
+      assert_nil job.reload.attempt_token if %w[complete release].include?(action)
+    end
+  end
+
+  test "attempt fencing accepts missing headers and rejects a present empty header" do
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    id = json_body.fetch("id")
+    assert_match(/\A[0-9a-f-]{36}\z/, json_body["attempt_token"])
+    post "/api/v1/runner/jobs/#{id}/heartbeat", headers: auth.merge("X-Forge-Attempt" => ""), as: :json
+    assert_response :forbidden
+    %w[start heartbeat].each do |action|
+      post "/api/v1/runner/jobs/#{id}/#{action}", headers: auth, as: :json
+      assert_response :ok
+    end
+    post "/api/v1/jobs/#{id}/log_chunks", params: { seq: 0, chunk: "legacy runner" }, headers: auth, as: :json
+    assert_response :ok
+    post "/api/v1/runner/jobs/#{id}/release", headers: auth, as: :json
+    assert_response :ok
+    post "/api/v1/runner/jobs/claim", headers: auth
+    assert_response :ok
+    post "/api/v1/runner/jobs/#{id}/complete", params: { status: "success" }, headers: auth, as: :json
+    assert_response :ok
+  end
+
   test "claim returns the oldest queued job with the full payload" do
     post "/api/v1/runner/jobs/claim", headers: auth
     assert_response :ok

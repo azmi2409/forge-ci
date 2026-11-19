@@ -43,6 +43,13 @@ module ForgeCIRunner
     # claim that found nothing (0 from older servers).
     attr_reader :upcoming, :no_work
 
+    def for_attempt(job_id, token)
+      client = dup
+      client.instance_variable_set(:@attempt_job_id, job_id)
+      client.instance_variable_set(:@attempt_token, token)
+      client
+    end
+
     def claim_job(resource_class, timeout: nil)
       body = {}
       body["resource_class"] = resource_class if resource_class
@@ -181,6 +188,7 @@ module ForgeCIRunner
       request = Net::HTTP::Get.new(uri)
       request["Authorization"] = "Bearer #{@token}"
       request["Accept"] = "application/json"
+      set_attempt_header(request)
       request_timeout = timeout.to_f if timeout
       request_timeout = nil unless request_timeout&.positive?
       http_request = lambda do
@@ -204,6 +212,7 @@ module ForgeCIRunner
       request["Accept"] = "application/json"
       request["Content-Type"] = body.content_type
       request["Content-Length"] = body.size.to_s
+      set_attempt_header(request)
       request.body_stream = body
 
       response = Net::HTTP.start(uri.host, uri.port,
@@ -224,6 +233,7 @@ module ForgeCIRunner
       request["X-Forge-Runner-ID"] = @runner_id
       request["X-Forge-Runner-Hostname"] = @runner_hostname
       request["X-Forge-Runner-Implementation"] = "ruby"
+      set_attempt_header(request)
       request.body = JSON.generate(payload)
       request_timeout = timeout.to_f if timeout
       request_timeout = nil unless request_timeout&.positive?
@@ -238,6 +248,13 @@ module ForgeCIRunner
       response = request_timeout ? Timeout.timeout(request_timeout) { http_request.call } : http_request.call
 
       parse_response(response)
+    end
+
+    def set_attempt_header(request)
+      match = request.path.match(%r{\A/api/v1/(?:runner/)?jobs/(\d+)(?:/|\z)})
+      if match && match[1] == @attempt_job_id.to_s && !@attempt_token.to_s.empty?
+        request["X-Forge-Attempt"] = @attempt_token
+      end
     end
 
     def parse_response(response)

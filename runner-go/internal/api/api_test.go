@@ -17,6 +17,53 @@ import (
 	"time"
 )
 
+func TestAttemptHeaderScopesEveryJobCall(t *testing.T) {
+	cp := newFakeCP(t, func(w http.ResponseWriter, r *http.Request) bool {
+		fmt.Fprint(w, `{"status":"running"}`)
+		return true
+	})
+	base := clientFor(t, cp.URL())
+	artifact := filepath.Join(t.TempDir(), "artifact")
+	if err := os.WriteFile(artifact, []byte("artifact"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first, second := base.ForAttempt(7, "attempt-a"), base.ForAttempt(7, "attempt-b")
+	for _, test := range []struct {
+		client *Client
+		token  string
+	}{{first, "attempt-a"}, {second, "attempt-b"}, {first, "attempt-a"}, {base, ""}} {
+		ctx := context.Background()
+		calls := []struct {
+			path string
+			call func() error
+		}{
+			{"/api/v1/runner/jobs/7/start", func() error { return test.client.Start(ctx, 7) }},
+			{"/api/v1/runner/jobs/7/heartbeat", func() error { _, err := test.client.Heartbeat(ctx, 7); return err }},
+			{"/api/v1/runner/jobs/7/complete", func() error { return test.client.Complete(ctx, 7, "success", nil) }},
+			{"/api/v1/runner/jobs/7/release", func() error { return test.client.Release(ctx, 7, "shutdown") }},
+			{"/api/v1/jobs/7/log_chunks", func() error { return test.client.PostLogChunk(ctx, 7, 0, "output") }},
+			{"/api/v1/jobs/7/artifacts", func() error { _, err := test.client.PostArtifact(ctx, 7, artifact, "output", ""); return err }},
+		}
+		for _, call := range calls {
+			if err := call.call(); err != nil {
+				t.Fatal(err)
+			}
+			cp.mu.Lock()
+			got := cp.requests[call.path][len(cp.requests[call.path])-1].Header.Get("X-Forge-Attempt")
+			cp.mu.Unlock()
+			if got != test.token {
+				t.Fatalf("%s attempt header=%q, want %q", call.path, got, test.token)
+			}
+		}
+	}
+	if err := first.Start(context.Background(), 8); err != nil {
+		t.Fatal(err)
+	}
+	if got := cp.header("/api/v1/runner/jobs/8/start", 0, "X-Forge-Attempt"); got != "" {
+		t.Fatalf("attempt leaked to another job: %q", got)
+	}
+}
+
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", "contract", name))

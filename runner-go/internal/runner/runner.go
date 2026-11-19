@@ -185,7 +185,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 		// A signal raced with the in-flight claim.
 		if r.shuttingDown.Load() || ctx.Err() != nil {
-			r.releaseUnstarted(claim.ID)
+			r.releaseUnstarted(claim)
 			break
 		}
 
@@ -275,16 +275,17 @@ func (r *Runner) pause(d time.Duration) {
 
 // runJob executes one claimed job through its full lifecycle.
 func (r *Runner) runJob(ctx context.Context, claim *payload.Claim) {
+	client := r.clientForClaim(claim)
 	r.logf("claimed job #%d (%s)", claim.ID, claim.Name)
 
 	// Signal after claim but before start: release immediately —
 	// containers never come up, start is never sent.
 	if r.shuttingDown.Load() || ctx.Err() != nil {
-		r.releaseUnstarted(claim.ID)
+		r.releaseUnstarted(claim)
 		return
 	}
 
-	if err := r.client.Start(ctx, claim.ID); err != nil {
+	if err := client.Start(ctx, claim.ID); err != nil {
 		// e.g. 422: the job was reclaimed after our heartbeats died, or a
 		// cancel raced the claim. Do not retry (not idempotent).
 		r.logf("could not start job #%d: %v", claim.ID, err)
@@ -309,9 +310,9 @@ func (r *Runner) runJob(ctx context.Context, claim *payload.Claim) {
 			cancelExec() // stop in-flight docker ops promptly
 		})
 	}
-	go r.heartbeatLoop(execCtx, claim.ID, heartbeatDone, interruptForCancel)
+	go r.heartbeatLoop(client, execCtx, claim.ID, heartbeatDone, interruptForCancel)
 
-	exec := executor.New(r.cfg, r.client, claim)
+	exec := executor.New(r.cfg, client, claim)
 	status, stepResults := exec.Execute(
 		execCtx,
 		func() bool { return r.shuttingDown.Load() }, // shutdownCheck
@@ -339,30 +340,30 @@ func (r *Runner) runJob(ctx context.Context, claim *payload.Claim) {
 	ctx = finalCtx
 	switch status {
 	case executor.StatusRequeue:
-		r.releaseJob(ctx, claim.ID, stepResults)
+		r.releaseWithClient(client, ctx, claim.ID, stepResults)
 	case executor.StatusCanceled:
 		// Server-driven cancel or ordinary shutdown after a finished step.
-		if err := r.client.Complete(ctx, claim.ID, "canceled", stepResults); err != nil {
+		if err := client.Complete(ctx, claim.ID, "canceled", stepResults); err != nil {
 			r.logf("could not report job #%d: %v", claim.ID, err)
 		} else {
 			r.logf("job #%d canceled", claim.ID)
 		}
 	case executor.StatusFailed, executor.StatusSuccess:
-		if err := r.client.Complete(ctx, claim.ID, status, stepResults); err != nil {
+		if err := client.Complete(ctx, claim.ID, status, stepResults); err != nil {
 			r.logf("could not report job #%d: %v", claim.ID, err)
 		} else {
 			r.logf("job #%d %s", claim.ID, status)
 		}
 	default:
 		r.logf("job #%d unknown status %q; reporting failed", claim.ID, status)
-		_ = r.client.Complete(ctx, claim.ID, "failed", stepResults)
+		_ = client.Complete(ctx, claim.ID, "failed", stepResults)
 	}
 }
 
 // heartbeatLoop refreshes heartbeat_at while the job runs and watches for
 // the control plane ending or revoking it. Bounded by execCtx so an in-flight
 // heartbeat cannot outlive the job.
-func (r *Runner) heartbeatLoop(ctx context.Context, jobID int64, done chan struct{}, onCanceled func()) {
+func (r *Runner) heartbeatLoop(client ControlPlane, ctx context.Context, jobID int64, done chan struct{}, onCanceled func()) {
 	defer close(done)
 	ticker := time.NewTicker(time.Duration(r.cfg.HeartbeatInterval * float64(time.Second)))
 	defer ticker.Stop()
@@ -373,7 +374,7 @@ func (r *Runner) heartbeatLoop(ctx context.Context, jobID int64, done chan struc
 		case <-ticker.C:
 		}
 		hbCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		reply, err := r.client.Heartbeat(hbCtx, jobID)
+		reply, err := client.Heartbeat(hbCtx, jobID)
 		cancel()
 		if err != nil {
 			r.logf("heartbeat failed for job #%d: %v", jobID, err)
@@ -401,10 +402,14 @@ func (r *Runner) heartbeatLoop(ctx context.Context, jobID int64, done chan struc
 // but a refused or unreachable release must fall back to reporting the job
 // canceled so the server does not wait on a runner that left.
 func (r *Runner) releaseJob(ctx context.Context, jobID int64, stepResults []api.StepResult) {
+	r.releaseWithClient(r.client, ctx, jobID, stepResults)
+}
+
+func (r *Runner) releaseWithClient(client ControlPlane, ctx context.Context, jobID int64, stepResults []api.StepResult) {
 	r.shutdownMu.Lock()
 	reason := fmt.Sprintf("runner shutting down (%s)", orDefault(r.shutdownSignal, "signal"))
 	r.shutdownMu.Unlock()
-	err := r.client.Release(ctx, jobID, reason)
+	err := client.Release(ctx, jobID, reason)
 	if err == nil {
 		r.logf("job #%d released back to the queue", jobID)
 		return
@@ -412,7 +417,7 @@ func (r *Runner) releaseJob(ctx context.Context, jobID int64, stepResults []api.
 	r.logf("could not release job #%d (%v); reporting it canceled", jobID, err)
 	fallbackCtx, cancelFallback := context.WithTimeout(context.Background(), api.JSONDeadline())
 	defer cancelFallback()
-	if cerr := r.client.Complete(fallbackCtx, jobID, "canceled", stepResults); cerr != nil {
+	if cerr := client.Complete(fallbackCtx, jobID, "canceled", stepResults); cerr != nil {
 		r.logf("could not report job #%d: %v", jobID, cerr)
 	} else {
 		r.logf("job #%d canceled", jobID)
@@ -421,11 +426,18 @@ func (r *Runner) releaseJob(ctx context.Context, jobID int64, stepResults []api.
 
 // releaseUnstarted releases a claimed-but-not-started job
 // (bounded, own context: usable after shutdown).
-func (r *Runner) releaseUnstarted(jobID int64) {
+func (r *Runner) releaseUnstarted(claim *payload.Claim) {
 	ctx, cancel := context.WithTimeout(context.Background(), api.JSONDeadline())
 	defer cancel()
-	r.logf("releasing claimed job #%d after shutdown without starting", jobID)
-	r.releaseJob(ctx, jobID, nil)
+	r.logf("releasing claimed job #%d after shutdown without starting", claim.ID)
+	r.releaseWithClient(r.clientForClaim(claim), ctx, claim.ID, nil)
+}
+
+func (r *Runner) clientForClaim(claim *payload.Claim) ControlPlane {
+	if client, ok := r.client.(*api.Client); ok {
+		return client.ForAttempt(claim.ID, claim.AttemptToken)
+	}
+	return r.client
 }
 
 func (r *Runner) logf(format string, args ...any) {

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_26_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_19_120000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.string "name", null: false
     t.string "record_type", null: false
@@ -125,6 +125,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_26_120000) do
     t.integer "node_index", default: 0, null: false
     t.integer "releases", default: 0, null: false
     t.text "encrypted_context_environment"
+    t.string "attempt_token"
     t.index ["resource_class"], name: "index_job_runs_on_resource_class"
     t.index ["status"], name: "index_job_runs_on_status"
     t.index ["workflow_run_id", "name", "node_index"], name: "index_job_runs_on_workflow_run_id_and_name_and_node_index", unique: true

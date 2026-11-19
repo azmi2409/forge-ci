@@ -6,6 +6,10 @@ separately.
 
 ## Unreleased
 
+- Fence runner job attempts with a fresh claim token. Updated Ruby and Go
+  runners send `X-Forge-Attempt` on per-job requests; stale attempts receive
+  403 before changing lifecycle state or logs. Requests without the header
+  remain compatible. Deploy the `job_runs.attempt_token` migration first.
 - Ruby and Go runners release claimed-but-not-started jobs when shutdown races
   a claim, regardless of `REQUEUE_ON_SHUTDOWN`, instead of abandoning or canceling
   them. Release failures use the existing cancellation fallback.

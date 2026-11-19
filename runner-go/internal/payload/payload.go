@@ -16,6 +16,7 @@ import (
 // Claim is the JSON body of a 200 claim response.
 type Claim struct {
 	ID               int64     `json:"id"`
+	AttemptToken     string    `json:"attempt_token,omitempty"`
 	Name             string    `json:"name"`
 	NodeIndex        *int      `json:"node_index"`
 	Parallelism      *int      `json:"parallelism"`
