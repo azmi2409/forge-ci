@@ -10,6 +10,10 @@ separately.
   three attempts, 1s/2s backoff, and a 20-second total deadline. Reports preserve
   status and step results; 4xx responses are not retried. Ruby no longer reports
   a successful job as failed when delivering its completion exhausts retries.
+- Ruby and Go runners stop executing jobs when heartbeat reports a non-active
+  status or HTTP 401/403/404, including jobs failed by stale-runner recovery.
+  Cancellation-report rejections are logged without stopping the runner;
+  transient heartbeat network and server errors do not interrupt execution.
 - Ruby and Go runners exit nonzero when `IDLE_SHUTDOWN_COMMAND` fails, so
   installed systemd services restart after 10 seconds and resume polling instead
   of leaving a stopped runner counted as provisioned capacity. Successful idle

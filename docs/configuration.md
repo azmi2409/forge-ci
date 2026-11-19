@@ -105,6 +105,15 @@ changing the reported status. Ruby keeps heartbeating during completion; Go stop
 heartbeating first, but the retry budget is well below the server's 120-second
 stale-heartbeat window. This does not add retries to start or release requests.
 
+Both runners stop the current job through their cancellation/cleanup path when
+a heartbeat reports a non-active status (anything other than `claimed` or
+`running`), or HTTP 401/403/404 (no longer authorized, no longer owned, or missing).
+Remaining steps are skipped. A final cancellation report can be rejected because
+the server already ended or reassigned the job; the runner logs that rejection
+without retrying 4xx responses and resumes polling. Network errors and 5xx heartbeat responses
+only warn and do not stop execution. Missing/empty status replies are ignored for
+compatibility; they are not evidence that the job ended.
+
 ## Compiler gem / CLI
 
 No configuration. `forge-ci validate|compile` takes flags (`--branch`,
