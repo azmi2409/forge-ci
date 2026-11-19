@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "timeout"
 
 class HeartbeatLossTest < Minitest::Test
   class Client
@@ -51,6 +52,58 @@ class HeartbeatLossTest < Minitest::Test
     runner.instance_variable_set(:@client, client)
     runner.send(:run_job, { "id" => 5, "name" => "heartbeat-test" })
     assert_operator client.heartbeats, :>, 0
+  end
+
+  def test_stopped_sleeping_heartbeat_cannot_cancel_the_next_job
+    runner = Runner.new(test_config(heartbeat_interval: 15))
+    sleeping = Queue.new
+    runner.define_singleton_method(:sleep) do |_interval|
+      gate = Queue.new
+      sleeping << gate
+      gate.pop
+    end
+    runner.instance_variable_set(:@client, Client.new(reply: { "status" => "success" }))
+    old = runner.send(:start_heartbeat, 1)
+    old_gate = Timeout.timeout(2) { sleeping.pop }
+
+    runner.send(:stop_heartbeat, old)
+    current = runner.send(:start_heartbeat, 2)
+    Timeout.timeout(2) { sleeping.pop }
+    old_gate << true
+    old.join(2)
+
+    refute runner.instance_variable_get(:@job_canceled), "old heartbeat canceled the next job"
+    refute old.alive?, "stopped heartbeat thread is still alive"
+  ensure
+    [old, current].compact.each { |thread| thread.kill.join }
+  end
+
+  def test_stopped_in_flight_heartbeat_cannot_cancel_the_next_job
+    runner = Runner.new(test_config(heartbeat_interval: 0.01))
+    entered = Queue.new
+    response = Queue.new
+    client = Client.new
+    client.define_singleton_method(:heartbeat) do |id|
+      if id == 1
+        entered << true
+        response.pop
+      else
+        { "status" => "running" }
+      end
+    end
+    runner.instance_variable_set(:@client, client)
+    old = runner.send(:start_heartbeat, 1)
+    Timeout.timeout(2) { entered.pop }
+
+    runner.send(:stop_heartbeat, old)
+    current = runner.send(:start_heartbeat, 2)
+    response << { "status" => "failed" }
+    old.join(2)
+
+    refute runner.instance_variable_get(:@job_canceled), "late heartbeat response canceled the next job"
+    refute old.alive?, "stopped heartbeat thread is still alive"
+  ensure
+    [old, current].compact.each { |thread| thread.kill.join }
   end
 
   %w[failed success canceled pending queued].each do |status|

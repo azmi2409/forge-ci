@@ -222,12 +222,10 @@ module ForgeCIRunner
     end
 
     def start_heartbeat(job_id)
-      @heartbeat_stop = false
       @job_canceled = false
       Thread.new do
-        until @heartbeat_stop
+        loop do
           sleep @config.heartbeat_interval
-          break if @heartbeat_stop
 
           begin
             reply = @client.heartbeat(job_id)
@@ -252,8 +250,8 @@ module ForgeCIRunner
     end
 
     def stop_heartbeat(thread)
-      @heartbeat_stop = true
-      thread&.join(5)
+      thread&.kill
+      thread&.join
     end
 
     def trap_signals
