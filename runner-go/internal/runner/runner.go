@@ -359,7 +359,7 @@ func (r *Runner) runJob(ctx context.Context, claim *payload.Claim) {
 }
 
 // heartbeatLoop refreshes heartbeat_at while the job runs and watches for
-// the control plane canceling it. Bounded by execCtx so an in-flight
+// the control plane ending or revoking it. Bounded by execCtx so an in-flight
 // heartbeat cannot outlive the job.
 func (r *Runner) heartbeatLoop(ctx context.Context, jobID int64, done chan struct{}, onCanceled func()) {
 	defer close(done)
@@ -376,10 +376,19 @@ func (r *Runner) heartbeatLoop(ctx context.Context, jobID int64, done chan struc
 		cancel()
 		if err != nil {
 			r.logf("heartbeat failed for job #%d: %v", jobID, err)
+			var apiErr *api.APIError
+			if errors.As(err, &apiErr) {
+				switch apiErr.Code {
+				case 401, 403, 404:
+					r.logf("job #%d heartbeat rejected (HTTP %d); stopping", jobID, apiErr.Code)
+					onCanceled()
+					return
+				}
+			}
 			continue
 		}
-		if reply != nil && reply.Status == "canceled" {
-			r.logf("job #%d was canceled by the control plane; stopping", jobID)
+		if reply != nil && reply.Status != "" && reply.Status != "claimed" && reply.Status != "running" {
+			r.logf("job #%d is no longer active (%s); stopping", jobID, reply.Status)
 			onCanceled()
 			return
 		}

@@ -212,8 +212,8 @@ func (c *Client) Outlook(ctx context.Context, resourceClass string) (*Outlook, e
 	return &outlook, nil
 }
 
-// HeartbeatReply is the heartbeat response; Status "canceled" tells the
-// runner the control plane stopped the job.
+// HeartbeatReply is the heartbeat response; a non-active Status tells the
+// runner the control plane stopped or requeued the job.
 type HeartbeatReply struct {
 	ID     int64  `json:"id"`
 	Status string `json:"status"`

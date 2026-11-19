@@ -96,6 +96,15 @@ continue working but are not listed. The page updates when refreshed.
 | `REQUEUE_ON_SHUTDOWN` | no | off | `1`: on SIGTERM/SIGINT mid-job, stop the running step and put the job back in the queue instead of reporting it canceled (at most twice per job). For Spot/preemptible runners whose jobs are safe to retry; never on deploy runners. The install command's `--requeue-on-shutdown` sets it |
 | `DOCKER_SOCKET_PATH` | no | `/var/run/docker.sock` | The socket mounted for `setup_remote_docker` |
 
+Both runners stop the current job through their cancellation/cleanup path when
+a heartbeat reports a non-active status (anything other than `claimed` or
+`running`), or HTTP 401/403/404 (no longer authorized, no longer owned, or missing).
+Remaining steps are skipped. A final cancellation report can be rejected because
+the server already ended or reassigned the job; the runner logs that rejection
+without retrying and resumes polling. Network errors and 5xx heartbeat responses
+only warn and do not stop execution. Missing/empty status replies are ignored for
+compatibility; they are not evidence that the job ended.
+
 ## Compiler gem / CLI
 
 No configuration. `forge-ci validate|compile` takes flags (`--branch`,
