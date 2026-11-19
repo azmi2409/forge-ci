@@ -115,6 +115,15 @@ class RunnerLoopTest < Minitest::Test
     assert_empty r.shell, "no command configured, so nothing runs"
   end
 
+  def test_failed_idle_shutdown_command_does_not_exit_successfully
+    [false, nil].each do |result|
+      r = runner([], on_empty: -> { nil }, idle_shutdown_after: 1.0, idle_shutdown_command: "terminate-me")
+      r.define_singleton_method(:system) { |_command| result }
+      error = assert_raises(StandardError) { r.run }
+      assert_match(/IDLE_SHUTDOWN_COMMAND failed/, error.message)
+    end
+  end
+
   def test_upcoming_work_suppresses_idle_shutdown
     r = nil
     r = runner([], on_empty: -> { r.stop! if r.clock > 300; nil }, idle_shutdown_after: 60.0,

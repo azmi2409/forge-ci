@@ -160,7 +160,7 @@ module ForgeCIRunner
 
       log("running IDLE_SHUTDOWN_COMMAND")
       ok = system(command)
-      log("IDLE_SHUTDOWN_COMMAND failed (exit #{$?&.exitstatus})") unless ok
+      raise "IDLE_SHUTDOWN_COMMAND failed (exit #{$?&.exitstatus}); exiting for service restart" unless ok
     end
 
     # Seams for tests.
