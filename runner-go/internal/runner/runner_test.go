@@ -388,6 +388,54 @@ func TestShutdownBeforeStartReleasesClaim(t *testing.T) {
 	}
 }
 
+type timingOutReleaseCP struct {
+	*fakeRunnerCP
+	fallbackContextErr  error
+	fallbackHasDeadline bool
+}
+
+func (f *timingOutReleaseCP) Release(ctx context.Context, jobID int64, reason string) error {
+	f.fakeRunnerCP.Release(ctx, jobID, reason)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (f *timingOutReleaseCP) Complete(ctx context.Context, jobID int64, status string, results []api.StepResult) error {
+	f.fallbackContextErr = ctx.Err()
+	_, f.fallbackHasDeadline = ctx.Deadline()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.fakeRunnerCP.Complete(ctx, jobID, status, results)
+}
+
+func TestReleaseTimeoutStillReportsCanceled(t *testing.T) {
+	for _, started := range []bool{false, true} {
+		t.Run(fmt.Sprintf("started=%v", started), func(t *testing.T) {
+			f := &timingOutReleaseCP{fakeRunnerCP: &fakeRunnerCP{t: t}}
+			r := New(runnerCfg(t), f)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+			defer cancel()
+			var results []api.StepResult
+			if started {
+				results = []api.StepResult{{Name: "interrupted", ExitCode: 130}}
+			}
+
+			r.releaseJob(ctx, 102, results)
+
+			if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.Fatal("release must exhaust its context deadline")
+			}
+			if got := f.completionsFor(102); len(got) != 1 || got[0] != "canceled" {
+				t.Fatalf("fallback completions: %v, context error: %v", got, f.fallbackContextErr)
+			}
+			if f.fallbackContextErr != nil || !f.fallbackHasDeadline {
+				t.Fatalf("fallback context: error=%v bounded=%v", f.fallbackContextErr, f.fallbackHasDeadline)
+			}
+		})
+	}
+}
+
 // Race 4: release succeeds server-side but the response is lost — the job
 // must not continue locally and the fallback reports canceled.
 func TestReleaseFailureFallsBackToCanceled(t *testing.T) {

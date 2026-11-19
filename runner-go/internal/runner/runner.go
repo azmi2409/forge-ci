@@ -410,7 +410,9 @@ func (r *Runner) releaseJob(ctx context.Context, jobID int64, stepResults []api.
 		return
 	}
 	r.logf("could not release job #%d (%v); reporting it canceled", jobID, err)
-	if cerr := r.client.Complete(ctx, jobID, "canceled", stepResults); cerr != nil {
+	fallbackCtx, cancelFallback := context.WithTimeout(context.Background(), api.JSONDeadline())
+	defer cancelFallback()
+	if cerr := r.client.Complete(fallbackCtx, jobID, "canceled", stepResults); cerr != nil {
 		r.logf("could not report job #%d: %v", jobID, cerr)
 	} else {
 		r.logf("job #%d canceled", jobID)
