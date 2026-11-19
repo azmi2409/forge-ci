@@ -153,4 +153,16 @@ class RequeueOnShutdownTest < Minitest::Test
     run_one("canceled", client)
     assert_equal [[:start, 5], [:complete, 5, "canceled"]], client.calls
   end
+
+  def test_failed_completion_delivery_does_not_report_a_successful_job_as_failed
+    client = FakeClient.new
+    client.define_singleton_method(:complete_job) do |id, status, _results|
+      @calls << [:complete, id, status]
+      raise IOError, "connection reset"
+    end
+
+    run_one("success", client)
+
+    assert_equal [[:start, 5], [:complete, 5, "success"]], client.calls
+  end
 end

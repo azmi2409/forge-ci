@@ -16,9 +16,9 @@
 //     the release is refused (409, older server) or unreachable, report it
 //     canceled instead. A released job never continues executing locally.
 //
-// No blind retries: complete/release/start fire once (the server does not
-// guarantee idempotency); only the log-chunk endpoint is idempotent and the
-// logstream owns its retries.
+// Completion retries transient failures within a short deadline; a repeated
+// terminal report returns 422. Start/release fire once. The logstream owns
+// log-chunk retries using the endpoint's idempotent sequence numbers.
 package runner
 
 import (

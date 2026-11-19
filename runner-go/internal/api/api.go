@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azmi2409/forge-ci/runner-go/internal/backoff"
 	"github.com/azmi2409/forge-ci/runner-go/internal/payload"
 )
 
@@ -257,8 +258,41 @@ func (c *Client) Complete(ctx context.Context, jobID int64, status string, stepR
 	if err != nil {
 		return err
 	}
-	_, err = c.postJSONBody(ctx, fmt.Sprintf("/api/v1/runner/jobs/%d/complete", jobID), body)
-	return err
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	delay := backoff.New(1, 2)
+	for attempt := 1; ; attempt++ {
+		attemptCtx, cancelAttempt := context.WithTimeout(ctx, 5*time.Second)
+		_, err = c.postJSONBody(attemptCtx, fmt.Sprintf("/api/v1/runner/jobs/%d/complete", jobID), body)
+		cancelAttempt()
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if attempt >= 3 || !transientCompletionError(err) {
+			return err
+		}
+		pause := time.Duration(delay.Tick() * float64(time.Second))
+		fmt.Fprintf(os.Stderr, "[forge-ci-runner] completion failed for job #%d: %v; retrying in %s\n", jobID, err, pause)
+		timer := time.NewTimer(pause)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func transientCompletionError(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Code >= 500 && apiErr.Code <= 599
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // Release hands a claimed/running job back to the queue. A 409 (release

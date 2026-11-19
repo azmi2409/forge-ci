@@ -96,12 +96,21 @@ continue working but are not listed. The page updates when refreshed.
 | `REQUEUE_ON_SHUTDOWN` | no | off | `1`: on SIGTERM/SIGINT mid-job, stop the running step and put the job back in the queue instead of reporting it canceled (at most twice per job). For Spot/preemptible runners whose jobs are safe to retry; never on deploy runners. The install command's `--requeue-on-shutdown` sets it |
 | `DOCKER_SOCKET_PATH` | no | `/var/run/docker.sock` | The socket mounted for `setup_remote_docker` |
 
+Completion reports include step results and are retried only on network errors
+and 5xx responses: at most three attempts with 1s then 2s backoff, a 5-second
+deadline per attempt, and a 20-second total budget. All 4xx responses stop retries;
+an already-applied completion returns 422 without changing the saved result.
+Rejections and exhausted retries are logged and the runner moves on without
+changing the reported status. Ruby keeps heartbeating during completion; Go stops
+heartbeating first, but the retry budget is well below the server's 120-second
+stale-heartbeat window. This does not add retries to start or release requests.
+
 Both runners stop the current job through their cancellation/cleanup path when
 a heartbeat reports a non-active status (anything other than `claimed` or
 `running`), or HTTP 401/403/404 (no longer authorized, no longer owned, or missing).
 Remaining steps are skipped. A final cancellation report can be rejected because
 the server already ended or reassigned the job; the runner logs that rejection
-without retrying and resumes polling. Network errors and 5xx heartbeat responses
+without retrying 4xx responses and resumes polling. Network errors and 5xx heartbeat responses
 only warn and do not stop execution. Missing/empty status replies are ignored for
 compatibility; they are not evidence that the job ended.
 
