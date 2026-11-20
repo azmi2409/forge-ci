@@ -63,6 +63,10 @@ module ForgeCI
                                                     exits 1 on failure/cancel;
                                                     --json emits one final JSON
                                                     (poll default 5 seconds)
+        logs <job-id> [--follow] [--poll SECONDS] [--json]
+             [--url URL] [--token T]                print job logs; --follow waits
+                                                    for final logs (poll 5s);
+                                                    exits 1 if failed, else 0
         cancel <pipeline-id> [--url URL] [--token T]
                                                     cancel a running pipeline
         skill install [--dir DIR] [--force]         install the forge-ci agent
@@ -102,6 +106,7 @@ module ForgeCI
       when "trigger" then trigger_command(argv)
       when "pipelines" then pipelines_command(argv)
       when "status" then status_command(argv)
+      when "logs" then logs_command(argv)
       when "cancel" then cancel_command(argv)
       when "skill" then skill_command(argv)
       when "-h", "--help", nil then help
@@ -455,6 +460,13 @@ module ForgeCI
         terminal = !%w[pending running].include?(pipeline["status"])
         unless options[:wait] && !terminal
           @out.puts JSON.generate(pipeline) if options[:json]
+          if options[:wait] && pipeline["status"] != "success" && !options[:json]
+            pipeline_jobs(pipeline).select { |job| job["status"] == "failed" }.each do |job|
+              logs = api_request(options, :get, "/api/v1/jobs/#{job["id"]}/logs")
+              @out.puts "forge-ci: job #{job["id"]} log (last 20 lines):"
+              @out.write Array(logs["chunks"]).map { |chunk| chunk["chunk"] }.join.lines.last(20).join
+            end
+          end
           return options[:wait] && pipeline["status"] != "success" ? 1 : 0
         end
         sleep options[:poll]
@@ -481,7 +493,75 @@ module ForgeCI
       states.each do |label, status|
         @out.puts "forge-ci: #{label}: #{status}" if last[label] != status
       end
+      pipeline_jobs(pipeline).each do |job|
+        next unless job["status"] == "failed"
+        next if last["failed job #{job["id"]}"]
+
+        print_failed_steps(job)
+        @out.puts "forge-ci logs #{job["id"]}"
+        states["failed job #{job["id"]}"] = true
+      end
+      last.each { |key, value| states[key] = value if key.start_with?("failed job ") }
       states
+    end
+
+    def pipeline_jobs(pipeline)
+      Array(pipeline["workflows"]).flat_map { |workflow| Array(workflow["jobs"]) }
+    end
+
+    def print_failed_steps(job)
+      failed = Array(job["steps"]).select { |step| step["status"] == "failed" }
+      return if failed.empty?
+
+      @out.puts "forge-ci: failed steps: " + failed.map { |step| "#{step["name"]} (exit #{step["exit_code"] || "unknown"})" }.join(", ")
+    end
+
+    def logs_command(argv)
+      options = { url: ENV["FORGE_CI_URL"], token: ENV["FORGE_CI_ADMIN_TOKEN"], poll: 5.0 }
+      parser = OptionParser.new do |opts|
+        opts.banner = "Usage: forge-ci logs <job-id> [--follow] [--poll SECONDS] [--json] [--url URL] [--token T]"
+        opts.on("--follow", "wait for final logs; exit 1 if failed, otherwise 0") { options[:follow] = true }
+        opts.on("--poll SECONDS", Float, "positive poll interval (default 5)") { |v| options[:poll] = v }
+        opts.on("--json", "print JSON (final response with --follow)") { options[:json] = true }
+        opts.on("--url URL", "server base URL (env FORGE_CI_URL)") { |v| options[:url] = v }
+        opts.on("--token T", "bearer token (env FORGE_CI_ADMIN_TOKEN, or forge-ci login)") { |v| options[:token] = v }
+        opts.on("-h", "--help", "show this help and exit") { @out.puts opts; return 0 }
+      end
+      parser.parse!(argv)
+      id = argv.shift
+      return usage_error("logs requires a positive integer <job-id>") unless id && id.match?(/\A\d+\z/) && id.to_i.positive?
+      return usage_error("logs takes exactly one <job-id> argument") unless argv.empty?
+      return usage_error("--poll must be a positive finite number of seconds") unless options[:poll].finite? && options[:poll].positive?
+
+      err = server_options_error(options)
+      return usage_error(err) if err
+
+      chunks = {}
+      after = -1
+      loop do
+        suffix = after < 0 ? "" : "?after=#{after}"
+        result = api_request(options, :get, "/api/v1/jobs/#{id.to_i}/logs#{suffix}")
+        chunks.clear if result["complete"]
+        Array(result["chunks"]).each { |chunk| chunks[chunk["seq"]] = chunk }
+        after = chunks.keys.max || -1
+        terminal = !%w[pending queued claimed running].include?(result["status"])
+        unless options[:follow] && !terminal
+          result["chunks"] = chunks.sort.map(&:last)
+          if options[:json]
+            @out.puts JSON.generate(result)
+          else
+            print_failed_steps(result) if result["status"] == "failed"
+            @out.write result["chunks"].map { |chunk| chunk["chunk"] }.join
+          end
+          return result["status"] == "failed" ? 1 : 0
+        end
+        sleep options[:poll]
+      end
+    rescue OptionParser::ParseError => e
+      usage_error(e.message)
+    rescue ApiError => e
+      @err.puts "forge-ci: #{e.message}"
+      1
     end
 
     # -- forge-ci cancel <pipeline-id> ----------------------------------------

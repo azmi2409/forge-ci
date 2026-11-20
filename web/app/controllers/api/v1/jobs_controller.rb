@@ -4,13 +4,16 @@ module Api
   module V1
     # Log streaming (component 6).
     #
-    # Chunk ingest and reads accept the owning runner's Bearer token. The
-    # SSE live-tail (`stream`) additionally accepts a signed-in UI session,
+    # Chunk ingest accepts the owning runner's Bearer token. Reads also
+    # accept API credentials and a signed-in UI session,
     # so the job page can tail logs without holding a runner token (browsers
     # send the session cookie on same-origin EventSource requests, but cannot
     # set an Authorization: Bearer header).
     class JobsController < BaseController
       include ActionController::Live
+      include ApiAuthentication
+
+      skip_before_action :authenticate_api!
 
       # How long a live-tail stream stays open waiting for new output. Each
       # open stream holds one of Puma's threads, so this stays short and the
@@ -50,7 +53,8 @@ module Api
       def logs
         after = params[:after].presence&.to_i
         chunks = @job.log_chunk_list(after: after)
-        render json: { job_id: @job.id, status: @job.status, complete: @job.log_complete?, chunks: chunks }, status: :ok
+        steps = @job.step_runs.order(:id).map { |step| step.as_json(only: %i[name status exit_code]) }
+        render json: { job_id: @job.id, status: @job.status, complete: @job.log_complete?, chunks: chunks, steps: steps }, status: :ok
       end
 
       # GET /api/v1/jobs/:id/logs/stream — text/event-stream live tail.
@@ -114,8 +118,7 @@ module Api
         render json: { error: "job not found" }, status: :not_found
       end
 
-      # The stream is browser-facing: accept the owning runner token OR a
-      # signed-in UI session.
+      # Reads accept the owning runner, a UI session, or API credentials.
       def authenticate_stream!
         return if performed?
         return if runner_token_owns_job? || valid_ui_session?
@@ -124,7 +127,7 @@ module Api
           return render json: { error: "forbidden: job is owned by another token" }, status: :forbidden
         end
 
-        render json: { error: "unauthorized" }, status: :unauthorized
+        authenticate_api!
       end
 
       def runner_token_owns_job?

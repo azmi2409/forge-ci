@@ -344,6 +344,67 @@ class CLITest < Minitest::Test
                              status: job_status, requires: [] }] }] }
   end
 
+  def test_logs_failed_header_empty_success_and_json
+    %w[failed success].each do |state|
+      payload = { job_id: 20, status: state, complete: true, chunks: [],
+                  steps: [{ name: "spec", status: state, exit_code: 7 }] }
+      with_fake_server("GET /api/v1/jobs/20/logs" => [200, payload]) do |url, _|
+        code, out, err = run_cli("logs", "20", "--url", url, "--token", "t")
+        assert_equal state == "failed" ? 1 : 0, code, err
+        state == "failed" ? assert_includes(out, "spec (exit 7)") : assert_empty(out)
+        code, out, err = run_cli("logs", "20", "--json", "--url", url, "--token", "t")
+        assert_equal state == "failed" ? 1 : 0, code, err
+        assert_equal JSON.parse(JSON.generate(payload)), JSON.parse(out)
+      end
+    end
+  end
+
+  def test_logs_follow_replaces_buffer_with_complete_log
+    routes = {
+      "GET /api/v1/jobs/20/logs" => [200, { status: "running", complete: false, chunks: [{ seq: 1, chunk: "old" }] }],
+      "GET /api/v1/jobs/20/logs?after=1" => [200, { status: "failed", complete: true,
+        steps: [{ name: "spec", status: "failed", exit_code: 2 }], chunks: [{ seq: 0, chunk: "final\n" }] }]
+    }
+    with_fake_server(routes) do |url, requests|
+      code, out, err = run_cli("logs", "20", "--follow", "--poll", "0.001", "--url", url, "--token", "t")
+      assert_equal 1, code, err
+      assert_equal "forge-ci: failed steps: spec (exit 2)\nfinal\n", out
+      assert_equal 2, requests.length
+    end
+  end
+
+  def test_logs_validation_and_http_errors
+    [["logs"], ["logs", "0"], ["logs", "3", "extra"], ["logs", "3", "--poll", "0"]].each do |args|
+      code, = run_cli(*args, "--url", "http://127.0.0.1:1", "--token", "t")
+      assert_equal 2, code
+    end
+    with_fake_server({}) do |url, _|
+      code, _, err = run_cli("logs", "20", "--url", url, "--token", "t")
+      assert_equal 1, code
+      assert_includes err, "HTTP 404"
+    end
+  end
+
+  def test_status_failure_diagnostics_and_wait_tail
+    payload = pipeline_detail("failed")
+    payload[:workflows][0][:jobs][0][:steps] = [{ name: "spec", status: "failed", exit_code: 9 }]
+    routes = { "GET /api/v1/pipelines/5" => [200, payload],
+               "GET /api/v1/jobs/20/logs" => [200, { chunks: [{ seq: 0, chunk: (1..25).map { |n| "line #{n}\n" }.join }] }] }
+    with_fake_server(routes) do |url, _|
+      [[], ["--wait"]].each do |flags|
+        code, out, err = run_cli("status", "5", *flags, "--url", url, "--token", "t")
+        assert_equal flags.empty? ? 0 : 1, code, err
+        assert_includes out, "spec (exit 9)"
+        assert_includes out, "forge-ci logs 20"
+        unless flags.empty?
+          refute_includes out, "line 5\n"
+          assert_includes out, "line 6\n"
+          assert_includes out, "line 25\n"
+        end
+      end
+    end
+  end
+
   def test_status_reads_running_failed_and_canceled_without_failing_or_triggering
     %w[running failed canceled].each do |pipeline_status|
       payload = pipeline_detail(pipeline_status)

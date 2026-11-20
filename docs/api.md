@@ -208,7 +208,11 @@ completes it as `canceled`. `422` from any other state.
   the owning token (`403` otherwise). The `LogChunk` rows hold the log while
   the job runs; when it finishes they're written to an ActiveStorage blob
   **in seq order** and purged.
-- `GET /api/v1/jobs/:id/logs[?after=SEQ]` → `200 { job_id, status, complete, chunks: [{ seq, chunk }] }`.
+- `GET /api/v1/jobs/:id/logs[?after=SEQ]` → `200 { job_id, status, complete, chunks: [{ seq, chunk }], steps: [{ name, status, exit_code }] }`.
+  Steps are in creation order. Pipeline detail responses also include this
+  `steps` array on each job. Reads accept the shared admin token, member or
+  admin OAuth API token, owning runner token, or signed-in UI session.
+  Invalid credentials return `401`; a non-owning runner token returns `403`.
   `after` returns only newer chunks. `complete: true` means the job finished
   and `chunks` is the whole log as one chunk.
 - **Action Cable** `JobLogChannel` (`/cable`, signed-in UI session,
@@ -219,8 +223,8 @@ completes it as `canceled`. `422` from any other state.
   blob once terminal.
 - `GET /api/v1/jobs/:id/logs/stream` — `text/event-stream` live tail. Sends
   existing chunks as `chunk` events, holds the connection open emitting new
-  chunks, closes with `done` once the job is terminal. Auth is dual: the
-  owning runner's Bearer token **or** the UI's HTTP basic credentials
+  chunks, closes with `done` once the job is terminal. Auth accepts the same
+  credentials as the logs endpoint, including a signed-in UI session
   (browsers can't set `Authorization: Bearer` on `EventSource`).
   Unauthenticated → `401`.
 

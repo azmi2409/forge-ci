@@ -20,6 +20,25 @@ class Api::V1::JobsControllerTest < ActionDispatch::IntegrationTest
     bearer_headers(@raw)
   end
 
+  test "admin and member OAuth tokens read logs and ordered steps" do
+    job = JobRun.find(@job_id)
+    job.step_runs.create!(name: "first", status: :success, exit_code: 0)
+    job.step_runs.create!(name: "second", status: :failed, exit_code: 7)
+    user = User.create!(username: "log-reader", password: "password123456", role: :member)
+    token = Doorkeeper::AccessToken.create!(application: CliOauthApp.bootstrap!, resource_owner_id: user.id, scopes: "api")
+    [admin_headers, bearer_headers(token.plaintext_token)].each do |headers|
+      get "/api/v1/jobs/#{@job_id}/logs", headers: headers
+      assert_response :ok
+      assert_equal job.step_runs.order(:id).pluck(:name), json_body["steps"].map { |step| step["name"] }
+      assert_equal 7, json_body["steps"].last["exit_code"]
+    end
+  end
+
+  test "bad bearer token cannot read logs" do
+    get "/api/v1/jobs/#{@job_id}/logs", headers: bearer_headers("invalid")
+    assert_response :unauthorized
+  end
+
   test "log chunks posted out of order come back ordered" do
     post "/api/v1/jobs/#{@job_id}/log_chunks", params: { seq: 2, chunk: "third\n" }, headers: auth, as: :json
     assert_response :ok

@@ -84,7 +84,8 @@ module Api
               status: wf.status,
               jobs: wf.job_runs.map do |job|
                 { id: job.id, name: job.name, node_index: job.node_index, parallelism: job.parallelism,
-                  status: job.status, requires: job.requires_list }
+                  status: job.status, requires: job.requires_list,
+                  steps: job.step_runs.order(:id).map { |step| step.as_json(only: %i[name status exit_code]) } }
               end
             }
           end
