@@ -208,7 +208,10 @@ completes it as `canceled`. `422` from any other state.
   the owning token (`403` otherwise). The `LogChunk` rows hold the log while
   the job runs; when it finishes they're written to an ActiveStorage blob
   **in seq order** and purged.
-- `GET /api/v1/jobs/:id/logs[?after=SEQ]` → `200 { job_id, status, complete, chunks: [{ seq, chunk }], steps: [{ name, status, exit_code }] }`.
+- `GET /api/v1/jobs/:id/logs[?after=SEQ]` → `200 { job_id, status, claimed_at, complete, chunks: [{ seq, chunk }], steps: [{ name, status, exit_code }] }`.
+  `claimed_at` is a non-secret attempt marker (UTC timestamp with microseconds,
+  null before claim or after release). If it changes, discard buffered log
+  state and refetch without `after` because chunk sequences restart per attempt.
   Steps are in creation order. Pipeline detail responses also include this
   `steps` array on each job. Reads accept the shared admin token, member or
   admin OAuth API token, owning runner token, or signed-in UI session.

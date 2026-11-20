@@ -539,9 +539,23 @@ module ForgeCI
       chunks = {}
       after = -1
       printed_bytes = 0
+      claimed_at = nil
       loop do
         suffix = after < 0 ? "" : "?after=#{after}"
         result = api_request(options, :get, "/api/v1/jobs/#{id.to_i}/logs#{suffix}")
+        if options[:follow] && result.key?("claimed_at") && claimed_at != result["claimed_at"]
+          restarted = claimed_at || printed_bytes.positive?
+          claimed_at = result["claimed_at"]
+          if restarted
+            @out.puts "forge-ci: job #{id.to_i} restarted; new attempt log follows" unless options[:json]
+            @out.flush unless options[:json]
+            chunks.clear
+            printed_bytes = 0
+            refetch = after >= 0
+            after = -1
+            next if refetch
+          end
+        end
         chunks.clear if result["complete"]
         Array(result["chunks"]).each { |chunk| chunks[chunk["seq"]] = chunk }
         after = chunks.keys.max || -1

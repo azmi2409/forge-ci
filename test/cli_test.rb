@@ -406,6 +406,32 @@ class CLITest < Minitest::Test
     end
   end
 
+  def test_logs_follow_resets_cursor_when_a_new_attempt_was_claimed_between_polls
+    routes = {
+      "GET /api/v1/jobs/20/logs" => ->(_) {
+        @log_attempt_reads = (@log_attempt_reads || 0) + 1
+        text = @log_attempt_reads == 1 ? "old attempt\n" : "new attempt\n"
+        attempt = @log_attempt_reads == 1 ? "2026-01-01T00:00:00.000001Z" : "2026-01-01T00:00:01.000001Z"
+        [200, { status: "running", claimed_at: attempt, complete: false, chunks: [{ seq: 0, chunk: text }] }]
+      },
+      "GET /api/v1/jobs/20/logs?after=0" => ->(_) {
+        @log_attempt_polls = (@log_attempt_polls || 0) + 1
+        if @log_attempt_polls == 1
+          [200, { status: "running", claimed_at: "2026-01-01T00:00:01.000001Z", complete: false, chunks: [] }]
+        else
+          [200, { status: "success", claimed_at: "2026-01-01T00:00:01.000001Z", complete: true,
+            chunks: [{ seq: 0, chunk: "new attempt\nfinished\n" }] }]
+        end
+      }
+    }
+    with_fake_server(routes) do |url, _|
+      code, out, err = run_cli("logs", "20", "--follow", "--poll", "0.001", "--url", url, "--token", "t")
+      assert_equal 0, code, err
+      assert_equal "old attempt\nforge-ci: job 20 restarted; new attempt log follows\nnew attempt\nfinished\n", out
+      assert_equal 2, @log_attempt_reads
+    end
+  end
+
   def test_status_failure_diagnostics_and_wait_tail
     payload = pipeline_detail("failed")
     payload[:workflows][0][:jobs][0][:steps] = [{ name: "spec", status: "failed", exit_code: 9 }]

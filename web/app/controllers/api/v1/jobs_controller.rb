@@ -54,7 +54,8 @@ module Api
         after = params[:after].presence&.to_i
         chunks = @job.log_chunk_list(after: after)
         steps = @job.step_runs.order(:id).map { |step| step.as_json(only: %i[name status exit_code]) }
-        render json: { job_id: @job.id, status: @job.status, complete: @job.log_complete?, chunks: chunks, steps: steps }, status: :ok
+        render json: { job_id: @job.id, status: @job.status, claimed_at: @job.claimed_at&.iso8601(6),
+                       complete: @job.log_complete?, chunks: chunks, steps: steps }, status: :ok
       end
 
       # GET /api/v1/jobs/:id/logs/stream — text/event-stream live tail.

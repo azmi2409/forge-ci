@@ -39,6 +39,26 @@ class Api::V1::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
+  test "logs expose a non-secret claim marker that changes on a new attempt" do
+    job = JobRun.find(@job_id)
+    get "/api/v1/jobs/#{@job_id}/logs", headers: admin_headers
+    assert_response :ok
+    first_claim = json_body.fetch("claimed_at")
+    assert_equal job.claimed_at.iso8601(6), first_claim
+    assert_not json_body.key?("attempt_token")
+
+    job.release!
+    get "/api/v1/jobs/#{@job_id}/logs", headers: admin_headers
+    assert_nil json_body.fetch("claimed_at")
+
+    travel 1.second do
+      job.mark_claimed!(claimed_by: @token_record.name)
+    end
+    get "/api/v1/jobs/#{@job_id}/logs", headers: admin_headers
+    assert_response :ok
+    assert_not_equal first_claim, json_body.fetch("claimed_at")
+  end
+
   test "log chunks posted out of order come back ordered" do
     post "/api/v1/jobs/#{@job_id}/log_chunks", params: { seq: 2, chunk: "third\n" }, headers: auth, as: :json
     assert_response :ok
