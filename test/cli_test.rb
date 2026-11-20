@@ -359,17 +359,25 @@ class CLITest < Minitest::Test
     end
   end
 
-  def test_logs_follow_replaces_buffer_with_complete_log
+  def test_logs_follow_streams_without_duplicating_complete_log
+    output = StringIO.new
     routes = {
-      "GET /api/v1/jobs/20/logs" => [200, { status: "running", complete: false, chunks: [{ seq: 1, chunk: "old" }] }],
-      "GET /api/v1/jobs/20/logs?after=1" => [200, { status: "failed", complete: true,
-        steps: [{ name: "spec", status: "failed", exit_code: 2 }], chunks: [{ seq: 0, chunk: "final\n" }] }]
+      "GET /api/v1/jobs/20/logs" => [200, { status: "running", complete: false, chunks: [{ seq: 1, chunk: "héllo\n" }] }],
+      "GET /api/v1/jobs/20/logs?after=1" => ->(_) {
+        assert_equal "héllo\n", output.string
+        [200, { status: "running", complete: false, chunks: [{ seq: 2, chunk: "more\n" }] }]
+      },
+      "GET /api/v1/jobs/20/logs?after=2" => ->(_) {
+        assert_equal "héllo\nmore\n", output.string
+        [200, { status: "failed", complete: true,
+          steps: [{ name: "spec", status: "failed", exit_code: 2 }], chunks: [{ seq: 0, chunk: "héllo\nmore\nfinal\n" }] }]
+      }
     }
     with_fake_server(routes) do |url, requests|
-      code, out, err = run_cli("logs", "20", "--follow", "--poll", "0.001", "--url", url, "--token", "t")
-      assert_equal 1, code, err
-      assert_equal "forge-ci: failed steps: spec (exit 2)\nfinal\n", out
-      assert_equal 2, requests.length
+      code = ForgeCI::CLI.run(["logs", "20", "--follow", "--poll", "0.001", "--url", url, "--token", "t"], out: output, err: StringIO.new)
+      assert_equal 1, code
+      assert_equal "héllo\nmore\nfinal\nforge-ci: failed steps: spec (exit 2)\n", output.string
+      assert_equal 3, requests.length
     end
   end
 
@@ -385,6 +393,19 @@ class CLITest < Minitest::Test
     end
   end
 
+  def test_logs_follow_json_emits_only_final_snapshot
+    routes = {
+      "GET /api/v1/jobs/20/logs" => [200, { status: "running", complete: false, chunks: [{ seq: 1, chunk: "hello\n" }] }],
+      "GET /api/v1/jobs/20/logs?after=1" => [200, { status: "success", complete: true, chunks: [{ seq: 0, chunk: "hello\nfinal\n" }] }]
+    }
+    with_fake_server(routes) do |url, _|
+      code, out, err = run_cli("logs", "20", "--follow", "--json", "--poll", "0.001", "--url", url, "--token", "t")
+      assert_equal 0, code, err
+      assert_equal "hello\nfinal\n", JSON.parse(out).fetch("chunks").first.fetch("chunk")
+      assert_equal 1, out.lines.length
+    end
+  end
+
   def test_status_failure_diagnostics_and_wait_tail
     payload = pipeline_detail("failed")
     payload[:workflows][0][:jobs][0][:steps] = [{ name: "spec", status: "failed", exit_code: 9 }]
@@ -395,7 +416,7 @@ class CLITest < Minitest::Test
         code, out, err = run_cli("status", "5", *flags, "--url", url, "--token", "t")
         assert_equal flags.empty? ? 0 : 1, code, err
         assert_includes out, "spec (exit 9)"
-        assert_includes out, "forge-ci logs 20"
+        assert_includes out, "forge-ci: view logs: forge-ci logs 20"
         unless flags.empty?
           refute_includes out, "line 5\n"
           assert_includes out, "line 6\n"

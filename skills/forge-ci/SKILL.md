@@ -228,14 +228,16 @@ Projects created by the GitHub App are named `owner/repo`.
 
 **Logs** are readable with the admin token or stored `forge-ci login`:
 `forge-ci logs <job-id>` prints the log and failed steps with exit codes.
-Use `--follow` to poll until terminal and print the final log without duplicates,
+Use `--follow` to stream new output until terminal without duplicates (failed
+steps are printed at the end rather than the beginning),
 or `--json` for structured output. Logs exit 1 when the job is failed, otherwise
 0 (usage errors exit 2; API errors exit 1).
 
 ## When a pipeline fails
 
 1. Run `forge-ci status <pipeline-id>` to find failed jobs and steps, then
-   `forge-ci logs <job-id>` for output. `status --wait` includes the last 20
+   `forge-ci logs <job-id>` for output. The hint reads
+   `forge-ci: view logs: forge-ci logs <job-id>`. `status --wait` includes the last 20
    log lines for failed jobs when the pipeline ends unsuccessfully; `--json`
    stays machine-readable. One-shot status exits 0; `--wait` exits 1 for
    non-success terminal pipelines.

@@ -64,8 +64,8 @@ module ForgeCI
                                                     --json emits one final JSON
                                                     (poll default 5 seconds)
         logs <job-id> [--follow] [--poll SECONDS] [--json]
-             [--url URL] [--token T]                print job logs; --follow waits
-                                                    for final logs (poll 5s);
+             [--url URL] [--token T]                print job logs; --follow streams
+                                                    until terminal (poll 5s);
                                                     exits 1 if failed, else 0
         cancel <pipeline-id> [--url URL] [--token T]
                                                     cancel a running pipeline
@@ -498,7 +498,7 @@ module ForgeCI
         next if last["failed job #{job["id"]}"]
 
         print_failed_steps(job)
-        @out.puts "forge-ci logs #{job["id"]}"
+        @out.puts "forge-ci: view logs: forge-ci logs #{job["id"]}"
         states["failed job #{job["id"]}"] = true
       end
       last.each { |key, value| states[key] = value if key.start_with?("failed job ") }
@@ -520,7 +520,7 @@ module ForgeCI
       options = { url: ENV["FORGE_CI_URL"], token: ENV["FORGE_CI_ADMIN_TOKEN"], poll: 5.0 }
       parser = OptionParser.new do |opts|
         opts.banner = "Usage: forge-ci logs <job-id> [--follow] [--poll SECONDS] [--json] [--url URL] [--token T]"
-        opts.on("--follow", "wait for final logs; exit 1 if failed, otherwise 0") { options[:follow] = true }
+        opts.on("--follow", "stream until terminal; exit 1 if failed, otherwise 0") { options[:follow] = true }
         opts.on("--poll SECONDS", Float, "positive poll interval (default 5)") { |v| options[:poll] = v }
         opts.on("--json", "print JSON (final response with --follow)") { options[:json] = true }
         opts.on("--url URL", "server base URL (env FORGE_CI_URL)") { |v| options[:url] = v }
@@ -538,20 +538,28 @@ module ForgeCI
 
       chunks = {}
       after = -1
+      printed_bytes = 0
       loop do
         suffix = after < 0 ? "" : "?after=#{after}"
         result = api_request(options, :get, "/api/v1/jobs/#{id.to_i}/logs#{suffix}")
         chunks.clear if result["complete"]
         Array(result["chunks"]).each { |chunk| chunks[chunk["seq"]] = chunk }
         after = chunks.keys.max || -1
+        if options[:follow] && !options[:json]
+          text = chunks.sort.map(&:last).map { |chunk| chunk["chunk"] }.join
+          @out.write(text.byteslice(printed_bytes..-1).to_s)
+          @out.flush
+          printed_bytes = text.bytesize
+        end
         terminal = !%w[pending queued claimed running].include?(result["status"])
         unless options[:follow] && !terminal
           result["chunks"] = chunks.sort.map(&:last)
           if options[:json]
             @out.puts JSON.generate(result)
           else
-            print_failed_steps(result) if result["status"] == "failed"
-            @out.write result["chunks"].map { |chunk| chunk["chunk"] }.join
+            print_failed_steps(result) if result["status"] == "failed" && !options[:follow]
+            @out.write result["chunks"].map { |chunk| chunk["chunk"] }.join unless options[:follow]
+            print_failed_steps(result) if result["status"] == "failed" && options[:follow]
           end
           return result["status"] == "failed" ? 1 : 0
         end
