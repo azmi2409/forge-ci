@@ -2,6 +2,12 @@
 <% content_for(:title, "Pipeline #{number} · #{@project.name} — ForgeCI") %>
 <% content_for(:breadcrumbs) { breadcrumbs(["Overview", projects_path], [@project.name, project_path(@project)], ["Pipeline #{number}"]) } %>
 <% content_for(:head) do %>
+  <link rel="stylesheet" href="https://esm.sh/@xyflow/react@12.8.5/dist/style.css">
+  <link rel="stylesheet" href="/pipeline-diagram.css">
+  <script type="importmap">
+    {"imports":{"react":"https://esm.sh/react@18.3.1","react/jsx-runtime":"https://esm.sh/react@18.3.1/jsx-runtime?external=react","react-dom/client":"https://esm.sh/react-dom@18.3.1/client?external=react","@xyflow/react":"https://esm.sh/@xyflow/react@12.8.5?external=react,react-dom","react-dom":"https://esm.sh/react-dom@18.3.1?external=react"}}
+  </script>
+  <script type="module" src="/pipeline-diagram.js"></script>
   <% unless @pipeline.terminal? %><meta http-equiv="refresh" content="5"><% end %>
   <style>
     .graph { display: flex; overflow-x: auto; padding: 16px 20px 24px; align-items: flex-start; }
@@ -78,6 +84,7 @@
         </div>
         <%= status_badge(wf.status) %>
       </div>
+      <div data-workflow-diagram="<%= workflow_diagram(wf).to_json %>" aria-label="Interactive workflow <%= wf.name %>"></div>
       <div class="graph">
         <% wf.stages.each_with_index do |stage, i| %>
           <div class="stage">

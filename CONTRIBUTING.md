@@ -128,7 +128,10 @@ default cutover; automated checks do not replace production soak evidence.
 ## Working on the web UI
 
 The UI is server-rendered ERB with no asset pipeline and no JavaScript
-framework. It follows the **Kilat.host design conventions**: monochrome ink on
+framework, except the pipeline page's workflow diagram: React + React Flow,
+loaded as pinned ES modules via an import map with no build step, progressively
+enhancing the server-rendered graph, which stays as the no-JS fallback.
+It follows the **Kilat.host design conventions**: monochrome ink on
 canvas, 1px hairlines for structure, colour only for state.
 
 - **Design system:** `web/app/views/layouts/_design.html.erb` holds the tokens

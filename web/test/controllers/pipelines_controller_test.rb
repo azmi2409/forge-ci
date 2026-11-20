@@ -43,4 +43,84 @@ class PipelinesControllerTest < ActionDispatch::IntegrationTest
     assert_response :ok
     assert_includes response.body, "✓ selesai — ünïcode"
   end
+
+  test "workflow diagram serializes grouped jobs and dependency edges with fallback" do
+    build = @pipeline.job_runs.find_by!(name: "build")
+    build.update!(status: :success)
+    job = @pipeline.job_runs.find_by!(name: "test")
+    job.update!(parallelism: 2, status: :running)
+    copy = job.dup
+    copy.update!(node_index: 1, status: :success)
+
+    get "/projects/#{@project.id}/pipelines/#{@pipeline.id}"
+    assert_response :ok
+    assert_select "[data-workflow-diagram]" do |elements|
+      graph = JSON.parse(elements.first["data-workflow-diagram"])
+      assert_equal %w[build test deploy], graph["nodes"].map { |node| node["id"] }
+      data = graph["nodes"][1]["data"]
+      assert_equal "running", data["status"]
+      assert_equal "medium", data["resource_class"]
+      assert_equal 2, data["parallel"]
+      assert_equal %w[running success], data["nodes"].map { |node| node["status"] }
+      assert_equal "/job_runs/#{job.id}", data["href"]
+      assert_equal ["build"], data["requires"]
+      assert_equal 1, data["stage"]
+      assert_equal [["build", "test"], ["test", "deploy"]], graph["edges"].map { |edge| edge.values_at("source", "target") }
+      assert_equal "success", graph["edges"][0]["data"]["status"]
+      assert_equal "default", graph["edges"][0]["type"]
+      assert_equal "build", graph["edges"][0]["targetHandle"]
+      assert_equal 840, graph["width"]
+      assert_equal 124, graph["height"]
+      assert graph["edges"][0]["animated"]
+      assert_not graph["edges"][1]["animated"]
+    end
+    assert_select ".graph .jobnode", count: 3
+    assert_select "meta[http-equiv=refresh][content='5']"
+  end
+
+  test "workflow diagram stacks a large parallel group without overlapping the next job" do
+    job = @pipeline.job_runs.find_by!(name: "test")
+    job.update!(parallelism: 16)
+    15.times do |index|
+      copy = job.dup
+      copy.update!(node_index: index + 1)
+    end
+    following = job.dup
+    following.update!(name: "lint", parallelism: 1, node_index: 0)
+
+    get "/projects/#{@project.id}/pipelines/#{@pipeline.id}"
+    graph = JSON.parse(css_select("[data-workflow-diagram]").first["data-workflow-diagram"])
+    parallel = graph["nodes"].find { |node| node["id"] == "test" }
+    lint = graph["nodes"].find { |node| node["id"] == "lint" }
+    assert_equal parallel["position"]["x"], lint["position"]["x"]
+    assert_equal 202, parallel["data"]["estimated_height"]
+    parallel_bottom = parallel["position"]["y"] + parallel["data"]["estimated_height"]
+    assert_equal parallel_bottom + 28, lint["position"]["y"]
+    assert_equal lint["position"]["y"] + lint["data"]["estimated_height"], graph["height"]
+  end
+
+  test "workflow diagram distinguishes dependencies that skip a stage" do
+    @pipeline.job_runs.find_by!(name: "deploy").update!(requires: %w[build test])
+    get "/projects/#{@project.id}/pipelines/#{@pipeline.id}"
+    graph = JSON.parse(css_select("[data-workflow-diagram]").first["data-workflow-diagram"])
+    assert_equal ["build"], graph["nodes"].last["data"]["long_requires"]
+    assert_equal 3, graph["edges"].size
+  end
+
+  test "workflow diagram handles empty workflows and unknown dependencies" do
+    @pipeline.workflow_runs.each { |workflow| workflow.job_runs.destroy_all }
+    get "/projects/#{@project.id}/pipelines/#{@pipeline.id}"
+    graph = JSON.parse(css_select("[data-workflow-diagram]").first["data-workflow-diagram"])
+    assert_empty graph["nodes"]
+    assert_empty graph["edges"]
+    assert_equal 0, graph["width"]
+    assert_equal 0, graph["height"]
+
+    @pipeline.workflow_runs.first.job_runs.create!(name: "orphan <job>", requires: ["missing"], status: :failed)
+    get "/projects/#{@project.id}/pipelines/#{@pipeline.id}"
+    graph = JSON.parse(css_select("[data-workflow-diagram]").first["data-workflow-diagram"])
+    assert_equal "orphan <job>", graph["nodes"].first["data"]["name"]
+    assert_equal "failed", graph["nodes"].first["data"]["status"]
+    assert_empty graph["edges"]
+  end
 end
