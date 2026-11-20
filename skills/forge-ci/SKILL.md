@@ -226,13 +226,21 @@ curl -s -H "Authorization: Bearer $FORGE_CI_ADMIN_TOKEN" "$FORGE_CI_URL/api/v1/q
 
 Projects created by the GitHub App are named `owner/repo`.
 
-**Logs** aren't readable with the admin token; they're in the web UI at
-`$FORGE_CI_URL/job_runs/<job id>`. If you can't sign in, ask the user to
-paste the failing step's output rather than guessing.
+**Logs** are readable with the admin token or stored `forge-ci login`:
+`forge-ci logs <job-id>` prints the log and failed steps with exit codes.
+Use `--follow` to stream new output until terminal without duplicates (failed
+steps are printed at the end rather than the beginning),
+or `--json` for structured output. Logs exit 1 when the job is failed, otherwise
+0 (usage errors exit 2; API errors exit 1).
 
 ## When a pipeline fails
 
-1. Find the failing job and step in the pipeline status or the UI.
+1. Run `forge-ci status <pipeline-id>` to find failed jobs and steps, then
+   `forge-ci logs <job-id>` for output. The hint reads
+   `forge-ci: view logs: forge-ci logs <job-id>`. `status --wait` includes the last 20
+   log lines for failed jobs when the pipeline ends unsuccessfully; `--json`
+   stays machine-readable. One-shot status exits 0; `--wait` exits 1 for
+   non-success terminal pipelines.
 2. Reproduce the step's command locally in the same image when you can.
 3. A job stuck in `queued` can mean no runner serves its `resource_class`,
    no runner belongs to its trust pool, project concurrency is full, or

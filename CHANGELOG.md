@@ -6,6 +6,11 @@ separately.
 
 ## Unreleased
 
+- Read job logs using admin or member OAuth credentials with `forge-ci logs`
+  (optional `--follow` and `--json`). Pipeline status includes failed steps
+  and log hints; `status --wait` shows failed jobs' last 20 log lines.
+  Log and pipeline APIs include ordered step names, statuses and exit codes.
+
 - Fence runner job attempts with a fresh claim token. Updated Ruby and Go
   runners send `X-Forge-Attempt` on per-job requests; stale attempts receive
   403 before changing lifecycle state or logs. Requests without the header
