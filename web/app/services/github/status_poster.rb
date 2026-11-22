@@ -1,13 +1,15 @@
 # frozen_string_literal: true
 
 module Github
-  # Posts forge-ci commit statuses to GitHub for pipelines created from
-  # GitHub events. One status context ("forge-ci") per pipeline.
+  # Keeps the "forge-ci" commit status on GitHub in step with pipelines
+  # created from GitHub events.
   #
-  # Called explicitly with :pending right after intake, and via
-  # Pipeline#after_update_commit for terminal statuses. No-op for pipelines
-  # that did not originate from a GitHub repository. Failures are logged,
-  # never raised — a status post must not break the pipeline itself.
+  # The post methods record the wanted state (GithubCommitStatus) and queue
+  # DeliverCommitStatusJob, which calls GitHub and retries transient
+  # failures. Callers run after their intake or completion transaction has
+  # committed, so GitHub is never called while job or repository rows are
+  # locked. No-op for pipelines that did not originate from a GitHub
+  # repository.
   class StatusPoster
     CONTEXT = "forge-ci"
 
@@ -20,7 +22,7 @@ module Github
     }.freeze
 
     def self.post_pending(pipeline)
-      post(pipeline, state: "pending", description: "forge-ci build queued")
+      publish(pipeline, state: "pending", description: "forge-ci build queued")
     end
 
     def self.post_terminal(pipeline)
@@ -31,34 +33,63 @@ module Github
         when "failed" then "forge-ci build failed"
         else "forge-ci build #{pipeline.status}"
         end
-      post(pipeline, state: state, description: description)
+      publish(pipeline, state: state, description: description)
     end
 
     # Used when config compilation fails: still create the failed pipeline
     # and tell GitHub why, instead of silently dropping the push.
     def self.post_compile_error(pipeline, errors)
       first_lines = Array(errors).first(2).join("; ")
-      post(pipeline, state: "failure", description: "config error: #{first_lines}")
+      publish(pipeline, state: "failure", description: "config error: #{first_lines}")
     end
 
-    def self.post(pipeline, state:, description:)
-      repo = pipeline.github_repository
-      return false unless repo
+    # For a webhook delivered again for a commit that already has a pipeline:
+    # queue the status again if GitHub never received it.
+    def self.redeliver(pipeline)
+      status = pipeline.github_commit_status
+      if status.nil?
+        pipeline.terminal? ? post_terminal(pipeline) : post_pending(pipeline)
+      elsif !status.delivered?
+        DeliverCommitStatusJob.perform_later(status.id)
+      end
+    end
 
-      installation = repo.github_installation
-      client = Github.client_for(installation.installation_id)
+    # Post the status's current state to GitHub. Raises
+    # AppClient::TransientError for DeliverCommitStatusJob to retry; other
+    # API errors are logged and kept on the row.
+    def self.deliver(status)
+      return if status.delivered?
+
+      generation = status.generation
+      pipeline = status.pipeline
+      repo = pipeline.github_repository
+      return unless repo
+
+      client = Github.client_for(repo.github_installation.installation_id)
       client.create_commit_status(
         repo.full_name,
         pipeline.sha,
-        state: state,
-        description: description,
+        state: status.state,
+        description: status.description,
         target_url: pipeline_url(pipeline),
         context: CONTEXT
       )
-      true
-    rescue StandardError => e
-      Rails.logger.error("[github] commit status #{state} failed for pipeline #{pipeline.id}: #{e.class}: #{e.message}")
-      false
+      status.mark_delivered!(generation)
+    rescue AppClient::TransientError => e
+      Rails.logger.warn("[github] commit status #{status.state} for pipeline #{status.pipeline_id} will be retried: #{e.message}")
+      status.mark_failed!(generation, e)
+      raise
+    rescue AppClient::ApiError, AppClient::NotConfigured => e
+      Rails.logger.error("[github] commit status #{status.state} failed for pipeline #{status.pipeline_id}: #{e.class}: #{e.message}")
+      status.mark_failed!(generation, e)
+    end
+
+    def self.publish(pipeline, state:, description:)
+      return unless pipeline.github_repository
+
+      status = GithubCommitStatus.record!(pipeline, state: state, description: description)
+      DeliverCommitStatusJob.perform_later(status.id)
+      status
     end
 
     def self.pipeline_url(pipeline)
@@ -69,6 +100,6 @@ module Github
       base = host.start_with?("http") ? host : "https://#{host}"
       "#{base}/projects/#{pipeline.project_id}/pipelines/#{pipeline.id}"
     end
-    private_class_method :post, :pipeline_url
+    private_class_method :publish, :pipeline_url
   end
 end

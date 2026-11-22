@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_19_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.string "name", null: false
     t.string "record_type", null: false
@@ -84,6 +84,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_19_120000) do
     t.text "private_key", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+  end
+
+  create_table "github_commit_statuses", force: :cascade do |t|
+    t.integer "pipeline_id", null: false
+    t.string "state", null: false
+    t.string "description", null: false
+    t.integer "generation", default: 1, null: false
+    t.datetime "delivered_at"
+    t.string "last_error"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["pipeline_id"], name: "index_github_commit_statuses_on_pipeline_id", unique: true
   end
 
   create_table "github_installations", force: :cascade do |t|
@@ -288,6 +300,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_19_120000) do
   add_foreign_key "artifacts", "job_runs"
   add_foreign_key "cache_entries", "projects"
   add_foreign_key "contexts", "projects"
+  add_foreign_key "github_commit_statuses", "pipelines", on_delete: :cascade
   add_foreign_key "github_repositories", "github_installations"
   add_foreign_key "github_repositories", "projects"
   add_foreign_key "job_runs", "workflow_runs"

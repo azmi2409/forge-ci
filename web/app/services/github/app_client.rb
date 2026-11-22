@@ -28,7 +28,19 @@ module Github
         @body = body
         super("GitHub API error #{status}: #{body.to_s.truncate(200)}")
       end
+
+      # TransientError for responses GitHub asks clients to retry later: rate
+      # limits (429, or 403 with a rate-limit message) and server errors.
+      def self.for(status, body)
+        message = body.is_a?(Hash) ? body["message"] : body
+        rate_limited = status == 429 || (status == 403 && message.to_s.match?(/rate limit/i))
+        error_class = (rate_limited || status >= 500) ? TransientError : ApiError
+        error_class.new(status, body)
+      end
     end
+
+    # A failure worth retrying: rate limit, server error or network error.
+    class TransientError < ApiError; end
 
     class NotConfigured < StandardError; end
 
@@ -43,7 +55,7 @@ module Github
     def fetch_config(full_name, sha)
       res = get("/repos/#{full_name}/contents/.circleci/config.yml?ref=#{sha}")
       return nil if res[:status] == 404
-      raise ApiError.new(res[:status], res[:body]) unless res[:status] == 200
+      raise ApiError.for(res[:status], res[:body]) unless res[:status] == 200
 
       body = res[:body]
       raise ApiError.new(200, "unexpected contents response") unless body["encoding"] == "base64"
@@ -60,7 +72,7 @@ module Github
       }
       payload[:target_url] = target_url if target_url.present?
       res = post("/repos/#{full_name}/statuses/#{sha}", payload)
-      raise ApiError.new(res[:status], res[:body]) unless res[:status] == 201
+      raise ApiError.for(res[:status], res[:body]) unless res[:status] == 201
 
       res[:body]
     end
@@ -100,7 +112,7 @@ module Github
     def request_installation_token
       res = api_request(:post, "/app/installations/#{@installation_id}/access_tokens",
                         bearer: app_jwt)
-      raise ApiError.new(res[:status], res[:body]) unless res[:status] == 201
+      raise ApiError.for(res[:status], res[:body]) unless res[:status] == 201
 
       [res[:body]["token"], Time.zone.parse(res[:body]["expires_at"])]
     end
@@ -114,7 +126,7 @@ module Github
     end
 
     # Raw request returning { status:, body: } (body parsed as JSON when
-    # possible). Raises ApiError only for transport-level failures.
+    # possible). Raises TransientError only for transport-level failures.
     def api_request(method, path, bearer:, payload: nil)
       uri = URI.join(API_BASE, path)
       http = Net::HTTP.new(uri.host, uri.port)
@@ -145,8 +157,8 @@ module Github
           response.body
         end
       { status: response.code.to_i, body: body }
-    rescue Net::OpenTimeout, Net::ReadTimeout, SocketError, SystemCallError => e
-      raise ApiError.new(0, "transport error: #{e.class}: #{e.message}")
+    rescue Net::OpenTimeout, Net::ReadTimeout, SocketError, SystemCallError, EOFError, OpenSSL::SSL::SSLError => e
+      raise TransientError.new(0, "transport error: #{e.class}: #{e.message}")
     end
   end
 end

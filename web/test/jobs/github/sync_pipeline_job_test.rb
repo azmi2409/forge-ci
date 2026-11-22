@@ -50,7 +50,7 @@ class Github::SyncPipelineJobTest < ActiveJob::TestCase
   end
 
   def perform_with_fake(**kwargs)
-    Github::SyncPipelineJob.perform_now(**kwargs)
+    perform_enqueued_jobs { Github::SyncPipelineJob.perform_now(**kwargs) }
   end
 
   def base_args(overrides = {})
