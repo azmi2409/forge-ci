@@ -21,8 +21,19 @@ module Github
       "canceled" => "error"
     }.freeze
 
+    # Skipped once the pipeline has finished: a build can finish before its
+    # intake gets here. The row lock orders this against the completion,
+    # whose callback then records the result after it.
     def self.post_pending(pipeline)
-      publish(pipeline, state: "pending", description: "forge-ci build queued", initial: true)
+      return unless pipeline.github_repository
+
+      status = pipeline.with_lock do
+        unless pipeline.terminal?
+          GithubCommitStatus.record!(pipeline, state: "pending", description: "forge-ci build queued")
+        end
+      end
+      DeliverCommitStatusJob.perform_later(status.id) if status
+      status
     end
 
     def self.post_terminal(pipeline)
@@ -84,16 +95,11 @@ module Github
       status.mark_failed!(generation, e)
     end
 
-    def self.publish(pipeline, state:, description:, initial: false)
+    def self.publish(pipeline, state:, description:)
       return unless pipeline.github_repository
 
-      status =
-        if initial
-          GithubCommitStatus.record_initial!(pipeline, state: state, description: description)
-        else
-          GithubCommitStatus.record!(pipeline, state: state, description: description)
-        end
-      DeliverCommitStatusJob.perform_later(status.id) unless status.delivered?
+      status = GithubCommitStatus.record!(pipeline, state: state, description: description)
+      DeliverCommitStatusJob.perform_later(status.id)
       status
     end
 

@@ -101,6 +101,16 @@ class GithubCommitStatusDeliveryTest < ActionDispatch::IntegrationTest
     assert_equal %w[pending success], states
   end
 
+  test "rerunning a finished pipeline sets the check back to pending" do
+    @github.install do
+      deliver_push_webhook
+      pipeline = finish_pipeline(Pipeline.find_by!(sha: SHA), "failed")
+      perform_enqueued_jobs { pipeline.rerun! }
+    end
+
+    assert_equal %w[pending failure pending], states
+  end
+
   test "config fetch is retried through a GitHub 502 so the push still gets a pipeline" do
     @github.fail_config_fetches(502)
     @github.install { deliver_push_webhook }
