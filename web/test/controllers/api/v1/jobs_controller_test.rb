@@ -115,6 +115,7 @@ class Api::V1::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "first\nsecond\n", job.log_text
 
     post "/api/v1/runner/jobs/#{@job_id}/complete", params: { status: "success", step_results: [] }, headers: auth, as: :json
+    perform_enqueued_jobs
     assert_equal "first\nsecond\n", job.reload.log_blob.download
   end
 
@@ -128,6 +129,7 @@ class Api::V1::JobsControllerTest < ActionDispatch::IntegrationTest
     assert_equal [], json_body["chunks"]
 
     post "/api/v1/runner/jobs/#{@job_id}/complete", params: { status: "failed", step_results: [] }, headers: auth, as: :json
+    perform_enqueued_jobs
     get "/api/v1/jobs/#{@job_id}/logs", params: { after: 2 }, headers: auth
     assert_equal true, json_body["complete"]
     assert_equal "failed", json_body["status"]
@@ -150,6 +152,7 @@ class Api::V1::JobsControllerTest < ActionDispatch::IntegrationTest
          headers: auth, as: :json
     assert_response :ok
 
+    perform_enqueued_jobs
     job = JobRun.find(@job_id)
     assert_equal 0, job.log_chunks.count
     assert job.log_blob.attached?
