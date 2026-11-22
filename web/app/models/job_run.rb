@@ -130,14 +130,18 @@ class JobRun < ApplicationRecord
 
   # Idempotent chunk ingest: retried seqs overwrite the buffered row.
   def append_log_chunk!(seq, chunk)
-    LogChunk.upsert(
-      { job_run_id: id, seq: seq.to_i, chunk: chunk.to_s,
-        created_at: Time.current, updated_at: Time.current },
-      unique_by: :index_log_chunks_on_job_run_id_and_seq
-    )
-    # The rows are the durable store until the job finishes; the blob is
-    # uploaded and verified asynchronously, not on every chunk.
-    JobLogChannel.notify(id, event: "chunk", seq: seq.to_i)
+    with_lock do
+      return if terminal? && log_blob.attached?
+
+      LogChunk.upsert(
+        { job_run_id: id, seq: seq.to_i, chunk: chunk.to_s,
+          created_at: Time.current, updated_at: Time.current },
+        unique_by: :index_log_chunks_on_job_run_id_and_seq
+      )
+      # The rows are the durable store until the job finishes; the blob is
+      # uploaded and verified asynchronously, not on every chunk.
+      JobLogChannel.notify(id, event: "chunk", seq: seq.to_i)
+    end
   end
 
   # Full log text: buffered rows while they exist, the blob after they're

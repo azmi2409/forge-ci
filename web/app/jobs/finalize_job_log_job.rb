@@ -13,8 +13,7 @@ class FinalizeJobLogJob < ApplicationJob
     chunks = job.log_chunks.order(:seq).to_a
     return if chunks.empty?
 
-    text = job.log_blob.attached? ? job.log_blob.download : "".b
-    text += chunks.map(&:chunk).join.b
+    text = chunks.map(&:chunk).join
     blob = upload(text, job.id)
     verify!(blob, text)
     job.with_lock do

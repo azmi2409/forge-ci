@@ -78,24 +78,27 @@ class FinalizeJobLogJobTest < ActionDispatch::IntegrationTest
     assert_not @job.reload.log_blob.attached?
   end
 
-  test "late legacy runner chunks preserve the previously finalized log" do
+  test "late legacy runner chunks and retries are ignored after finalization" do
     token, raw = RunnerToken.generate!(name: "legacy-runner", resource_class: "medium")
     @job.update!(claimed_by: token.name)
     @job.transition_to!("success")
     FinalizeJobLogJob.perform_now(@job.id)
     original = @job.reload.log_blob.download
 
-    post "/api/v1/jobs/#{@job.id}/log_chunks", params: { seq: 2, chunk: "late output ✓\n" },
-         headers: bearer_headers(raw), as: :json
-    assert_response :ok
-    assert_equal 1, @job.log_chunks.count
-
+    [2, 0].each do |seq|
+      post "/api/v1/jobs/#{@job.id}/log_chunks", params: { seq: seq, chunk: "late output ✓\n" },
+           headers: bearer_headers(raw), as: :json
+      assert_response :ok
+      assert_equal seq, json_body["seq"]
+      assert_equal original, @job.reload.log_blob.download
+      assert_empty @job.log_chunks
+      assert @job.log_complete?
+    end
+    @job.update_column(:updated_at, 6.minutes.ago)
+    clear_enqueued_jobs
+    assert_no_enqueued_jobs(only: FinalizeJobLogJob) { SweepJobLogsJob.perform_now }
     FinalizeJobLogJob.perform_now(@job.id)
-    assert_equal original + "late output ✓\n".b, @job.reload.log_blob.download
-    assert_empty @job.log_chunks
-    assert @job.log_complete?
-    FinalizeJobLogJob.perform_now(@job.id)
-    assert_equal original + "late output ✓\n".b, @job.reload.log_blob.download
+    assert_equal original, @job.reload.log_blob.download
   ensure
     token&.destroy!
   end
