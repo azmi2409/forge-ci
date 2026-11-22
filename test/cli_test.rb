@@ -381,6 +381,18 @@ class CLITest < Minitest::Test
     end
   end
 
+  def test_logs_follow_exits_with_buffered_output_when_terminal_but_not_finalized
+    routes = {
+      "GET /api/v1/jobs/20/logs" => [200, { status: "success", complete: false, chunks: [{ seq: 0, chunk: "buffered\n" }] }]
+    }
+    with_fake_server(routes) do |url, requests|
+      code, out, err = run_cli("logs", "20", "--follow", "--poll", "0.001", "--url", url, "--token", "t")
+      assert_equal 0, code, err
+      assert_equal "buffered\n", out
+      assert_equal 1, requests.length
+    end
+  end
+
   def test_logs_validation_and_http_errors
     [["logs"], ["logs", "0"], ["logs", "3", "extra"], ["logs", "3", "--poll", "0"]].each do |args|
       code, = run_cli(*args, "--url", "http://127.0.0.1:1", "--token", "t")

@@ -15,21 +15,30 @@ class FinalizeJobLogJob < ApplicationJob
 
     text = chunks.map(&:chunk).join
     blob = upload(text, job.id)
+    verify!(blob, text)
     job.with_lock do
       return unless job.terminal? && job.updated_at == version
-      return unless job.log_chunks.order(:seq).pluck(:id, :chunk) == chunks.map { |c| [c.id, c.chunk] }
+      unless job.log_chunks.order(:seq).pluck(:id, :chunk) == chunks.map { |c| [c.id, c.chunk] }
+        raise StorageError, "log chunks changed during upload"
+      end
 
       job.log_blob.attach(blob)
-      verify!(blob, text)
       job.log_chunks.where("seq <= ?", chunks.last.seq).delete_all
     end
+    finalized = true
+  ensure
+    blob&.purge unless finalized
   end
 
   private
 
   def upload(text, job_id)
-    ActiveStorage::Blob.create_and_upload!(io: StringIO.new(text), filename: "job-#{job_id}.log", content_type: "text/plain")
+    io = StringIO.new(text)
+    blob = ActiveStorage::Blob.create_after_unfurling!(io: io, filename: "job-#{job_id}.log", content_type: "text/plain")
+    blob.upload_without_unfurling(io)
+    blob
   rescue StandardError => error
+    blob&.purge
     raise StorageError, error.message
   end
 

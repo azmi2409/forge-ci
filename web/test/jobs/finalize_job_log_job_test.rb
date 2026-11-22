@@ -15,7 +15,7 @@ class FinalizeJobLogJobTest < ActionDispatch::IntegrationTest
   end
 
   teardown do
-    @project.destroy!
+    @project.reload.destroy!
     clear_enqueued_jobs
   end
 
@@ -30,10 +30,9 @@ class FinalizeJobLogJobTest < ActionDispatch::IntegrationTest
 
   test "upload failure preserves buffered logs and retry finalizes exact text" do
     with_service_override(:upload, ->(*) { raise IOError, "injected upload failure" }) do
-      begin
+      assert_no_difference "ActiveStorage::Blob.count" do
         @job.transition_to!("success")
         FinalizeJobLogJob.perform_now(@job.id)
-      rescue IOError
       end
     end
     assert_equal 2, @job.reload.log_chunks.count
@@ -82,11 +81,14 @@ class FinalizeJobLogJobTest < ActionDispatch::IntegrationTest
   test "verification failure and exhausted retries retain chunks" do
     @job.transition_to!("success")
     with_service_override(:exist?, ->(*) { false }) do
-      assert_enqueued_with(job: FinalizeJobLogJob) { FinalizeJobLogJob.perform_now(@job.id) }
-      assert_raises(FinalizeJobLogJob::StorageError) do
-        FinalizeJobLogJob.new(@job.id).tap { |j| j.exception_executions = { [FinalizeJobLogJob::StorageError].to_s => 9 } }.perform_now
+      assert_no_difference "ActiveStorage::Blob.count" do
+        assert_enqueued_with(job: FinalizeJobLogJob) { FinalizeJobLogJob.perform_now(@job.id) }
+        assert_raises(FinalizeJobLogJob::StorageError) do
+          FinalizeJobLogJob.new(@job.id).tap { |j| j.exception_executions = { [FinalizeJobLogJob::StorageError].to_s => 9 } }.perform_now
+        end
       end
     end
+    assert_not @job.reload.log_blob.attached?
     assert_equal "first\nsecond\n", @job.reload.log_text
     assert_equal 2, @job.log_chunks.count
     assert_not @job.log_complete?
@@ -101,7 +103,7 @@ class FinalizeJobLogJobTest < ActionDispatch::IntegrationTest
       upload.call(*args, **kwargs)
       job.reset_for_rerun!
       job.append_log_chunk!(0, "new attempt\n")
-    }) { FinalizeJobLogJob.perform_now(@job.id) }
+    }) { assert_no_difference("ActiveStorage::Blob.count") { FinalizeJobLogJob.perform_now(@job.id) } }
     assert_equal "new attempt\n", @job.reload.log_text
     assert_not @job.log_blob.attached?
   end
@@ -113,10 +115,64 @@ class FinalizeJobLogJobTest < ActionDispatch::IntegrationTest
     with_service_override(:upload, ->(*args, **kwargs) {
       upload.call(*args, **kwargs)
       job.append_log_chunk!(2, "late\n")
-    }) { FinalizeJobLogJob.perform_now(@job.id) }
+    }) do
+      assert_no_difference "ActiveStorage::Blob.count" do
+        assert_enqueued_with(job: FinalizeJobLogJob, args: [@job.id]) { FinalizeJobLogJob.perform_now(@job.id) }
+      end
+    end
     assert_equal [0, 1, 2], @job.log_chunks.order(:seq).pluck(:seq)
     assert_not @job.log_complete?
     FinalizeJobLogJob.perform_now(@job.id)
     assert_equal "first\nsecond\nlate\n", @job.reload.log_blob.download
+  end
+
+  test "corrupt upload is never attached and its stored object is purged" do
+    @job.transition_to!("success")
+    key = nil
+    upload = ActiveStorage::Blob.service.method(:upload)
+    with_service_override(:upload, ->(uploaded_key, *args, **kwargs) {
+      key = uploaded_key
+      upload.call(uploaded_key, *args, **kwargs)
+    }) do
+      with_service_override(:download, ->(*) { "corrupt" }) do
+        assert_no_difference "ActiveStorage::Blob.count" do
+          assert_enqueued_with(job: FinalizeJobLogJob) { FinalizeJobLogJob.perform_now(@job.id) }
+        end
+      end
+    end
+    assert_not_nil key
+    assert_not ActiveStorage::Blob.service.exist?(key)
+    assert_not @job.reload.log_blob.attached?
+    assert_equal "first\nsecond\n", @job.log_text
+  end
+
+  test "attachment failure purges the uploaded blob and retains chunks" do
+    @job.transition_to!("success")
+    job_id = @job.id
+    failure = ->(attachment) { raise "injected attach failure" if attachment.record_type == "JobRun" && attachment.record_id == job_id }
+    ActiveStorage::Attachment.set_callback(:create, :before, failure)
+    assert_no_difference "ActiveStorage::Blob.count" do
+      assert_raises(RuntimeError) { FinalizeJobLogJob.new.perform(@job.id) }
+    end
+    assert_not @job.reload.log_blob.attached?
+    assert_equal 2, @job.log_chunks.count
+  ensure
+    ActiveStorage::Attachment.skip_callback(:create, :before, failure)
+  end
+
+  test "sweep recovers old terminal logs but skips recent active and empty jobs" do
+    assert_no_enqueued_jobs(only: FinalizeJobLogJob) { SweepJobLogsJob.perform_now }
+    @job.transition_to!("success")
+    clear_enqueued_jobs
+    assert_no_enqueued_jobs(only: FinalizeJobLogJob) { SweepJobLogsJob.perform_now }
+    @job.update_column(:updated_at, 6.minutes.ago)
+    assert_enqueued_with(job: FinalizeJobLogJob, args: [@job.id]) { SweepJobLogsJob.perform_now }
+    perform_enqueued_jobs(only: FinalizeJobLogJob)
+    assert @job.reload.log_complete?
+    assert_no_enqueued_jobs(only: FinalizeJobLogJob) { SweepJobLogsJob.perform_now }
+    @job.reset_for_rerun!
+    @job.append_log_chunk!(0, "new attempt")
+    @job.update_column(:updated_at, 6.minutes.ago)
+    assert_no_enqueued_jobs(only: FinalizeJobLogJob) { SweepJobLogsJob.perform_now }
   end
 end
