@@ -22,7 +22,7 @@ module Github
     }.freeze
 
     def self.post_pending(pipeline)
-      publish(pipeline, state: "pending", description: "forge-ci build queued")
+      publish(pipeline, state: "pending", description: "forge-ci build queued", initial: true)
     end
 
     def self.post_terminal(pipeline)
@@ -84,11 +84,16 @@ module Github
       status.mark_failed!(generation, e)
     end
 
-    def self.publish(pipeline, state:, description:)
+    def self.publish(pipeline, state:, description:, initial: false)
       return unless pipeline.github_repository
 
-      status = GithubCommitStatus.record!(pipeline, state: state, description: description)
-      DeliverCommitStatusJob.perform_later(status.id)
+      status =
+        if initial
+          GithubCommitStatus.record_initial!(pipeline, state: state, description: description)
+        else
+          GithubCommitStatus.record!(pipeline, state: state, description: description)
+        end
+      DeliverCommitStatusJob.perform_later(status.id) unless status.delivered?
       status
     end
 

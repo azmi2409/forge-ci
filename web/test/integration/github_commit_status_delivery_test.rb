@@ -89,6 +89,18 @@ class GithubCommitStatusDeliveryTest < ActionDispatch::IntegrationTest
     assert_equal %w[pending success], states
   end
 
+  test "a pending status recorded after the build finished does not replace the result" do
+    @github.install do
+      deliver_push_webhook
+      pipeline = finish_pipeline(Pipeline.find_by!(sha: SHA), "success")
+      perform_enqueued_jobs { Github::StatusPoster.post_pending(pipeline) } # late intake post
+
+      assert_equal "success", pipeline.github_commit_status.reload.state
+    end
+
+    assert_equal %w[pending success], states
+  end
+
   test "config fetch is retried through a GitHub 502 so the push still gets a pipeline" do
     @github.fail_config_fetches(502)
     @github.install { deliver_push_webhook }

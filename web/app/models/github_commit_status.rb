@@ -25,6 +25,18 @@ class GithubCommitStatus < ApplicationRecord
     find_by!(pipeline_id: pipeline.id)
   end
 
+  # Record the pipeline's first state, unless a state is already recorded:
+  # a pipeline can finish before its initial "pending" is recorded, and that
+  # pending must not replace the result.
+  def self.record_initial!(pipeline, state:, description:)
+    now = Time.current
+    insert(
+      { pipeline_id: pipeline.id, state: state, description: description, created_at: now, updated_at: now },
+      unique_by: :pipeline_id
+    )
+    find_by!(pipeline_id: pipeline.id)
+  end
+
   def delivered?
     delivered_at.present?
   end
