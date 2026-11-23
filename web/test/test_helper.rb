@@ -8,6 +8,7 @@ TEST_ADMIN_TOKEN = "test-admin-token-123"
 ENV["FORGE_CI_ADMIN_TOKEN"] = TEST_ADMIN_TOKEN
 require_relative "../config/environment"
 require "rails/test_help"
+Dir[File.expand_path("support/**/*.rb", __dir__)].each { |file| require file }
 
 module ActiveSupport
   class TestCase
