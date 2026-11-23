@@ -9,6 +9,9 @@
 # scale_runners raises runner Auto Scaling Groups when jobs queue; it does
 # nothing unless FORGE_CI_AUTOSCALE is set (see DEPLOY.md).
 production:
+  sweep_job_logs:
+    class: SweepJobLogsJob
+    schedule: every 5 minutes
   reclaim_stale_jobs:
     class: ReclaimStaleJobsJob
     schedule: every minute
@@ -20,6 +23,9 @@ production:
     schedule: every day at 3am
 
 development:
+  sweep_job_logs:
+    class: SweepJobLogsJob
+    schedule: every 5 minutes
   reclaim_stale_jobs:
     class: ReclaimStaleJobsJob
     schedule: every minute

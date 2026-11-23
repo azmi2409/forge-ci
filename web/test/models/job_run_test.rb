@@ -3,6 +3,7 @@
 require "test_helper"
 
 class JobRunTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
   def build_job(status: "pending")
     project = Project.create!(name: "p")
     pipeline = project.pipelines.create!(sha: "abc", branch: "main", status: "running")
@@ -387,7 +388,7 @@ class JobRunTest < ActiveSupport::TestCase
   test "a finished job's stored log comes back as UTF-8 text, with invalid bytes replaced" do
     job = build_job(status: "running")
     job.log_chunks.create!(seq: 0, chunk: "✓ 12 tests passed — sukses ünïcode\n")
-    job.transition_to!("success")
+    perform_enqueued_jobs { job.transition_to!("success") }
     job.reload
     assert job.log_blob.attached?
 

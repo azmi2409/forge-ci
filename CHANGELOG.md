@@ -6,6 +6,9 @@ separately.
 
 ## Unreleased
 
+- Finalize job logs asynchronously after commit, retaining buffered logs until
+  the uploaded object is verified so storage failures cannot lose job output.
+
 - Read job logs using admin or member OAuth credentials with `forge-ci logs`
   (optional `--follow` and `--json`). Pipeline status includes failed steps
   and log hints; `status --wait` shows failed jobs' last 20 log lines.

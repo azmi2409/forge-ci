@@ -123,7 +123,7 @@
       if (lastSeq === null || data.complete) { el.textContent = text; } else if (text) { el.textContent += text; }
       if (data.chunks.length) lastSeq = data.chunks[data.chunks.length - 1].seq;
       else if (lastSeq === null) lastSeq = -1;
-      if (data.complete) finish(data.status);
+      if (data.complete || ["success", "failed", "canceled"].indexOf(data.status) !== -1) finish(data.status);
       stick();
     }).catch(function() {}).finally(function() {
       fetching = false;

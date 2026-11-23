@@ -48,9 +48,8 @@ class JobRun < ApplicationRecord
 
   # Durable log store (component 6). LogChunk rows remain as the write-ahead
   # ingestion buffer — idempotent upserts keyed on (job_run_id, seq) give us
-  # ordering and safe retries — while the blob is the source of truth for
-  # reads. Rows are purged once the job reaches a terminal state and the
-  # final blob is written (see finalize_log_blob!).
+  # ordering and safe retries. Readers prefer rows until the background
+  # finalizer has uploaded and verified the durable blob.
   has_one_attached :log_blob
 
   enum :status, { pending: 0, queued: 1, claimed: 2, running: 3, success: 4, failed: 5, canceled: 6 }
@@ -89,11 +88,9 @@ class JobRun < ApplicationRecord
 
       attrs[:attempt_token] = nil unless ACTIVE_STATUSES.include?(new_status)
       update!(attrs.merge(status: new_status))
-      # Durable log store: once terminal, the blob holds the final log and the
-      # ingestion rows are dropped (see #finalize_log_blob!).
       return unless TERMINAL_STATUSES.include?(new_status)
 
-      finalize_log_blob!
+      ActiveRecord.after_all_transactions_commit { FinalizeJobLogJob.perform_later(id) }
       JobLogChannel.notify(id, event: "done", status: new_status)
     end
   end
@@ -131,29 +128,20 @@ class JobRun < ApplicationRecord
 
   # --- log storage (component 6) ------------------------------------------------
 
-  # Idempotent chunk ingest: upsert the row, then rebuild the blob from all
-  # ordered chunks. Retried seqs overwrite the row (upsert) and the rebuild
-  # keeps the blob consistent — never duplicated, always in seq order.
+  # Idempotent chunk ingest: retried seqs overwrite the buffered row.
   def append_log_chunk!(seq, chunk)
-    LogChunk.upsert(
-      { job_run_id: id, seq: seq.to_i, chunk: chunk.to_s,
-        created_at: Time.current, updated_at: Time.current },
-      unique_by: :index_log_chunks_on_job_run_id_and_seq
-    )
-    # The rows are the durable store until the job finishes; the blob is
-    # written once then (finalize_log_blob!), not on every chunk.
-    JobLogChannel.notify(id, event: "chunk", seq: seq.to_i)
-  end
+    with_lock do
+      return if terminal? && log_blob.attached?
 
-  # Concatenate all chunks in seq order into the blob, replacing any
-  # previous blob. Called once, when the job finishes.
-  def rebuild_log_blob!
-    text = log_chunks.order(:seq).map(&:chunk).join
-    log_blob.attach(
-      io: StringIO.new(text),
-      filename: "job-#{id}.log",
-      content_type: "text/plain"
-    )
+      LogChunk.upsert(
+        { job_run_id: id, seq: seq.to_i, chunk: chunk.to_s,
+          created_at: Time.current, updated_at: Time.current },
+        unique_by: :index_log_chunks_on_job_run_id_and_seq
+      )
+      # The rows are the durable store until the job finishes; the blob is
+      # uploaded and verified asynchronously, not on every chunk.
+      JobLogChannel.notify(id, event: "chunk", seq: seq.to_i)
+    end
   end
 
   # Full log text: buffered rows while they exist, the blob after they're
@@ -190,13 +178,6 @@ class JobRun < ApplicationRecord
   # odd job output can't break the page that shows it.
   def stored_log_text
     log_blob.download.force_encoding(Encoding::UTF_8).scrub
-  end
-
-  # Write the final blob and drop the ingestion rows. Called automatically
-  # when the job reaches a terminal state.
-  def finalize_log_blob!
-    rebuild_log_blob!
-    log_chunks.delete_all
   end
 
   # Back to pending for a rerun, as if never run: no runner, logs, artifacts

@@ -45,8 +45,8 @@ module Api
       end
 
       # GET /api/v1/jobs/:id/logs -> { chunks: [{seq, chunk}] } ordered by seq.
-      # Reads from the blob once the job is terminal (rows purged by then);
-      # otherwise from the buffered rows. Simple polling is the fallback
+      # Reads buffered rows until the finalizer verifies the blob;
+      # then reads from the blob. Simple polling is the fallback
       # live-tail story.
       # ?after=SEQ returns only newer chunks (the job page's live view);
       # complete: true means the job finished and `chunks` is the whole log.
