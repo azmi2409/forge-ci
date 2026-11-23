@@ -268,12 +268,6 @@ class JobRun < ApplicationRecord
 
   # --- claiming ----------------------------------------------------------------
   #
-  # Postgres-first: the candidate scan takes FOR UPDATE SKIP LOCKED so two
-  # runners racing for the same row resolve atomically (the loser simply sees
-  # no claimable row). On other adapters (e.g. SQLite in local dev) the lock
-  # clause is skipped — correctness then rests on the surrounding transaction
-  # plus the reclaim safety net; see README.
-
   def self.postgres?
     connection.adapter_name == "PostgreSQL"
   end
@@ -288,28 +282,51 @@ class JobRun < ApplicationRecord
   # Returns the claimed JobRun, or nil when nothing is claimable.
   def self.claim_next!(token, requested_resource_class: nil)
     resource_class = token.resource_class || requested_resource_class.presence
+    scope = queued.joins(workflow_run: { pipeline: :project })
+                  .where(pipelines: { forked: token.fork_only? })
+                  .merge(Project.with_free_slots)
+                  .order(:created_at, :id)
+    if resource_class
+      # A classless job matches any runner; a classless runner needs no filter.
+      scope = scope.where(resource_class: [resource_class, nil])
+    end
+
+    return claim_next_postgres!(scope, token.name) if postgres?
+
     transaction do
-      scope = queued.order(:created_at)
-                    .preload(workflow_run: { pipeline: :project })
-      scope = scope.where(workflow_run_id: WorkflowRun.joins(:pipeline).where(pipelines: { forked: token.fork_only? }).select(:id))
-      # NULL on either side matches anything. A NULL token class needs no
-      # filter at all; binding NULL into `OR :rc IS NULL` makes Postgres
-      # unable to infer the parameter type (PG::IndeterminateDatatype).
-      unless resource_class.nil?
-        scope = scope.where(
-          "job_runs.resource_class = ? OR job_runs.resource_class IS NULL",
-          resource_class
-        )
-      end
-      scope = scope.lock("FOR UPDATE SKIP LOCKED") if postgres?
-
-      job = scope.detect { |j| j.project.free_slots.positive? }
-      return nil unless job
-
-      job.mark_claimed!(claimed_by: token.name)
+      job = scope.first
+      job&.mark_claimed!(claimed_by: token.name)
       job
     end
   end
+
+  def self.claim_next_postgres!(scope, runner_name)
+    candidates = scope.select("job_runs.*", "pipelines.project_id AS claim_project_id")
+                      .lock("FOR UPDATE OF job_runs SKIP LOCKED")
+    skipped_projects = []
+
+    uncached do
+      loop do
+        project_id = nil
+        job = transaction(requires_new: true) do
+          candidate = candidates.where.not(pipelines: { project_id: skipped_projects }).first
+          next unless candidate
+
+          project_id = candidate[:claim_project_id]
+          # Release the candidate's lock on failure before trying another project,
+          # including when this claim is called inside an existing transaction.
+          raise ActiveRecord::Rollback unless Project.lock_claim_slot(project_id)
+
+          candidate.mark_claimed!(claimed_by: runner_name)
+          candidate
+        end
+        return job if job || project_id.nil?
+
+        skipped_projects << project_id
+      end
+    end
+  end
+  private_class_method :claim_next_postgres!
 
   # Jobs of +resource_class+ waiting on earlier jobs (pending) that a runner
   # of that class will get soon. Lets a warmed-up runner stay up for them and

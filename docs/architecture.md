@@ -74,10 +74,11 @@ accepts — the raw YAML never leaves the intake boundary.
 Runners poll `POST /api/v1/runner/jobs/claim` with their bearer token:
 
 1. The server atomically claims the oldest `queued` job the token may run —
-   matching `resource_class` (NULL matches anything) and a free
-   `max_concurrency` slot on the project. On Postgres this is
-   `SELECT … FOR UPDATE SKIP LOCKED` inside a transaction, so concurrent
-   runners resolve the race without double-claims.
+   in its trust pool, matching `resource_class` (NULL matches anything) and
+   a free `max_concurrency` slot on the project. On Postgres the transaction
+   selects one eligible job with `FOR UPDATE SKIP LOCKED`, locks its project
+   and rechecks capacity before issuing an attempt token. If the project is
+   locked or has filled up, the poll can still claim from another project.
 2. The claim response is the full **job payload**: id, name,
    `working_directory`, `executor`, `steps`, merged `environment` (executor
    env + context values, contexts win), `pipeline` sha/branch,
@@ -174,7 +175,7 @@ Per claimed job:
 
 - **Runners** are the unit of scale: add hosts, generate a token per host
   (optionally per `resource_class`), done. No shared state between them.
-- **Control plane** scales like any Rails app; the claim path is the hot
-  spot and is a single indexed, row-locked query.
+- **Control plane** scales like any Rails app; claims use indexed queue
+  selection and serialize slot reservations only within the same project.
 - **Storage** (logs/artifacts/cache) lives in S3-compatible object storage,
   never on the app disk in production.

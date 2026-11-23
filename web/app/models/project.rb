@@ -23,9 +23,24 @@ class Project < ApplicationRecord
     variables.to_h { |v| [v.name, v.value] }
   end
 
+  def self.with_free_slots
+    active_jobs = JobRun.joins(workflow_run: :pipeline)
+                        .where(status: JobRun::ACTIVE_STATUSES)
+                        .where(Pipeline.arel_table[:project_id].eq(arel_table[:id]))
+    where("projects.max_concurrency > (#{active_jobs.select('COUNT(*)').to_sql})")
+  end
+
+  # The caller holds this reservation until its claim transaction commits.
+  # At READ COMMITTED, count in a new statement after locking: the candidate
+  # query's snapshot may predate the previous claimant's commit.
+  def self.lock_claim_slot(project_id)
+    project = lock("FOR NO KEY UPDATE SKIP LOCKED").find_by(id: project_id)
+    project && project.free_slots.positive?
+  end
+
   # Jobs currently occupying a concurrency slot.
   def active_job_count
-    job_runs.where(status: %w[claimed running]).count
+    job_runs.where(status: JobRun::ACTIVE_STATUSES).count
   end
 
   def free_slots
