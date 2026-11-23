@@ -78,8 +78,10 @@ class GithubStatusPosterTest < ActiveJob::TestCase
 
   test "successful pipeline posts pending then success with target_url" do
     pipeline = create_pipeline
-    Github::StatusPoster.post_pending(pipeline)
-    drive_all_jobs(pipeline, "success")
+    perform_enqueued_jobs do
+      Github::StatusPoster.post_pending(pipeline)
+      drive_all_jobs(pipeline, "success")
+    end
 
     assert_equal "success", Pipeline.find(@pipeline_ids.last).status
     states = @client.statuses.map { |s| s[:state] }
@@ -93,8 +95,10 @@ class GithubStatusPosterTest < ActiveJob::TestCase
 
   test "failed pipeline posts failure" do
     pipeline = create_pipeline
-    Github::StatusPoster.post_pending(pipeline)
-    drive_all_jobs(pipeline, "failed")
+    perform_enqueued_jobs do
+      Github::StatusPoster.post_pending(pipeline)
+      drive_all_jobs(pipeline, "failed")
+    end
 
     assert_equal "failed", Pipeline.find(@pipeline_ids.last).status
     assert_equal %w[pending failure], @client.statuses.map { |s| s[:state] }
@@ -107,7 +111,7 @@ class GithubStatusPosterTest < ActiveJob::TestCase
       project: @project, sha: "plainsha", branch: "main", ir: JSON.parse(ir.to_json)
     )
     @pipeline_ids << pipeline.id
-    drive_all_jobs(pipeline, "success")
+    perform_enqueued_jobs { drive_all_jobs(pipeline, "success") }
     assert_equal "success", pipeline.reload.status
 
     assert_empty @client.statuses

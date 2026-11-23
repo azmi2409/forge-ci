@@ -14,6 +14,9 @@ module Github
   class SyncPipelineJob < ApplicationJob
     queue_as :default
 
+    # Safe to run again: a commit that already has a pipeline is not rebuilt.
+    retry_on AppClient::TransientError, wait: :polynomially_longer, attempts: 10
+
     def perform(installation_id:, account_login:, repo_full_name:, sha:, branch:, forked: false)
       installation = GithubInstallation.find_or_create_by!(installation_id: installation_id) do |inst|
         inst.account_login = account_login
@@ -35,19 +38,34 @@ module Github
       end
 
       # A push to a branch with an open pull request sends both a `push` and a
-      # `pull_request` event for the same commit: build it once. The row lock
-      # makes two deliveries arriving together wait for each other.
+      # `pull_request` event for the same commit, and GitHub may deliver an
+      # event more than once: build it once. The row lock makes deliveries
+      # arriving together wait for each other; the commit status is recorded
+      # after it is released.
+      pipeline = errors = nil
+      duplicate = false
       github_repo.with_lock do
-        if project.pipelines.exists?(github_repository: github_repo, sha: sha)
-          Rails.logger.info("[github] #{repo_full_name}@#{sha[0, 7]} already has a pipeline — skipping")
+        pipeline = project.pipelines.find_by(github_repository: github_repo, sha: sha)
+        if pipeline
+          duplicate = true
         else
-          create_pipeline(project, github_repo, yaml, sha: sha, branch: branch, forked: forked)
+          pipeline, errors = create_pipeline(project, github_repo, yaml, sha: sha, branch: branch, forked: forked)
         end
+      end
+
+      if duplicate
+        Rails.logger.info("[github] #{repo_full_name}@#{sha[0, 7]} already has a pipeline — skipping")
+        StatusPoster.redeliver(pipeline)
+      elsif errors.any?
+        StatusPoster.post_compile_error(pipeline, errors)
+      else
+        StatusPoster.post_pending(pipeline)
       end
     end
 
     private
 
+    # Returns [pipeline, compile errors].
     def create_pipeline(project, github_repo, yaml, sha:, branch:, forked:)
       number = project.pipelines.maximum(:pipeline_number).to_i + 1
       ir, errors = ForgeCI::Compiler.compile(yaml, pipeline_params: { "branch" => branch, "number" => number })
@@ -59,8 +77,7 @@ module Github
           sha: sha, branch: branch, status: "failed",
           forked: forked, github_repository: github_repo, pipeline_number: number
         )
-        StatusPoster.post_compile_error(pipeline, errors)
-        return
+        return [pipeline, errors]
       end
 
       # Forked PRs never receive contexts — see the SECURITY note above.
@@ -75,7 +92,7 @@ module Github
         forked: forked,
         github_repository: github_repo
       )
-      StatusPoster.post_pending(pipeline)
+      [pipeline, []]
     end
   end
 end
