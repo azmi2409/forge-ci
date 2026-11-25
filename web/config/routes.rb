@@ -6,7 +6,10 @@ Rails.application.routes.draw do
   # management UI is also mounted but answers 403 to everyone: no
   # admin_authenticator is configured (the CLI client is seeded, see
   # CliOauthApp).
-  use_doorkeeper
+  use_doorkeeper do
+    controllers authorizations: "oauth_authorizations", tokens: "oauth_tokens"
+  end
+  post "/oauth/register", to: OauthClientRegistration, as: :oauth_client_registration, format: false
 
   match "/mcp", to: "mcp#dispatch_request", via: %i[get post delete], as: :mcp, format: false
   get "/.well-known/oauth-protected-resource/mcp", to: "mcp#resource_metadata", as: :mcp_resource_metadata

@@ -22,33 +22,36 @@ claude mcp add --transport http forge-ci https://ci.example.com/mcp \
   --header 'Authorization: Bearer ${FORGE_CI_ADMIN_TOKEN}'
 ```
 
-**OAuth.** Use an MCP client that supports a pre-registered OAuth client ID.
-An installation administrator registers the client's documented callback URI
-once on the control plane. For a public client, run `bin/rails console` from
-`web/` (in the deployment's Rails environment) and use:
+**OAuth.** Add the server URL in your MCP client and choose OAuth. Clients
+that support dynamic registration register themselves; no administrator needs
+to create a client ID. When your browser opens, sign in to ForgeCI and approve
+the client. Use authorization code with S256 PKCE and the `mcp` scope if your
+client asks. The client can refresh its token when it expires.
+
+If your client needs a pre-configured client ID, an installation administrator
+can register its callback manually: run `bin/rails console` from `web/` in
+the deployment's Rails environment.
 
 ```ruby
 app = Doorkeeper::Application.create!(
   name: "My MCP client",
   redirect_uri: "https://agent.example.com/oauth/callback",
   confidential: false,
-  scopes: "api"
+  scopes: "mcp"
 )
 puts app.uid
 ```
 
-Enter that ID in the MCP client's OAuth setup. Select the `api` scope and
-authorization code with PKCE (S256). Sign in to ForgeCI in the browser and
-approve the client. The client can refresh the access token when it expires.
-Use the exact callback the MCP client specifies; Doorkeeper permits HTTP only
-for loopback callbacks. Do not reuse the seeded `forge-ci-cli` client ID for
-other apps.
+Enter that ID in the client's OAuth setup. Use the exact callback the client
+specifies. Registration accepts HTTPS and HTTP on a loopback IP or
+`localhost`; loopback ports may vary. Do not reuse the seeded `forge-ci-cli`
+client ID for other apps.
 
 An unauthenticated request returns a `401` with a `WWW-Authenticate` header
 pointing to `/.well-known/oauth-protected-resource/mcp`. The authorization
-server advertises its endpoints at `/.well-known/oauth-authorization-server`.
-ForgeCI does not provide dynamic client registration; use the Bearer option
-if your client cannot use a pre-registered client.
+server advertises its endpoints at `/.well-known/oauth-authorization-server`,
+including registration at `/oauth/register`. Tokens issued to dynamically
+registered clients are scoped to MCP and cannot access the REST API.
 
 ## Available tools
 

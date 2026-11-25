@@ -57,6 +57,7 @@ Doorkeeper.configure do
   # Only token hashes are stored; the raw values exist solely in the CLI's
   # credentials file. (This rules out reuse_access_token, which we don't use.)
   hash_token_secrets
+  hash_application_secrets
 
   default_scopes :api
   optional_scopes :mcp

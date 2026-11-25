@@ -34,11 +34,12 @@ class McpController < ActionController::API
       authorization_endpoint: oauth_authorization_url,
       token_endpoint: oauth_token_url,
       revocation_endpoint: oauth_revoke_url,
+      registration_endpoint: oauth_client_registration_url,
       scopes_supported: %w[api mcp],
       response_types_supported: ["code"],
       grant_types_supported: %w[authorization_code refresh_token],
       code_challenge_methods_supported: ["S256"],
-      token_endpoint_auth_methods_supported: %w[none client_secret_basic client_secret_post]
+      token_endpoint_auth_methods_supported: OauthClientRegistration::AUTH_METHODS
     }
   end
 

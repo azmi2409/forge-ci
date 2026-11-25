@@ -25,6 +25,7 @@ class McpTest < ActionDispatch::IntegrationTest
     assert_equal "#{issuer}/oauth/authorize", json_body["authorization_endpoint"]
     assert_equal "#{issuer}/oauth/token", json_body["token_endpoint"]
     assert_equal "#{issuer}/oauth/revoke", json_body["revocation_endpoint"]
+    assert_equal "#{issuer}/oauth/register", json_body["registration_endpoint"]
     assert_equal ["S256"], json_body["code_challenge_methods_supported"]
   end
 
@@ -61,26 +62,46 @@ class McpTest < ActionDispatch::IntegrationTest
     assert_equal "POST", response.headers["Allow"]
   end
 
-  test "a registered OAuth client can authorize with PKCE and acts as the member" do
-    redirect_uri = "https://agent.example/callback"
-    app = Doorkeeper::Application.create!(name: "MCP agent", redirect_uri: redirect_uri, scopes: "mcp", confidential: false)
+  test "a self-registered OAuth client can authorize with PKCE and acts as the member" do
+    post "/oauth/register", params: { client_name: "MCP agent", redirect_uris: ["http://localhost:5000/callback"],
+                                     token_endpoint_auth_method: "none", grant_types: %w[authorization_code refresh_token] }, as: :json
+    assert_response :created
+    client_id = json_body.fetch("client_id")
+    assert_equal "mcp", json_body["scope"]
+    assert_not json_body.key?("client_secret")
+
+    redirect_uri = "http://localhost:5001/callback"
     sign_in_as("mcp-member", role: :member)
     verifier = SecureRandom.urlsafe_base64(48)
     challenge = Base64.urlsafe_encode64(OpenSSL::Digest::SHA256.digest(verifier), padding: false)
-    params = { client_id: app.uid, redirect_uri: redirect_uri, response_type: "code", scope: "mcp",
+    params = { client_id: client_id, redirect_uri: redirect_uri, response_type: "code",
                state: "mcp-test-state", code_challenge: challenge, code_challenge_method: "S256" }
+    get "/oauth/authorize", params: params.merge(resource: "https://other.example/mcp")
+    assert_response :bad_request
+    assert_equal "invalid_target", json_body["error"]
+
+    get "/oauth/authorize", params: params.merge(scope: "api")
+    assert_response :bad_request
+
     get "/oauth/authorize", params: params.merge(resource: "http://www.example.com/mcp")
     assert_response :ok
+    assert_select "h1", text: "Authorization required"
     post "/oauth/authorize", params: params
     assert_response :redirect
     callback = URI(redirect_to_url)
-    assert_equal "agent.example", callback.host
+    assert_equal "localhost", callback.host
+    assert_equal 5001, callback.port
     query = URI.decode_www_form(callback.query).to_h
     assert_equal "mcp-test-state", query["state"]
-    post "/oauth/token", params: { grant_type: "authorization_code", code: query.fetch("code"),
-                                  redirect_uri: redirect_uri, client_id: app.uid, code_verifier: verifier,
-                                  resource: "http://www.example.com/mcp" }
+    exchange = { grant_type: "authorization_code", code: query.fetch("code"), redirect_uri: redirect_uri,
+                 client_id: client_id, code_verifier: verifier }
+    post "/oauth/token", params: exchange.merge(resource: "http://www.example.com/api/v1")
+    assert_response :bad_request
+    assert_equal "invalid_target", json_body["error"]
+
+    post "/oauth/token", params: exchange.merge(resource: "http://www.example.com/mcp")
     assert_response :ok
+    assert_equal "mcp", json_body["scope"]
     token = json_body.fetch("access_token")
     headers = bearer_headers(token)
 
@@ -95,7 +116,7 @@ class McpTest < ActionDispatch::IntegrationTest
     get "/api/v1/projects", headers: headers
     assert_response :unauthorized
 
-    post "/oauth/revoke", params: { token: token, client_id: app.uid }
+    post "/oauth/revoke", params: { token: token, client_id: client_id }
     assert_response :ok
     rpc("tools/list", headers: headers)
     assert_response :unauthorized
