@@ -11,12 +11,13 @@ class McpTest < ActionDispatch::IntegrationTest
     sign_in_as_admin
     rpc("tools/list", headers: {})
     assert_response :unauthorized
-    assert_equal 'Bearer resource_metadata="http://www.example.com/.well-known/oauth-protected-resource/mcp", scope="api"',
+    assert_equal 'Bearer resource_metadata="http://www.example.com/.well-known/oauth-protected-resource/mcp", scope="mcp"',
                  response.headers["WWW-Authenticate"]
 
     get "/.well-known/oauth-protected-resource/mcp"
     assert_response :ok
     assert_equal "http://www.example.com/mcp", json_body["resource"]
+    assert_equal ["mcp"], json_body["scopes_supported"]
     issuer = json_body.fetch("authorization_servers").sole
     get URI(issuer).path + "/.well-known/oauth-authorization-server"
     assert_response :ok
@@ -62,11 +63,11 @@ class McpTest < ActionDispatch::IntegrationTest
 
   test "a registered OAuth client can authorize with PKCE and acts as the member" do
     redirect_uri = "https://agent.example/callback"
-    app = Doorkeeper::Application.create!(name: "MCP agent", redirect_uri: redirect_uri, scopes: "api", confidential: false)
+    app = Doorkeeper::Application.create!(name: "MCP agent", redirect_uri: redirect_uri, scopes: "mcp", confidential: false)
     sign_in_as("mcp-member", role: :member)
     verifier = SecureRandom.urlsafe_base64(48)
     challenge = Base64.urlsafe_encode64(OpenSSL::Digest::SHA256.digest(verifier), padding: false)
-    params = { client_id: app.uid, redirect_uri: redirect_uri, response_type: "code", scope: "api",
+    params = { client_id: app.uid, redirect_uri: redirect_uri, response_type: "code", scope: "mcp",
                state: "mcp-test-state", code_challenge: challenge, code_challenge_method: "S256" }
     get "/oauth/authorize", params: params.merge(resource: "http://www.example.com/mcp")
     assert_response :ok
@@ -91,10 +92,20 @@ class McpTest < ActionDispatch::IntegrationTest
     end
     assert json_body.key?("error")
 
+    get "/api/v1/projects", headers: headers
+    assert_response :unauthorized
+
     post "/oauth/revoke", params: { token: token, client_id: app.uid }
     assert_response :ok
     rpc("tools/list", headers: headers)
     assert_response :unauthorized
+  end
+
+  test "legacy API scoped OAuth tokens can still use MCP" do
+    user = User.create!(username: "cli-member", password: TEST_PASSWORD, role: :member)
+    token = Doorkeeper::AccessToken.create!(application: CliOauthApp.bootstrap!, resource_owner_id: user.id,
+                                           scopes: "api", expires_in: 1.hour)
+    assert_equal [@project.id], call_tool("list_projects", headers: bearer_headers(token.plaintext_token)).fetch("projects").pluck("id")
   end
 
   test "tools inspect projects, pipelines, and jobs and bound job log output" do

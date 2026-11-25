@@ -39,7 +39,7 @@ module ApiAuthentication
 
     if provided.present?
       token = Doorkeeper::AccessToken.by_token(provided)
-      if token&.accessible? && token.scopes.exists?("api")
+      if token&.accessible? && api_oauth_scope_allowed?(token)
         @current_api_user = User.find_by(id: token.resource_owner_id)
         if current_api_user
           token.revoke_previous_refresh_token!
@@ -55,6 +55,10 @@ module ApiAuthentication
     error = { error: "unauthorized: valid bearer token required" }
     error[:hint] = "set FORGE_CI_ADMIN_TOKEN or run forge-ci login" unless admin_token_configured?
     render json: error, status: :unauthorized
+  end
+
+  def api_oauth_scope_allowed?(token)
+    token.scopes.exists?("api")
   end
 
   # Installations-affecting endpoints (start pipelines, create projects,

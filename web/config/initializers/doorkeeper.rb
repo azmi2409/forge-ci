@@ -52,4 +52,5 @@ Doorkeeper.configure do
   hash_token_secrets
 
   default_scopes :api
+  optional_scopes :mcp
 end

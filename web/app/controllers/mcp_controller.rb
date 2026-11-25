@@ -24,7 +24,7 @@ class McpController < ActionController::API
   def resource_metadata
     render json: {
       resource: mcp_url, authorization_servers: [request.base_url],
-      scopes_supported: ["api"], bearer_methods_supported: ["header"]
+      scopes_supported: ["mcp"], bearer_methods_supported: ["header"]
     }
   end
 
@@ -34,7 +34,7 @@ class McpController < ActionController::API
       authorization_endpoint: oauth_authorization_url,
       token_endpoint: oauth_token_url,
       revocation_endpoint: oauth_revoke_url,
-      scopes_supported: ["api"],
+      scopes_supported: %w[api mcp],
       response_types_supported: ["code"],
       grant_types_supported: %w[authorization_code refresh_token],
       code_challenge_methods_supported: ["S256"],
@@ -56,7 +56,11 @@ class McpController < ActionController::API
   end
 
   def unauthorized_api!
-    response.set_header("WWW-Authenticate", %(Bearer resource_metadata="#{mcp_resource_metadata_url}", scope="api"))
+    response.set_header("WWW-Authenticate", %(Bearer resource_metadata="#{mcp_resource_metadata_url}", scope="mcp"))
     super
+  end
+
+  def api_oauth_scope_allowed?(token)
+    token.scopes.exists?("mcp") || super
   end
 end

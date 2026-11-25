@@ -19,6 +19,9 @@ en:
               not_match_configured: "doesn't match those configured on the server."
 
   doorkeeper:
+    scopes:
+      mcp: 'Use ForgeCI MCP tools with your ForgeCI role'
+
     applications:
       confirmations:
         destroy: 'Are you sure?'
