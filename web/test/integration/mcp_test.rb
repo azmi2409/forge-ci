@@ -68,6 +68,7 @@ class McpTest < ActionDispatch::IntegrationTest
     assert_response :created
     client_id = json_body.fetch("client_id")
     assert_equal "mcp", json_body["scope"]
+    assert_equal %w[authorization_code refresh_token], json_body["grant_types"]
     assert_not json_body.key?("client_secret")
 
     redirect_uri = "http://localhost:5001/callback"
@@ -103,6 +104,7 @@ class McpTest < ActionDispatch::IntegrationTest
     assert_response :ok
     assert_equal "mcp", json_body["scope"]
     token = json_body.fetch("access_token")
+    refresh_token = json_body.fetch("refresh_token")
     headers = bearer_headers(token)
 
     assert_equal [@project.id], call_tool("list_projects", headers: headers).fetch("projects").pluck("id")
@@ -115,6 +117,12 @@ class McpTest < ActionDispatch::IntegrationTest
 
     get "/api/v1/projects", headers: headers
     assert_response :unauthorized
+
+    post "/oauth/token", params: { grant_type: "refresh_token", refresh_token: refresh_token,
+                                  client_id: client_id, resource: "http://www.example.com/mcp" }
+    assert_response :ok
+    assert_equal "mcp", json_body["scope"]
+    assert_not_equal token, json_body["access_token"]
 
     post "/oauth/revoke", params: { token: token, client_id: client_id }
     assert_response :ok

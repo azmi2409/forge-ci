@@ -42,7 +42,10 @@ class OauthClientRegistration
       return error(400, "invalid_client_metadata", "Only authorization code, optional refresh tokens, and the mcp scope are supported.")
     end
 
-    app = Doorkeeper::Application.create!(name: name, redirect_uri: redirects.uniq, scopes: "mcp", confidential: method != "none")
+    app = Doorkeeper::Application.create!(
+      name: name, redirect_uri: redirects.uniq, scopes: "mcp", confidential: method != "none",
+      refresh_token_enabled: grants.include?("refresh_token")
+    )
     registration = {
       client_id: app.uid, client_id_issued_at: app.created_at.to_i, client_name: app.name,
       redirect_uris: redirects.uniq, scope: "mcp", token_endpoint_auth_method: method,

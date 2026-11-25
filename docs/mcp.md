@@ -26,7 +26,8 @@ claude mcp add --transport http forge-ci https://ci.example.com/mcp \
 that support dynamic registration register themselves; no administrator needs
 to create a client ID. When your browser opens, sign in to ForgeCI and approve
 the client. Use authorization code with S256 PKCE and the `mcp` scope if your
-client asks. The client can refresh its token when it expires.
+client asks. A dynamically registered client can refresh its token if it
+requests the `refresh_token` grant type during registration.
 
 If your client needs a pre-configured client ID, an installation administrator
 can register its callback manually: run `bin/rails console` from `web/` in

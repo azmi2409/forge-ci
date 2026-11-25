@@ -50,8 +50,9 @@ Doorkeeper.configure do
     !Doorkeeper::OAuth::Helpers::URIChecker.loopback_uri?(uri)
   end
 
-  # Long-lived CLI sessions: short access tokens that refresh transparently.
-  use_refresh_token
+  use_refresh_token do |context|
+    context.client&.refresh_token_enabled?
+  end
   access_token_expires_in 24.hours
 
   # Only token hashes are stored; the raw values exist solely in the CLI's

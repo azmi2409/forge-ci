@@ -12,6 +12,7 @@ class OauthClientRegistrationTest < ActionDispatch::IntegrationTest
     assert_response :created
     assert_equal "no-store", response.headers["Cache-Control"]
     client = json_body
+    assert_equal ["authorization_code"], client["grant_types"]
     secret = client.fetch("client_secret")
     assert_equal 0, client["client_secret_expires_at"]
     application = Doorkeeper::Application.find_by!(uid: client.fetch("client_id"))
@@ -50,6 +51,8 @@ class OauthClientRegistrationTest < ActionDispatch::IntegrationTest
     post "/oauth/token", params: exchange.merge(code_verifier: verifier)
     assert_response :ok
     assert_equal "mcp", json_body["scope"]
+    assert_not json_body.key?("refresh_token")
+    assert_nil Doorkeeper::AccessToken.by_token(json_body.fetch("access_token")).refresh_token
   end
 
   test "a confidential client configured for other scopes also needs S256 when requesting MCP" do
