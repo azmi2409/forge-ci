@@ -1,5 +1,8 @@
 # Agent skills
 
+To connect an agent directly to ForgeCI for live CI data and actions, see
+[Connect an agent to ForgeCI with MCP](mcp.md).
+
 ForgeCI ships a skill for coding agents:
 [`skills/forge-ci/SKILL.md`](../skills/forge-ci/SKILL.md). It tells an agent
 how to write `.circleci/config.yml` for ForgeCI (supported features, absolute

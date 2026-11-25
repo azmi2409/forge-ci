@@ -10,9 +10,8 @@ Doorkeeper.configure do
 
   grant_flows %w[authorization_code]
 
-  # The CLI app is the only client. Its authorization step is the web UI's
-  # own login: once the resource owner is signed in there is nothing left to
-  # consent to, so no consent screen is shown.
+  # The first-party CLI skips consent after web login. Other registered
+  # clients, including MCP clients, go through Doorkeeper's consent screen.
   skip_authorization do |_resource_owner, client|
     client.uid == CliOauthApp::UID
   end
@@ -33,8 +32,7 @@ Doorkeeper.configure do
     end
   end
 
-  # The CLI cannot keep a client secret: public client, PKCE mandatory, and
-  # only the S256 challenge method (never "plain").
+  # Require PKCE with S256 for public clients such as the CLI.
   force_pkce
   pkce_code_challenge_methods %w[S256]
 

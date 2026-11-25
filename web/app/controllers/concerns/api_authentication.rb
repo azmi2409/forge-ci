@@ -48,6 +48,10 @@ module ApiAuthentication
       end
     end
 
+    unauthorized_api!
+  end
+
+  def unauthorized_api!
     error = { error: "unauthorized: valid bearer token required" }
     error[:hint] = "set FORGE_CI_ADMIN_TOKEN or run forge-ci login" unless admin_token_configured?
     render json: error, status: :unauthorized
@@ -57,9 +61,13 @@ module ApiAuthentication
   # rotate secrets, autoscaler queue depth): the admin token or an admin
   # user's OAuth token.
   def require_admin!
-    return if admin_token? || current_api_user&.admin?
+    return if api_admin?
 
     render json: { error: "forbidden: admin access required" }, status: :forbidden
+  end
+
+  def api_admin?
+    admin_token? || current_api_user&.admin?
   end
 
   def bearer_credentials

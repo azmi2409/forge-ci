@@ -8,6 +8,11 @@ Rails.application.routes.draw do
   # CliOauthApp).
   use_doorkeeper
 
+  match "/mcp", to: "mcp#dispatch_request", via: %i[get post delete], as: :mcp, format: false
+  get "/.well-known/oauth-protected-resource/mcp", to: "mcp#resource_metadata", as: :mcp_resource_metadata
+  get "/.well-known/oauth-protected-resource", to: "mcp#resource_metadata"
+  get "/.well-known/oauth-authorization-server", to: "mcp#authorization_metadata"
+
   # --- Public landing page (no auth) -----------------------------------------
   root "landing#show"
   get "/dashboard", to: redirect("/projects")
