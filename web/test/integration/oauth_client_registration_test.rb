@@ -3,9 +3,10 @@
 require "test_helper"
 
 class OauthClientRegistrationTest < ActionDispatch::IntegrationTest
-  test "a confidential registration returns a secret usable only with the registered client" do
+  test "a confidential registered client must use S256 and prove possession of its verifier" do
+    callback = "https://agent.example/callback"
     post "/oauth/register", params: {
-      client_name: "Confidential agent", redirect_uris: ["https://agent.example/callback"],
+      client_name: "Confidential agent", redirect_uris: [callback],
       token_endpoint_auth_method: "client_secret_post", response_types: ["code"], scope: "mcp"
     }, as: :json
     assert_response :created
@@ -18,6 +19,46 @@ class OauthClientRegistrationTest < ActionDispatch::IntegrationTest
     assert_not_equal secret, application.secret
     assert_equal application, Doorkeeper::Application.by_uid_and_secret(application.uid, secret)
     assert_nil Doorkeeper::Application.by_uid_and_secret(application.uid, nil)
+
+    sign_in_as
+    authorization = { client_id: application.uid, redirect_uri: callback, response_type: "code" }
+    get "/oauth/authorize", params: authorization
+    assert_response :bad_request
+    assert_equal "invalid_request", json_body["error"]
+
+    verifier = SecureRandom.urlsafe_base64(48)
+    challenge = Base64.urlsafe_encode64(OpenSSL::Digest::SHA256.digest(verifier), padding: false)
+    get "/oauth/authorize", params: authorization.merge(code_challenge: challenge, code_challenge_method: "plain")
+    assert_response :bad_request
+    authorization.merge!(code_challenge: challenge, code_challenge_method: "S256")
+    get "/oauth/authorize", params: authorization
+    assert_response :ok
+    post "/oauth/authorize", params: authorization
+    assert_response :redirect
+
+    code = URI.decode_www_form(URI(redirect_to_url).query).to_h.fetch("code")
+    grant = Doorkeeper::AccessGrant.by_token(code)
+    assert_equal challenge, grant.code_challenge
+    assert_equal "S256", grant.code_challenge_method
+    exchange = { grant_type: "authorization_code", code: code, redirect_uri: callback,
+                 client_id: application.uid, client_secret: secret }
+    post "/oauth/token", params: exchange
+    assert_response :bad_request
+    post "/oauth/token", params: exchange.merge(code_verifier: SecureRandom.urlsafe_base64(48))
+    assert_response :bad_request
+    assert_equal "invalid_grant", json_body["error"]
+    post "/oauth/token", params: exchange.merge(code_verifier: verifier)
+    assert_response :ok
+    assert_equal "mcp", json_body["scope"]
+  end
+
+  test "a confidential client configured for other scopes also needs S256 when requesting MCP" do
+    sign_in_as
+    app = Doorkeeper::Application.create!(name: "Manually configured agent", redirect_uri: "https://agent.example/callback",
+                                         scopes: "api mcp", confidential: true)
+    get "/oauth/authorize", params: { client_id: app.uid, redirect_uri: app.redirect_uri, response_type: "code", scope: "api mcp" }
+    assert_response :bad_request
+    assert_equal "invalid_request", json_body["error"]
   end
 
   test "registration rejects unsafe redirects and metadata outside the MCP OAuth flow" do

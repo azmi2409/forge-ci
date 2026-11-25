@@ -9,13 +9,20 @@ class OauthAuthorizationsController < Doorkeeper::AuthorizationsController
   private
 
   def prepare_mcp_scope!
-    return unless params[:client_id].is_a?(String)
-    return unless Doorkeeper::Application.find_by(uid: params[:client_id])&.scopes&.to_s == "mcp"
+    if params[:scope].blank? && params[:client_id].is_a?(String)
+      app = Doorkeeper::Application.find_by(uid: params[:client_id])
+      params[:scope] = "mcp" if app&.scopes&.to_s == "mcp"
+    end
+    return unless params[:scope].is_a?(String) && params[:scope].split.include?("mcp")
 
-    params[:scope] = "mcp" if params[:scope].blank?
-    return if action_name == "destroy" || (params[:code_challenge].present? && params[:code_challenge_method] == "S256")
+    return if action_name == "destroy" || valid_s256_challenge?
 
     render json: { error: "invalid_request", error_description: "MCP OAuth clients must use S256 PKCE." },
            status: :bad_request
+  end
+
+  def valid_s256_challenge?
+    challenge = params[:code_challenge]
+    params[:code_challenge_method] == "S256" && challenge.is_a?(String) && challenge.match?(/\A[A-Za-z0-9_-]{43}\z/)
   end
 end
