@@ -1,5 +1,13 @@
 # frozen_string_literal: true
 
+module OauthLocalhostRedirects
+  def loopback_uri?(uri)
+    uri.hostname&.casecmp?("localhost") || super
+  end
+end
+
+Doorkeeper::OAuth::Helpers::URIChecker.singleton_class.prepend(OauthLocalhostRedirects)
+
 # OAuth provider for the forge-ci CLI (`forge-ci login`). The CLI is a public
 # native client (RFC 8252): authorization-code grant with PKCE (S256 only)
 # against the web UI's own session login, redirecting to a loopback port the
@@ -36,9 +44,8 @@ Doorkeeper.configure do
   force_pkce
   pkce_code_challenge_methods %w[S256]
 
-  # HTTPS redirect URIs everywhere except the CLI's loopback callback
-  # (RFC 8252 §7.3: the port is ignored too, so the CLI binds an ephemeral
-  # one; see URIChecker.matches?).
+  # HTTPS except for loopback callbacks, including localhost. Doorkeeper
+  # ignores the registered port for these callbacks (RFC 8252 §7.3).
   force_ssl_in_redirect_uri do |uri|
     !Doorkeeper::OAuth::Helpers::URIChecker.loopback_uri?(uri)
   end

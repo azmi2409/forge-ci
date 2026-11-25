@@ -199,6 +199,21 @@ class OAuthLoginTest < ActionDispatch::IntegrationTest
     assert_response :bad_request
   end
 
+  test "a registered localhost callback can listen on an ephemeral port" do
+    sign_in_as("local-client", role: :member)
+    app = Doorkeeper::Application.create!(name: "Local client", redirect_uri: "http://localhost:8080/callback",
+                                         scopes: "api", confidential: false)
+    callback = "http://localhost:55555/callback"
+    params = @authorize_params.merge(client_id: app.uid, redirect_uri: callback)
+    get "/oauth/authorize", params: params
+    assert_response :ok
+
+    post "/oauth/authorize", params: params
+    assert_response :redirect
+    assert_equal callback, redirect_to_url.split("?").first
+    assert_not_nil code_query["code"]
+  end
+
   test "member tokens cannot manage secrets or read the autoscaler queue" do
     sign_in_as("jules", role: :member)
     token = exchange_code(authorization_code)
