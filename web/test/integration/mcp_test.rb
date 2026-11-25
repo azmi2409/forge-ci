@@ -87,6 +87,23 @@ class McpTest < ActionDispatch::IntegrationTest
     get "/oauth/authorize", params: params.merge(resource: "http://www.example.com/mcp")
     assert_response :ok
     assert_select "h1", text: "Authorization required"
+    assert_select "main.oauth .brand", text: "forgeci"
+    assert_select "main.oauth .lead strong", text: "MCP agent"
+    assert_select "main.oauth .hint strong", text: "mcp-member"
+    assert_select "dd.mono", text: "localhost:5001"
+    assert_select "#oauth-permissions li", text: "Use ForgeCI MCP tools with your ForgeCI role"
+    assert_select "form[action='/oauth/authorize']", count: 2 do
+      assert_select "input[name=resource][value='http://www.example.com/mcp']", count: 2
+      assert_select "input.button-primary[value=Authorize]"
+      assert_select "input.button-secondary[value=Deny]"
+    end
+
+    delete "/oauth/authorize", params: params.merge(resource: "http://www.example.com/mcp")
+    assert_response :redirect
+    denied = URI.decode_www_form(URI(redirect_to_url).query).to_h
+    assert_equal "access_denied", denied["error"]
+    assert_equal "mcp-test-state", denied["state"]
+
     post "/oauth/authorize", params: params
     assert_response :redirect
     callback = URI(redirect_to_url)

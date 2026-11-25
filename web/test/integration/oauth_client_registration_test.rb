@@ -53,6 +53,10 @@ class OauthClientRegistrationTest < ActionDispatch::IntegrationTest
     assert_equal "mcp", json_body["scope"]
     assert_not json_body.key?("refresh_token")
     assert_nil Doorkeeper::AccessToken.by_token(json_body.fetch("access_token")).refresh_token
+
+    get "/oauth/authorize", params: authorization
+    assert_response :ok
+    assert_select "main.oauth h1", text: "Authorization required"
   end
 
   test "a confidential client configured for other scopes also needs S256 when requesting MCP" do
@@ -97,13 +101,13 @@ class OauthClientRegistrationTest < ActionDispatch::IntegrationTest
   test "registration is rate limited per IP" do
     previous_cache = Rails.cache
     Rails.cache = ActiveSupport::Cache::MemoryStore.new
-    OauthClientRegistration::MAX_REGISTRATIONS.times do
+    OauthClientRegistrationsController::MAX_REGISTRATIONS.times do
       post "/oauth/register", params: {}, as: :json
       assert_response :bad_request
     end
     post "/oauth/register", params: {}, as: :json
     assert_response :too_many_requests
-    assert_equal OauthClientRegistration::RATE_WINDOW.to_i.to_s, response.headers["Retry-After"]
+    assert_equal OauthClientRegistrationsController::RATE_WINDOW.to_i.to_s, response.headers["Retry-After"]
   ensure
     Rails.cache = previous_cache
   end

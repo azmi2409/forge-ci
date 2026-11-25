@@ -20,6 +20,15 @@
       .auth .hint { margin-top: 16px; font-size: 13px; line-height: 20px; color: var(--muted); }
       .auth .back { margin-top: 20px; text-align: center; font-size: 13px; color: var(--muted); }
       .auth .back a:hover { color: var(--ink); }
+      .oauth { max-width: 440px; overflow-wrap: anywhere; }
+      .oauth .card-body { padding: clamp(16px, 6vw, 28px); }
+      .oauth-details { margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--canvas); }
+      .oauth-details dt { font-weight: 600; }
+      .oauth-details dd { margin: 4px 0 0; color: var(--muted); }
+      .oauth-details dd + dt { margin-top: 12px; }
+      .oauth-details ul { margin: 0; padding-inline-start: 20px; }
+      .oauth-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 24px; }
+      .oauth-code { display: block; user-select: all; }
     </style>
   </head>
   <body>

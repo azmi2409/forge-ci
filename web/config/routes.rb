@@ -9,7 +9,7 @@ Rails.application.routes.draw do
   use_doorkeeper do
     controllers authorizations: "oauth_authorizations", tokens: "oauth_tokens"
   end
-  post "/oauth/register", to: OauthClientRegistration, as: :oauth_client_registration, format: false
+  post "/oauth/register", to: "oauth_client_registrations#create", as: :oauth_client_registration, format: false
 
   match "/mcp", to: "mcp#dispatch_request", via: %i[get post delete], as: :mcp, format: false
   get "/.well-known/oauth-protected-resource/mcp", to: "mcp#resource_metadata", as: :mcp_resource_metadata

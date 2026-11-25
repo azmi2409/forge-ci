@@ -50,6 +50,19 @@ class OAuthLoginTest < ActionDispatch::IntegrationTest
     assert_equal "admin", json_body["role"]
   end
 
+  test "authorization errors and native codes use the ForgeCI auth layout" do
+    sign_in_as
+    get "/oauth/authorize", params: @authorize_params.merge(redirect_uri: "https://unregistered.example/callback")
+    assert_response :bad_request
+    assert_select "main.oauth h1", text: "An error has occurred"
+    assert_select "main.oauth a", text: "Back to ForgeCI"
+
+    get "/oauth/authorize/native", params: { code: "native-code" }
+    assert_response :ok
+    assert_select "main.oauth h1", text: "Authorization code:"
+    assert_select "#authorization_code", text: "native-code"
+  end
+
   test "the CLI client is seeded by the first authorize request" do
     Doorkeeper::Application.where(uid: CliOauthApp::UID).delete_all
     get "/oauth/authorize", params: @authorize_params

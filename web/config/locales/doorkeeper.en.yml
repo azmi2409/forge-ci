@@ -20,6 +20,7 @@ en:
 
   doorkeeper:
     scopes:
+      api: 'Use the ForgeCI API with your ForgeCI role'
       mcp: 'Use ForgeCI MCP tools with your ForgeCI role'
 
     applications:
@@ -64,17 +65,24 @@ en:
         not_defined: 'Not defined'
 
     authorizations:
+      label: 'Application access'
       buttons:
         authorize: 'Authorize'
         deny: 'Deny'
       error:
         title: 'An error has occurred'
+        back_to_forgeci: 'Back to ForgeCI'
       new:
         title: 'Authorization required'
         prompt: 'Authorize %{client_name} to use your account?'
+        prompt_html: 'Authorize %{client_name} to use your ForgeCI account?'
         able_to: 'This application will be able to:'
+        redirect_host: 'Redirect host'
+        native_callback: 'Native application'
+        signed_in_as_html: 'Signed in as %{username}'
       show:
         title: 'Authorization code:'
+        instructions: 'Copy this code and paste it into the application to finish connecting.'
       form_post:
         title: 'Submit this form'
 

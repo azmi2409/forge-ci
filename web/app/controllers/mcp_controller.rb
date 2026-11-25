@@ -39,7 +39,7 @@ class McpController < ActionController::API
       response_types_supported: ["code"],
       grant_types_supported: %w[authorization_code refresh_token],
       code_challenge_methods_supported: ["S256"],
-      token_endpoint_auth_methods_supported: OauthClientRegistration::AUTH_METHODS
+      token_endpoint_auth_methods_supported: OauthClientRegistrationsController::AUTH_METHODS
     }
   end
 
