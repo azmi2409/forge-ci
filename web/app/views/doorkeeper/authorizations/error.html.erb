@@ -1,0 +1,4 @@
+<%= render "doorkeeper/authorizations/card", title: t(".title") do %>
+  <p class="hint"><%= (local_assigns[:error_response] || @pre_auth.error_response).body[:error_description] %></p>
+  <p class="hint"><%= link_to t("doorkeeper.authorizations.error.back_to_forgeci"), main_app.root_path, class: "text-link" %></p>
+<% end %>

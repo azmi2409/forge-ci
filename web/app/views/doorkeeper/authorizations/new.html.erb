@@ -1,0 +1,36 @@
+<%= render "doorkeeper/authorizations/card", title: t(".title") do %>
+  <% copy = "doorkeeper.authorizations.new" %>
+  <p class="lead"><%= t("prompt_html", scope: copy, client_name: tag.strong(@pre_auth.client.name)) %></p>
+
+  <% callback = URI.parse(@pre_auth.redirect_uri) %>
+  <dl class="oauth-details">
+    <dt><%= t("redirect_host", scope: copy) %></dt>
+    <dd class="mono"><%= callback.is_a?(URI::HTTP) ? callback.authority : callback.host || t("native_callback", scope: copy) %></dd>
+    <% if @pre_auth.scopes.any? %>
+      <dt><%= t("able_to", scope: copy) %></dt>
+      <dd>
+        <ul id="oauth-permissions">
+          <% @pre_auth.scopes.each do |scope| %>
+            <li><%= t(scope, scope: [:doorkeeper, :scopes], default: scope) %></li>
+          <% end %>
+        </ul>
+      </dd>
+    <% end %>
+  </dl>
+
+  <p class="hint"><%= t("signed_in_as_html", scope: copy, username: tag.strong(@pre_auth.resource_owner.username)) %></p>
+
+  <% fields = %i[redirect_uri state response_type response_mode scope code_challenge code_challenge_method].index_with { |name| @pre_auth.public_send(name) } %>
+  <% fields[:client_id] = @pre_auth.client.uid %>
+  <% fields[:resource] = params[:resource] if params[:resource].present? %>
+  <div class="oauth-actions">
+    <% { authorize: [:post, "primary"], deny: [:delete, "secondary"] }.each do |action, (method, style)| %>
+      <%= form_tag oauth_authorization_path, method: method do %>
+        <% fields.each do |name, value| %>
+          <%= hidden_field_tag name, value, id: nil %>
+        <% end %>
+        <%= submit_tag t("doorkeeper.authorizations.buttons.#{action}"), class: "button-#{style} button-block" %>
+      <% end %>
+    <% end %>
+  </div>
+<% end %>

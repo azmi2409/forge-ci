@@ -166,6 +166,7 @@ covered in [docs/agent-skills.md](docs/agent-skills.md).
 | [docs/agent-skills.md](docs/agent-skills.md) | Installing the skill for Claude Code and other agents |
 | [docs/configuration.md](docs/configuration.md) | Every environment variable |
 | [docs/api.md](docs/api.md) | The REST API and the runner contract |
+| [docs/mcp.md](docs/mcp.md) | Connect an agent to ForgeCI over MCP using a token or OAuth |
 | [docs/architecture.md](docs/architecture.md) | How it works: compiler, state machines, claims, secrets |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Common problems and fixes |
 | [TODO.md](TODO.md) | What's left |

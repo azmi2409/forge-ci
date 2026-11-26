@@ -20,24 +20,23 @@ module Api
           return render json: { error: "limit must be an integer between 1 and 100" }, status: :bad_request
         end
 
-        pipelines = project.pipelines
+        filters = {}
         %i[branch sha].each do |filter|
           next unless params.key?(filter)
           unless params[filter].is_a?(String)
             return render json: { error: "#{filter} must be a string" }, status: :bad_request
           end
 
-          pipelines = pipelines.where(filter => params[filter])
+          filters[filter] = params[filter]
         end
 
-        fields = %i[id project_id sha branch status]
-        render json: { pipelines: pipelines.select(*fields).order(id: :desc).limit(limit.to_i).as_json(only: fields) }
+        render json: { pipelines: PipelineStatus.list(project, limit: limit.to_i, **filters) }
       rescue ActiveRecord::RecordNotFound
         render json: { error: "project not found" }, status: :not_found
       end
 
       def show
-        render json: pipeline_json(Pipeline.find(params[:id]))
+        render json: PipelineStatus.detail(Pipeline.find(params[:id]))
       rescue ActiveRecord::RecordNotFound
         render json: { error: "pipeline not found" }, status: :not_found
       end
@@ -45,7 +44,7 @@ module Api
       def cancel
         pipeline = Pipeline.find(params[:id])
         pipeline.cancel!
-        render json: pipeline_json(pipeline.reload)
+        render json: PipelineStatus.detail(pipeline.reload)
       rescue ActiveRecord::RecordNotFound
         render json: { error: "pipeline not found" }, status: :not_found
       end
@@ -59,37 +58,13 @@ module Api
           ir: params[:ir],
           context_names: params[:contexts]
         )
-        render json: pipeline_json(pipeline), status: :created
+        render json: PipelineStatus.detail(pipeline), status: :created
       rescue ActiveRecord::RecordNotFound
         render json: { error: "project not found" }, status: :not_found
       rescue PipelineIntake::IntakeError => e
         render json: { error: e.message, details: e.details }, status: e.http_status
       rescue ActiveRecord::RecordInvalid => e
         render json: { error: "invalid pipeline", details: e.record.errors.full_messages }, status: :unprocessable_entity
-      end
-
-      private
-
-      def pipeline_json(pipeline)
-        {
-          id: pipeline.id,
-          project_id: pipeline.project_id,
-          sha: pipeline.sha,
-          branch: pipeline.branch,
-          status: pipeline.status,
-          workflows: pipeline.workflow_runs.map do |wf|
-            {
-              id: wf.id,
-              name: wf.name,
-              status: wf.status,
-              jobs: wf.job_runs.map do |job|
-                { id: job.id, name: job.name, node_index: job.node_index, parallelism: job.parallelism,
-                  status: job.status, requires: job.requires_list,
-                  steps: job.step_runs.order(:id).map { |step| step.as_json(only: %i[name status exit_code]) } }
-              end
-            }
-          end
-        }
       end
     end
   end

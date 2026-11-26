@@ -18,6 +18,7 @@ gem "jwt"
 # OAuth provider for the forge-ci CLI (`forge-ci login`): authorization-code
 # + PKCE against the web UI's own session login.
 gem "doorkeeper", "~> 5.8"
+gem "mcp", "~> 1.11"
 
 # S3-compatible object storage for ActiveStorage (logs, artifacts, caches).
 # Only loaded when ACTIVE_STORAGE_SERVICE=amazon; local disk is the default.

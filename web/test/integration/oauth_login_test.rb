@@ -50,6 +50,19 @@ class OAuthLoginTest < ActionDispatch::IntegrationTest
     assert_equal "admin", json_body["role"]
   end
 
+  test "authorization errors and native codes use the ForgeCI auth layout" do
+    sign_in_as
+    get "/oauth/authorize", params: @authorize_params.merge(redirect_uri: "https://unregistered.example/callback")
+    assert_response :bad_request
+    assert_select "main.oauth h1", text: "An error has occurred"
+    assert_select "main.oauth a", text: "Back to ForgeCI"
+
+    get "/oauth/authorize/native", params: { code: "native-code" }
+    assert_response :ok
+    assert_select "main.oauth h1", text: "Authorization code:"
+    assert_select "#authorization_code", text: "native-code"
+  end
+
   test "the CLI client is seeded by the first authorize request" do
     Doorkeeper::Application.where(uid: CliOauthApp::UID).delete_all
     get "/oauth/authorize", params: @authorize_params
@@ -197,6 +210,21 @@ class OAuthLoginTest < ActionDispatch::IntegrationTest
     sign_in_as("iris", role: :admin)
     get "/oauth/authorize", params: @authorize_params.merge(redirect_uri: "https://evil.example.com/cb")
     assert_response :bad_request
+  end
+
+  test "a registered localhost callback can listen on an ephemeral port" do
+    sign_in_as("local-client", role: :member)
+    app = Doorkeeper::Application.create!(name: "Local client", redirect_uri: "http://localhost:8080/callback",
+                                         scopes: "api", confidential: false)
+    callback = "http://localhost:55555/callback"
+    params = @authorize_params.merge(client_id: app.uid, redirect_uri: callback)
+    get "/oauth/authorize", params: params
+    assert_response :ok
+
+    post "/oauth/authorize", params: params
+    assert_response :redirect
+    assert_equal callback, redirect_to_url.split("?").first
+    assert_not_nil code_query["code"]
   end
 
   test "member tokens cannot manage secrets or read the autoscaler queue" do

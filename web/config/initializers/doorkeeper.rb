@@ -1,5 +1,13 @@
 # frozen_string_literal: true
 
+module OauthLocalhostRedirects
+  def loopback_uri?(uri)
+    uri.hostname&.casecmp?("localhost") || super
+  end
+end
+
+Doorkeeper::OAuth::Helpers::URIChecker.singleton_class.prepend(OauthLocalhostRedirects)
+
 # OAuth provider for the forge-ci CLI (`forge-ci login`). The CLI is a public
 # native client (RFC 8252): authorization-code grant with PKCE (S256 only)
 # against the web UI's own session login, redirecting to a loopback port the
@@ -10,9 +18,8 @@ Doorkeeper.configure do
 
   grant_flows %w[authorization_code]
 
-  # The CLI app is the only client. Its authorization step is the web UI's
-  # own login: once the resource owner is signed in there is nothing left to
-  # consent to, so no consent screen is shown.
+  # The first-party CLI skips consent after web login. Other registered
+  # clients, including MCP clients, go through Doorkeeper's consent screen.
   skip_authorization do |_resource_owner, client|
     client.uid == CliOauthApp::UID
   end
@@ -33,25 +40,26 @@ Doorkeeper.configure do
     end
   end
 
-  # The CLI cannot keep a client secret: public client, PKCE mandatory, and
-  # only the S256 challenge method (never "plain").
+  # Require PKCE with S256 for public clients such as the CLI.
   force_pkce
   pkce_code_challenge_methods %w[S256]
 
-  # HTTPS redirect URIs everywhere except the CLI's loopback callback
-  # (RFC 8252 §7.3: the port is ignored too, so the CLI binds an ephemeral
-  # one; see URIChecker.matches?).
+  # HTTPS except for loopback callbacks, including localhost. Doorkeeper
+  # ignores the registered port for these callbacks (RFC 8252 §7.3).
   force_ssl_in_redirect_uri do |uri|
     !Doorkeeper::OAuth::Helpers::URIChecker.loopback_uri?(uri)
   end
 
-  # Long-lived CLI sessions: short access tokens that refresh transparently.
-  use_refresh_token
+  use_refresh_token do |context|
+    context.client&.refresh_token_enabled?
+  end
   access_token_expires_in 24.hours
 
   # Only token hashes are stored; the raw values exist solely in the CLI's
   # credentials file. (This rules out reuse_access_token, which we don't use.)
   hash_token_secrets
+  hash_application_secrets
 
   default_scopes :api
+  optional_scopes :mcp
 end

@@ -1,0 +1,4 @@
+<%= render "doorkeeper/authorizations/card", title: t(".title") do %>
+  <p class="lead"><%= t("doorkeeper.authorizations.show.instructions") %></p>
+  <code id="authorization_code" class="oauth-details oauth-code"><%= params[:code] %></code>
+<% end %>
