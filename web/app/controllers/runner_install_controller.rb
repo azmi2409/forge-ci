@@ -64,6 +64,11 @@ class RunnerInstallController < ActionController::Base
 
   # Streams the archive to disk; file contents are piped through in chunks,
   # never loaded whole (the Go binaries are far too big for that).
+  #
+  # Modes are normalized, not copied from disk: a checkout's umask (e.g. 0007)
+  # can strip the other-execute bit from runner/bin/forge-ci-runner, which
+  # both breaks the installed runner for other users and fails the tarball
+  # test. Executable files ship 0755, everything else 0644, dirs 0755.
   def self.build_tarball(root, dest)
     FileUtils.mkdir_p(File.dirname(dest))
     Tempfile.create([File.basename(dest), ".tmp"], File.dirname(dest)) do |file|
@@ -73,10 +78,10 @@ class RunnerInstallController < ActionController::Base
         RUNNER_DIRS.each do |dir|
           Dir.glob(File.join(root, dir, "**", "*")).sort.each do |path|
             rel = path.delete_prefix("#{root}/")
-            mode = File.stat(path).mode & 0o777
             if File.directory?(path)
-              tar.mkdir(rel, mode)
+              tar.mkdir(rel, 0o755)
             else
+              mode = File.stat(path).mode & 0o100 != 0 ? 0o755 : 0o644
               tar.add_file_simple(rel, mode, File.size(path)) do |f|
                 IO.copy_stream(path, f)
               end
